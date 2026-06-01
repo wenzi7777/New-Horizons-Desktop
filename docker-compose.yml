@@ -1,0 +1,19 @@
+services:
+  newhorizons:
+    build:
+      context: .
+    container_name: newhorizons-app
+    environment:
+      NEWHORIZONS_HOST: 0.0.0.0
+      NEWHORIZONS_PORT: "5051"
+      NEWHORIZONS_AUTOSTART: "0"
+      NEWHORIZONS_DATA_ROOT: /data/mqtt_store
+      NEWHORIZONS_PROFILES_DIR: /data/profiles
+    ports:
+      - "5051:5051"
+    volumes:
+      - newhorizons_data:/data
+    restart: unless-stopped
+
+volumes:
+  newhorizons_data:

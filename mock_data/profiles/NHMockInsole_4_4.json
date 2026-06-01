@@ -1,0 +1,11 @@
+{
+  "name": "NH Mock Insole 4x4",
+  "deviceType": "insole",
+  "matrix": {
+    "rows": 4,
+    "cols": 4
+  },
+  "activeRows": [1, 2, 3, 4],
+  "activeCols": [11, 12, 13, 14],
+  "notes": "Standalone mock profile for local NewHorizons console testing."
+}
