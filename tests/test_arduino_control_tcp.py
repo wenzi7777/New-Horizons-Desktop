@@ -363,6 +363,33 @@ class ArduinoControlTcpTest(unittest.TestCase):
         self.assertEqual(device["last_status"]["indicators"]["oled"]["detected"], True)
         self.assertEqual(device["last_status"]["config"]["schema_version"], 1)
 
+    def test_arduino_power_state_response_updates_power_status_cache(self):
+        service = NewHorizonsService(mock_mode=False)
+        service._record_arduino_response(
+            "3CDC7545CCD0",
+            {"command": "power_set_state", "request_id": "req-power", "state": "soft_off_auto"},
+            {
+                "ok": True,
+                "cmd": "power_set_state",
+                "message": "power_state_updated",
+                "data": {
+                    "power": {
+                        "state": "soft_off_charging",
+                        "wake_source": "command",
+                        "soft_off_reason": "command",
+                        "charger_present": True,
+                        "charge_state": "charging",
+                    }
+                },
+                "error": "",
+            },
+        )
+
+        device = service.get_device("3CDC7545CCD0")
+        self.assertEqual(device["last_status"]["power"]["state"], "soft_off_charging")
+        self.assertEqual(device["last_status"]["power"]["wake_source"], "command")
+        self.assertEqual(device["last_result"]["power"]["charge_state"], "charging")
+
     def test_arduino_heartbeat_preserves_cached_indicator_status(self):
         service = NewHorizonsService(mock_mode=False)
         service._record_arduino_response(

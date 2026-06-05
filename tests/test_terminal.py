@@ -143,6 +143,15 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertEqual(compiled["payload"], {"command": "set_imu", "enabled": False})
         self.assertEqual(payload["command"], "set_imu")
 
+    def test_power_set_state_is_allowed_and_compiles_from_terminal(self):
+        payload = validate_device_command_payload({"command": "power_set_state", "state": "soft_off_auto", "request_id": "req-power"})
+        compiled = compile_terminal_command("power-set-state --state normal")
+
+        self.assertEqual(payload["command"], "power_set_state")
+        self.assertEqual(payload["state"], "soft_off_auto")
+        self.assertEqual(compiled["payload"]["command"], "power_set_state")
+        self.assertEqual(compiled["payload"]["state"], "normal")
+
     def test_set_indicators_compiles_external_led_and_oled_modes(self):
         compiled = compile_terminal_command(
             "set-indicators --external-led-mode enabled --preset stream_health --brightness 0.35 "

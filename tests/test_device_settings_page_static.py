@@ -120,6 +120,19 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('t("fastChargingMode")', source)
         self.assertIn('isCommandBusy("set_charge_profile")', source)
 
+    def test_diagnostics_exposes_power_state_controls_and_status_metrics(self):
+        source = SETTINGS_PAGE.read_text()
+
+        self.assertIn("powerStatus", source)
+        self.assertIn("powerState", source)
+        self.assertIn('command: "power_set_state"', source)
+        self.assertIn("softOffAuto", source)
+        self.assertIn("wakeSource", source)
+        self.assertIn("softOffReason", source)
+        self.assertIn("chargerPresent", source)
+        self.assertIn("chargeState", source)
+        self.assertIn('isCommandBusy("power_set_state")', source)
+
     def test_indicators_use_external_ws2812b_and_ssd1306_modes_from_status(self):
         source = SETTINGS_PAGE.read_text()
 
@@ -222,6 +235,18 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('command: "set_ota_config"', source)
         self.assertIn("auto_apply_on_boot", source)
 
+    def test_update_section_can_view_release_changelog_after_check(self):
+        source = SETTINGS_PAGE.read_text()
+
+        self.assertIn("updateChangelogUrl", source)
+        self.assertIn("updateChangelogBody", source)
+        self.assertIn("loadUpdateChangelog", source)
+        self.assertIn('t("viewChangelog")', source)
+        self.assertIn('t("hideChangelog")', source)
+        self.assertIn('t("changelogUnavailable")', source)
+        self.assertIn("fetch(updateChangelogUrl)", source)
+        self.assertIn('className="changelog-panel"', source)
+
     def test_status_driven_tabs_auto_refresh_status_when_opened(self):
         source = SETTINGS_PAGE.read_text()
 
@@ -229,6 +254,21 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("shouldAutoRefreshStatusForSection", source)
         self.assertIn('const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["about", "gateway", "update", "diagnostics", "flash"]', source)
         self.assertIn('command: "status"', source)
+
+    def test_offline_device_skips_auto_refresh_and_disables_live_queries(self):
+        source = SETTINGS_PAGE.read_text()
+
+        self.assertIn("const isDeviceOffline = normalized?.isOffline === true", source)
+        self.assertIn("if (!ramMonitorEnabled || !deviceUid || isDeviceOffline) return undefined;", source)
+        self.assertIn("if (!deviceUid || !shouldAutoRefreshStatusForSection(activeSection) || isDeviceOffline)", source)
+        self.assertIn('if (activeSection !== "pins" || !deviceUid || busyCommand || isDeviceOffline) return;', source)
+        self.assertIn('if (activeSection !== "indicators" || !deviceUid || isDeviceOffline)', source)
+        self.assertIn("if (!deviceUid || isDeviceOffline) return;", source)
+        self.assertIn('disabled={isCommandBusy("status") || !deviceUid || isDeviceOffline}', source)
+        self.assertIn('disabled={isCommandBusy("findme_discover") || !deviceUid || isDeviceOffline}', source)
+        self.assertIn('disabled={busyCommand === "storage_status" || !deviceUid || isDeviceOffline}', source)
+        self.assertIn('disabled={busyCommand === "log_tail" || !deviceUid || isDeviceOffline}', source)
+        self.assertIn('disabled={busyCommand === "calibration_status" || !deviceUid || isDeviceOffline}', source)
 
     def test_flash_tab_exposes_log_settings(self):
         source = SETTINGS_PAGE.read_text()

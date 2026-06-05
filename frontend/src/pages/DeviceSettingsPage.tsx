@@ -116,6 +116,20 @@ function pretty(value: unknown) {
   return String(value);
 }
 
+function isLiveQueryCommand(command: string) {
+  return [
+    "status",
+    "query",
+    "memory_status",
+    "scan_health",
+    "storage_status",
+    "log_tail",
+    "calibration_status",
+    "calibration_dump_level",
+    "findme_discover",
+  ].includes(command);
+}
+
 function Metric({ label, value, small = false }: { label: string; value: unknown; small?: boolean }) {
   return (
     <div className="metric">
@@ -185,6 +199,7 @@ type CalibrationLevelPreview = {
 type CalibrationWorkbenchProps = {
   t: (key: string) => string;
   deviceUid: string;
+  isDeviceOffline: boolean;
   matrixShape: Record<string, unknown>;
   calibrationStatus: Record<string, unknown>;
   busyCommand: string;
@@ -292,6 +307,7 @@ function calibrationCellLookup(layer: CalibrationLevelLayer) {
 function CalibrationWorkbench({
   t,
   deviceUid,
+  isDeviceOffline,
   matrixShape,
   calibrationStatus,
   busyCommand,
@@ -338,9 +354,9 @@ function CalibrationWorkbench({
   }
 
   useEffect(() => {
-    if (!deviceUid) return;
+    if (!deviceUid || isDeviceOffline) return;
     void syncCalibrationStatus().catch(() => undefined);
-  }, [deviceUid]);
+  }, [deviceUid, isDeviceOffline]);
 
   const totalSensors = rows * cols;
   const savedLookup = calibrationCellLookup(calibrationLevelPreview?.saved ?? null);
@@ -438,7 +454,7 @@ function CalibrationWorkbench({
           <button className="button" type="button" disabled={busyCommand === "exit_maintenance" || !deviceUid} onClick={() => void run(t("exitMaintenance"), { command: "exit_maintenance" })}>
             {busyCommand === "exit_maintenance" ? t("running") : t("exitMaintenance")}
           </button>
-          <button className="button" type="button" disabled={busyCommand === "calibration_status" || !deviceUid} onClick={() => void syncCalibrationStatus()}>
+          <button className="button" type="button" disabled={busyCommand === "calibration_status" || !deviceUid || isDeviceOffline} onClick={() => void syncCalibrationStatus()}>
             {busyCommand === "calibration_status" ? t("running") : t("refreshStatus")}
           </button>
         </div>
@@ -565,7 +581,7 @@ function CalibrationWorkbench({
                 <p>{selectedLevel === null ? t("noPreviewSelected") : `${t("paramLevel")} ${selectedLevel}`}</p>
               </div>
               {selectedLevel !== null ? (
-                <button className="button" type="button" disabled={busyCommand === "calibration_dump_level"} onClick={() => void loadLevelPreview(selectedLevel)}>
+                <button className="button" type="button" disabled={busyCommand === "calibration_dump_level" || isDeviceOffline} onClick={() => void loadLevelPreview(selectedLevel)}>
                   {busyCommand === "calibration_dump_level" ? t("running") : t("preview")}
                 </button>
               ) : null}
@@ -601,10 +617,10 @@ function CalibrationWorkbench({
           </div>
 
           <div className="actions compact">
-            <button className="button" type="button" disabled={busyCommand === "storage_status" || !deviceUid} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
+            <button className="button" type="button" disabled={busyCommand === "storage_status" || !deviceUid || isDeviceOffline} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
               {busyCommand === "storage_status" ? t("running") : t("refreshFlashUsage")}
             </button>
-            <button className="button" type="button" disabled={busyCommand === "log_tail" || !deviceUid} onClick={() => void run("Log tail", { command: "log_tail", max_lines: 80 })}>
+            <button className="button" type="button" disabled={busyCommand === "log_tail" || !deviceUid || isDeviceOffline} onClick={() => void run("Log tail", { command: "log_tail", max_lines: 80 })}>
               {busyCommand === "log_tail" ? t("running") : "Logs"}
             </button>
             <a className="button" href={appHref(`device/${encodeURIComponent(deviceUid)}/files`)} target="_blank" rel="noreferrer">
@@ -624,6 +640,7 @@ export function DeviceSettingsPage() {
   const { queue, errorMessage } = useDeviceCommand(deviceUid);
   const device = useMemo(() => devices.find((item) => item.device_uid === deviceUid), [devices, deviceUid]);
   const normalized = device ? normalizeDevice(device) : null;
+  const isDeviceOffline = normalized?.isOffline === true;
   const status = recordValue(device?.last_status);
   const lastResult = recordValue(device?.last_result);
   const lastResultCommand = stringValue(lastResult.command, "");
@@ -638,7 +655,8 @@ export function DeviceSettingsPage() {
   const analogPinsFromStatus = arrayCsv(matrixLayout.analog_pins ?? matrixLayout.active_rows);
   const selectPinsFromStatus = arrayCsv(matrixLayout.select_pins ?? matrixLayout.active_cols);
   const wifi = recordValue(status.wifi);
-  const batteryStatus = recordValue(status.battery ?? status.power ?? (lastResultCommand === "set_charge_profile" ? lastResult.battery : undefined));
+  const batteryStatus = recordValue(status.battery ?? (lastResultCommand === "set_charge_profile" ? lastResult.battery : undefined));
+  const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" ? lastResult.power : undefined));
   const memory = recordValue(status.memory ?? (lastResultCommand === "memory_status" ? lastResult : undefined));
   const logging = recordValue(status.logging ?? runtime.logging ?? (lastResultCommand === "set_log" ? lastResult.logging : undefined));
   const otaConfig = recordValue(status.ota ?? status.update_config ?? (lastResultCommand === "set_ota_config" ? lastResult.ota : undefined));
@@ -670,11 +688,16 @@ export function DeviceSettingsPage() {
   const indicators = recordValue(hasIndicatorData(nextIndicators) ? nextIndicators : lastKnownIndicatorsRef.current);
   const externalLed = recordValue(indicators.external_led);
   const oled = recordValue(indicators.oled);
-  const updateState = recordValue(status.update_state ?? device?.update_state);
+  const updateState = recordValue(status.update_state ?? device?.update_state ?? (lastResultCommand === "check_update" ? lastResult.update_state : undefined));
+  const updateChangelogUrl = stringValue(updateState.changelog_url ?? (lastResultCommand === "check_update" ? lastResult.changelog_url : undefined), "");
 
   const [activeSection, setActiveSection] = useState<SettingsSection>("about");
   const [manifestUrl, setManifestUrl] = useState(DEFAULT_MANIFEST_URL);
   const [autoOtaOnBoot, setAutoOtaOnBoot] = useState(otaConfig.auto_apply_on_boot === true);
+  const [updateChangelogVisible, setUpdateChangelogVisible] = useState(false);
+  const [updateChangelogBody, setUpdateChangelogBody] = useState("");
+  const [updateChangelogLoading, setUpdateChangelogLoading] = useState(false);
+  const [updateChangelogError, setUpdateChangelogError] = useState("");
   const [analogPins, setAnalogPins] = useState("");
   const [selectPins, setSelectPins] = useState("");
   const [pinDraftDirty, setPinDraftDirty] = useState(false);
@@ -785,6 +808,13 @@ export function DeviceSettingsPage() {
   }, [otaConfig.auto_apply_on_boot, otaConfig.manifest_url]);
 
   useEffect(() => {
+    setUpdateChangelogVisible(false);
+    setUpdateChangelogBody("");
+    setUpdateChangelogLoading(false);
+    setUpdateChangelogError("");
+  }, [updateChangelogUrl]);
+
+  useEffect(() => {
     if (logging.enabled !== undefined) setLogEnabled(logging.enabled !== false);
     const nextLogLevel = stringValue(logging.level, "");
     if (nextLogLevel) setLogLevel(nextLogLevel);
@@ -842,6 +872,9 @@ export function DeviceSettingsPage() {
 
   async function run(label: string, payload: Record<string, unknown>, timeoutMs = 20000) {
     const command = String(payload.command ?? "");
+    if (isDeviceOffline && isLiveQueryCommand(command)) {
+      return { queued: null, result: null };
+    }
     setBusyCommand(command);
     try {
       const response = await queue(payload, timeoutMs);
@@ -873,7 +906,7 @@ export function DeviceSettingsPage() {
   }
 
   async function refreshRamStatus() {
-    if (!deviceUid || ramRefreshInFlightRef.current) return;
+    if (!deviceUid || isDeviceOffline || ramRefreshInFlightRef.current) return;
     ramRefreshInFlightRef.current = true;
     setRamRefreshInFlight(true);
     try {
@@ -888,7 +921,7 @@ export function DeviceSettingsPage() {
   }
 
   useEffect(() => {
-    if (!ramMonitorEnabled || !deviceUid) return undefined;
+    if (!ramMonitorEnabled || !deviceUid || isDeviceOffline) return undefined;
     let cancelled = false;
     const tick = () => {
       if (!cancelled) void refreshRamStatus();
@@ -899,7 +932,7 @@ export function DeviceSettingsPage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [deviceUid, ramMonitorEnabled]);
+  }, [deviceUid, isDeviceOffline, ramMonitorEnabled]);
 
   useEffect(() => () => {
     if (toastTimerRef.current) {
@@ -908,7 +941,7 @@ export function DeviceSettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (!deviceUid || !shouldAutoRefreshStatusForSection(activeSection)) {
+    if (!deviceUid || !shouldAutoRefreshStatusForSection(activeSection) || isDeviceOffline) {
       statusDrivenSectionAutoRefreshKeyRef.current = "";
       return;
     }
@@ -916,25 +949,25 @@ export function DeviceSettingsPage() {
     if (statusDrivenSectionAutoRefreshKeyRef.current === refreshKey || busyCommand) return;
     statusDrivenSectionAutoRefreshKeyRef.current = refreshKey;
     void run(t("refreshStatus"), { command: "status" }, 10000).catch(() => undefined);
-  }, [activeSection, busyCommand, deviceUid, t]);
+  }, [activeSection, busyCommand, deviceUid, isDeviceOffline, t]);
 
   useEffect(() => {
-    if (activeSection !== "pins" || !deviceUid || busyCommand) return;
+    if (activeSection !== "pins" || !deviceUid || busyCommand || isDeviceOffline) return;
     if (analogPinsFromStatus && selectPinsFromStatus) return;
     if (pinStatusAutoRequestedRef.current[deviceUid]) return;
     pinStatusAutoRequestedRef.current[deviceUid] = true;
     void run(t("refreshStatus"), { command: "status" }, 10000).catch(() => undefined);
-  }, [activeSection, analogPinsFromStatus, busyCommand, deviceUid, selectPinsFromStatus]);
+  }, [activeSection, analogPinsFromStatus, busyCommand, deviceUid, isDeviceOffline, selectPinsFromStatus, t]);
 
   function runIndicatorsStatusRefresh() {
-    if (!deviceUid) return;
+    if (!deviceUid || isDeviceOffline) return;
     lastIndicatorsStatusAutoRefreshKeyRef.current = `${deviceUid}:indicators`;
     indicatorsStatusAutoRefreshPendingRef.current = false;
     void run(t("refreshStatus"), { command: "status" }, 10000).catch(() => undefined);
   }
 
   useEffect(() => {
-    if (activeSection !== "indicators" || !deviceUid) {
+    if (activeSection !== "indicators" || !deviceUid || isDeviceOffline) {
       lastIndicatorsStatusAutoRefreshKeyRef.current = "";
       indicatorsStatusAutoRefreshPendingRef.current = false;
       return;
@@ -946,7 +979,7 @@ export function DeviceSettingsPage() {
       return;
     }
     runIndicatorsStatusRefresh();
-  }, [activeSection, busyCommand, deviceUid]);
+  }, [activeSection, busyCommand, deviceUid, isDeviceOffline]);
 
   function applyScanPreset(fps: number) {
     setScanDraftDirty(true);
@@ -987,6 +1020,37 @@ export function DeviceSettingsPage() {
     await run(t("saveChargeProfile"), { command: "set_charge_profile", profile: chargeProfile });
   }
 
+  async function applyPowerState(state: "normal" | "soft_off_auto") {
+    await run(t("savePowerState"), { command: "power_set_state", state });
+  }
+
+  async function loadUpdateChangelog() {
+    if (!updateChangelogUrl) {
+      setUpdateChangelogVisible(true);
+      setUpdateChangelogError(t("changelogUnavailable"));
+      return;
+    }
+    setUpdateChangelogVisible(true);
+    setUpdateChangelogLoading(true);
+    setUpdateChangelogError("");
+    try {
+      const response = await fetch(updateChangelogUrl);
+      if (!response.ok) {
+        throw new Error(`http_${response.status}`);
+      }
+      const text = (await response.text()).trim();
+      setUpdateChangelogBody(text);
+      if (!text) {
+        setUpdateChangelogError(t("changelogUnavailable"));
+      }
+    } catch (error) {
+      setUpdateChangelogBody("");
+      setUpdateChangelogError(error instanceof Error ? error.message : t("changelogUnavailable"));
+    } finally {
+      setUpdateChangelogLoading(false);
+    }
+  }
+
   async function saveOtaConfig() {
     await run(t("saveUpdateSettings"), { command: "set_ota_config", auto_apply_on_boot: autoOtaOnBoot, manifest_url: manifestUrl });
   }
@@ -1011,7 +1075,7 @@ export function DeviceSettingsPage() {
               <p>{normalized?.displayName ?? deviceUid}</p>
             </div>
             <div className="actions compact">
-              <button className="button primary" type="button" disabled={isCommandBusy("status") || !deviceUid} onClick={() => void run(t("refreshStatus"), { command: "status" })}>
+              <button className="button primary" type="button" disabled={isCommandBusy("status") || !deviceUid || isDeviceOffline} onClick={() => void run(t("refreshStatus"), { command: "status" })}>
                 {isCommandBusy("status") ? t("running") : t("refreshStatus")}
               </button>
               <button className="button danger" type="button" disabled={isCommandBusy("reboot") || !deviceUid} onClick={() => void run("Reboot", { command: "reboot" })}>
@@ -1041,7 +1105,7 @@ export function DeviceSettingsPage() {
               <h3>{t("gatewayTitle")}</h3>
               <p>{t("gatewayCopy")}</p>
             </div>
-            <button className="button primary" type="button" disabled={isCommandBusy("findme_discover") || !deviceUid} onClick={() => void run("FindMe", { command: "findme_discover" }, 15000)}>
+            <button className="button primary" type="button" disabled={isCommandBusy("findme_discover") || !deviceUid || isDeviceOffline} onClick={() => void run("FindMe", { command: "findme_discover" }, 15000)}>
               {isCommandBusy("findme_discover") ? t("running") : t("rediscoverGateway")}
             </button>
           </div>
@@ -1096,6 +1160,30 @@ export function DeviceSettingsPage() {
             <DetailBox label="URL" value={updateState.url ?? "-"} />
             <DetailBox label="Error" value={updateState.last_error ?? updateState.error ?? "-"} />
           </div>
+          <div className="actions compact">
+            <button
+              className="button"
+              type="button"
+              disabled={!updateChangelogUrl || updateChangelogLoading}
+              onClick={() => {
+                if (updateChangelogVisible) {
+                  setUpdateChangelogVisible(false);
+                  return;
+                }
+                void loadUpdateChangelog();
+              }}
+            >
+              {updateChangelogVisible ? t("hideChangelog") : (updateChangelogLoading ? t("loading") : t("viewChangelog"))}
+            </button>
+          </div>
+          {updateChangelogVisible ? (
+            <div className="changelog-panel">
+              {updateChangelogLoading ? <p className="service-muted">{t("loading")}</p> : null}
+              {updateChangelogError ? <p className="service-muted">{updateChangelogError || t("changelogUnavailable")}</p> : null}
+              {updateChangelogBody ? <pre>{updateChangelogBody}</pre> : null}
+              {!updateChangelogLoading && !updateChangelogBody && !updateChangelogError ? <p className="service-muted">{t("changelogUnavailable")}</p> : null}
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -1133,7 +1221,7 @@ export function DeviceSettingsPage() {
                 <h3>{t("scanPerformance")}</h3>
                 <p>{t("scanPerformanceCopy")}</p>
               </div>
-              <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid} onClick={() => void run("Scan health", { command: "scan_health" })}>
+              <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid || isDeviceOffline} onClick={() => void run("Scan health", { command: "scan_health" })}>
                 {isCommandBusy("scan_health") ? t("running") : "Health"}
               </button>
             </div>
@@ -1183,6 +1271,7 @@ export function DeviceSettingsPage() {
         <CalibrationWorkbench
           t={t}
           deviceUid={deviceUid}
+          isDeviceOffline={isDeviceOffline}
           matrixShape={recordValue(status.matrix_shape)}
           calibrationStatus={calibrationStatus}
           busyCommand={busyCommand}
@@ -1303,7 +1392,7 @@ export function DeviceSettingsPage() {
                 <h4>{t("streamDiagnostics")}</h4>
                 <p>{t("streamDiagnosticsCopy")}</p>
               </div>
-              <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid} onClick={() => void run("Scan health", { command: "scan_health" })}>
+              <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid || isDeviceOffline} onClick={() => void run("Scan health", { command: "scan_health" })}>
                 {isCommandBusy("scan_health") ? t("running") : "Health"}
               </button>
             </div>
@@ -1368,7 +1457,30 @@ export function DeviceSettingsPage() {
               <Metric label={t("prechargePercent")} value={batteryStatus.precharge_percent ?? "-"} />
               <Metric label={t("safetyTimerHours")} value={batteryStatus.safety_timer_hours ?? "-"} />
               <Metric label={t("configured")} value={boolString(batteryStatus.configured)} />
-              <Metric label={t("chargerDetected")} value={boolString(batteryStatus.detected)} />
+              <Metric label={t("chargerDetected")} value={boolString(batteryStatus.charger_detected ?? batteryStatus.detected)} />
+            </div>
+          </div>
+          <div className="settings-card">
+            <div className="settings-detail-header">
+              <div>
+                <h4>{t("powerStatus")}</h4>
+                <p>{t("powerStatusCopy")}</p>
+              </div>
+              <div className="actions compact">
+                <button className="button" type="button" disabled={isCommandBusy("power_set_state") || !deviceUid} onClick={() => void applyPowerState("normal")}>
+                  {isCommandBusy("power_set_state") ? t("running") : t("resumeNormalMode")}
+                </button>
+                <button className="button primary" type="button" disabled={isCommandBusy("power_set_state") || !deviceUid} onClick={() => void applyPowerState("soft_off_auto")}>
+                  {isCommandBusy("power_set_state") ? t("running") : t("softOffAuto")}
+                </button>
+              </div>
+            </div>
+            <div className="metric-row">
+              <Metric label={t("powerState")} value={powerStatus.state ?? "-"} />
+              <Metric label={t("wakeSource")} value={powerStatus.wake_source ?? "-"} />
+              <Metric label={t("softOffReason")} value={powerStatus.soft_off_reason ?? "-"} small />
+              <Metric label={t("chargerPresent")} value={boolString(powerStatus.charger_present)} />
+              <Metric label={t("chargeState")} value={powerStatus.charge_state ?? batteryStatus.charge_state ?? "-"} />
             </div>
           </div>
           <div className="settings-card">
@@ -1383,7 +1495,7 @@ export function DeviceSettingsPage() {
                     {t("closeRam")}
                   </button>
                 ) : (
-                  <button className="button primary" type="button" disabled={isCommandBusy("memory_status") || !deviceUid} onClick={() => setRamMonitorEnabled(true)}>
+                  <button className="button primary" type="button" disabled={isCommandBusy("memory_status") || !deviceUid || isDeviceOffline} onClick={() => setRamMonitorEnabled(true)}>
                     {t("viewRam")}
                   </button>
                 )}
@@ -1428,7 +1540,7 @@ export function DeviceSettingsPage() {
               <p>{t("flashDiagnosticsCopy")}</p>
             </div>
             <div className="actions compact">
-              <button className="button primary" type="button" disabled={isCommandBusy("storage_status") || !deviceUid} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
+              <button className="button primary" type="button" disabled={isCommandBusy("storage_status") || !deviceUid || isDeviceOffline} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
                 {isCommandBusy("storage_status") ? t("running") : t("refreshFlashUsage")}
               </button>
               <a className="button" href={appHref(`device/${encodeURIComponent(deviceUid)}/files`)} target="_blank" rel="noreferrer">
@@ -1493,7 +1605,7 @@ export function DeviceSettingsPage() {
               <button className="button primary" type="button" disabled={isCommandBusy("set_log") || !deviceUid} onClick={() => void saveLogSettings()}>
                 {isCommandBusy("set_log") ? t("running") : t("saveLogSettings")}
               </button>
-              <button className="button" type="button" disabled={isCommandBusy("log_tail") || !deviceUid} onClick={() => void run("Log tail", { command: "log_tail", max_lines: 50 })}>
+              <button className="button" type="button" disabled={isCommandBusy("log_tail") || !deviceUid || isDeviceOffline} onClick={() => void run("Log tail", { command: "log_tail", max_lines: 50 })}>
                 {isCommandBusy("log_tail") ? t("running") : "Logs"}
               </button>
               <button className="button danger" type="button" disabled={isCommandBusy("log_clear") || !deviceUid} onClick={() => void run("Log clear", { command: "log_clear" })}>

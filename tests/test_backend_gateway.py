@@ -854,6 +854,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(result["version"], "v0.5.1")
         self.assertEqual(latest["last_status"]["update_state"]["operation"], "check_update")
         self.assertEqual(latest["last_status"]["update_state"]["manifest_url"], "https://example.com/arduino-latest.json")
+        self.assertIn("changelog_url", latest["last_status"]["update_state"])
 
     def test_mock_set_scan_timing_stores_full_runtime_controls(self):
         service = NewHorizonsService(mock_mode=True)

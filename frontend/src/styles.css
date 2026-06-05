@@ -2106,6 +2106,24 @@ button:disabled {
   white-space: pre;
 }
 
+.changelog-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8faf6;
+  padding: 10px;
+}
+
+.changelog-panel pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text);
+}
+
 .terminal-input-row {
   display: grid;
   grid-template-columns: 1fr auto;

@@ -65,6 +65,7 @@ class NewHorizonsService:
         "set_matrix_layout",
         "set_scan_timing",
         "set_charge_profile",
+        "power_set_state",
         "set_indicators",
         "set_imu",
         "calibration_status",
@@ -659,6 +660,7 @@ class NewHorizonsService:
                 "url": payload.get("url", ""),
                 "size": payload.get("size", 0),
                 "sha256": payload.get("sha256", ""),
+                "changelog_url": payload.get("changelog_url", ""),
                 "last_error": payload.get("error", ""),
                 "last_result": payload.get("message", "update_checked"),
                 "manifest_url": request.get("manifest_url", ""),
@@ -687,10 +689,22 @@ class NewHorizonsService:
                 "configured": True,
                 "profile": request.get("profile", "compatible"),
             }
+        elif command == "power_set_state" and ok:
+            power_data = data.get("power") if isinstance(data.get("power"), dict) else {}
+            requested_state = str(request.get("state") or "soft_off_auto")
+            fallback_state = "normal" if requested_state == "normal" else requested_state
+            payload["power"] = power_data or {
+                "state": fallback_state,
+                "wake_source": "command",
+                "soft_off_reason": "command",
+                "charger_present": False,
+                "charge_state": "not_charging",
+            }
         status_like = command in self.STATUS_COMMANDS or command in {
             "set_matrix_layout",
             "set_scan_timing",
             "set_charge_profile",
+            "power_set_state",
             "set_imu",
             "set_indicators",
             "set_log",
@@ -1263,6 +1277,7 @@ class NewHorizonsService:
                     "operation": "check_update",
                     "version": "v0.5.1",
                     "manifest_url": str(payload.get("manifest_url") or ""),
+                    "changelog_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/notes/v0.5.1.md",
                     "total_files": 0,
                     "applied_files": 0,
                     "current_file": "",
@@ -1311,6 +1326,20 @@ class NewHorizonsService:
                     }
                 )
                 status["wifi"] = wifi_cfg
+            elif command == "power_set_state":
+                requested_state = str(payload.get("state") or "soft_off_auto")
+                power = dict(status.get("power") or {})
+                effective_state = requested_state
+                if requested_state == "soft_off_auto":
+                    effective_state = "soft_off_charging" if power.get("charger_present") else "soft_off_battery"
+                power.update({
+                    "state": "normal" if requested_state == "normal" else effective_state,
+                    "wake_source": "command",
+                    "soft_off_reason": "command",
+                    "charger_present": bool(power.get("charger_present", False)),
+                    "charge_state": str(power.get("charge_state") or "not_charging"),
+                })
+                status["power"] = power
             elif command == "findme_discover":
                 gateway = {
                     "host": "127.0.0.1",
@@ -1473,6 +1502,7 @@ class NewHorizonsService:
                     "url": "https://example.com/newhorizons-os-v0.5.1.bin",
                     "size": 1024,
                     "sha256": "0" * 64,
+                    "changelog_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/notes/v0.5.1.md",
                     "error": "",
                     "update_state": status.get("update_state", {}),
                 })
@@ -1982,6 +2012,7 @@ class NewHorizonsService:
                 "operation": "check_update",
                 "version": payload.get("version") or payload.get("latest_version", ""),
                 "manifest_url": payload.get("manifest_url", ""),
+                "changelog_url": payload.get("changelog_url", ""),
                 "total_files": 0,
                 "applied_files": 0,
                 "downloaded_files": 0,
@@ -2202,6 +2233,7 @@ class NewHorizonsService:
                 "request_id": request_id,
                 "latest_version": state.get("version", ""),
                 "manifest_url": state.get("manifest_url", ""),
+                "changelog_url": state.get("changelog_url", ""),
                 "update_state": state,
                 "reboot_required": False,
             }

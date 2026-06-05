@@ -31,6 +31,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "set_matrix_layout",
     "set_scan_timing",
     "set_charge_profile",
+    "power_set_state",
     "set_log",
     "set_ota_config",
     "set_indicators",
@@ -172,6 +173,11 @@ def terminal_help_items() -> list[dict[str, str]]:
             "command": "set-charge-profile",
             "description": "Configure the BQ25180 charging profile.",
             "example": "set-charge-profile --profile fast",
+        },
+        {
+            "command": "power-set-state",
+            "description": "Switch the device between normal mode and soft-off power states.",
+            "example": "power-set-state --state soft_off_auto",
         },
         {
             "command": "set-log",
@@ -361,6 +367,14 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
             raise ValueError("invalid_charge_profile")
         payload = {"command": "set_charge_profile", "profile": profile}
         return {"command": "set_charge_profile", "payload": payload, "argv": argv}
+
+    if command == "power-set-state":
+        parsed = _parse_options(args)
+        state = parsed.get("state", "soft_off_auto")
+        if state not in {"normal", "soft_off_auto", "soft_off_battery", "soft_off_charging"}:
+            raise ValueError("invalid_power_state")
+        payload = {"command": "power_set_state", "state": state}
+        return {"command": "power_set_state", "payload": payload, "argv": argv}
 
     if command == "set-log":
         parsed = _parse_options(args)

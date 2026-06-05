@@ -33,6 +33,7 @@ type UpdateState = {
   operation?: string;
   version?: string;
   manifest_url?: string;
+  changelog_url?: string;
   total_files?: number;
   applied_files?: number;
   skipped_files?: number;
@@ -116,7 +117,7 @@ export function normalizeDevice(device: DeviceEntry): NormalizedDevice {
   const systemSummary = objectValue(device.system_summary ?? status.system_summary);
   const logging = objectValue(device.logging ?? status.logging ?? runtime.logging);
   const matrix = objectValue(device.matrix_shape ?? status.matrix_shape ?? systemSummary.matrix_shape);
-  const battery = objectValue(status.battery ?? status.power);
+  const battery = objectValue(status.battery);
   const gatewayState = objectValue(device.gateway_state);
   const gatewayConnected = device.gateway_connected === true || gatewayState.connected === true;
   const lastSeenAt = stringValue(device.last_seen_at ?? status.received_at ?? device.last_gateway_seen_at, "");
@@ -207,6 +208,7 @@ export function resultFromState(command: string, requestId: string, state: Updat
       request_id: requestId,
       latest_version: state.version ?? "",
       manifest_url: state.manifest_url ?? "",
+      changelog_url: state.changelog_url ?? "",
       update_state: state,
       reboot_required: false,
     };
