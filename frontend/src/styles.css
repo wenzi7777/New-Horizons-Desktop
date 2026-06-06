@@ -72,6 +72,15 @@ button:disabled {
   letter-spacing: 0;
 }
 
+.app-version {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .eyebrow {
   color: var(--text-muted);
   font-size: 12px;

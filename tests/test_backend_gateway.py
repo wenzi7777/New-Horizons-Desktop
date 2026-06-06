@@ -239,26 +239,15 @@ class IndependentNewHorizonsTest(unittest.TestCase):
             },
         })
 
-        with patch.object(service, "_send_arduino_command") as send_arduino:
-            send_arduino.return_value = {
-                "ok": True,
-                "cmd": "status",
-                "message": "status",
-                "data": {
-                    "protocol": "NHO/Arduino/1",
-                    "mode": "normal",
-                    "firmware_version": "v0.5.0",
-                },
-                "error": "",
-            }
-            queued = service.publish_command("3CDC7545CCD0", {"command": "status", "request_id": "req-direct"})
+        queued = service.publish_command("3CDC7545CCD0", {"command": "status", "request_id": "req-direct"})
 
-        self.assertEqual(queued["transport"], "arduino_tcp")
-        send_arduino.assert_called_once()
-        self.assertEqual(send_arduino.call_args.args[0], "192.168.50.32")
-        self.assertEqual(sent, [])
+        self.assertEqual(queued["transport"], "gateway_wss")
+        self.assertEqual(sent[-1]["type"], "command")
+        self.assertEqual(sent[-1]["payload"]["command"], "status")
+        self.assertEqual(sent[-1]["payload"]["request_id"], "req-direct")
+        self.assertEqual(len(sent), 1)
 
-    def test_arduino_tcp_failure_falls_back_to_gateway_sender(self):
+    def test_gateway_sender_is_used_even_when_gateway_summary_reports_peer(self):
         service = NewHorizonsService(mock_mode=False)
         sent = []
         service.register_gateway("gw-main", sent.append, {"gateway_name": "Bench Gateway"})
@@ -275,8 +264,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
             },
         })
 
-        with patch.object(service, "_send_arduino_command", side_effect=OSError("host unreachable")):
-            queued = service.publish_command("3CDC7545CCD0", {"command": "status", "request_id": "req-fallback"})
+        queued = service.publish_command("3CDC7545CCD0", {"command": "status", "request_id": "req-fallback"})
 
         self.assertEqual(queued["transport"], "gateway_wss")
         self.assertEqual(sent[-1]["type"], "command")
@@ -314,35 +302,14 @@ class IndependentNewHorizonsTest(unittest.TestCase):
             "firmware_version": "v0.5.9",
         })
 
-        with patch.object(service, "_send_arduino_command") as send_arduino:
-            send_arduino.return_value = {
-                "ok": True,
-                "cmd": "apply_update",
-                "message": "update_started",
-                "data": {
-                    "update_state": {
-                        "phase": "downloading",
-                        "operation": "apply_update",
-                        "current_file": "firmware",
-                        "last_error": "",
-                        "last_result": "starting",
-                        "reboot_required": True,
-                    },
-                },
-                "error": "",
-            }
-            queued = service.publish_command("3CDC7545CCD0", {"command": "apply_update", "request_id": "req-apply"})
+        queued = service.publish_command("3CDC7545CCD0", {"command": "apply_update", "request_id": "req-apply"})
 
-        devices = {item["device_uid"]: item for item in service.list_devices()}
-        latest = devices["3CDC7545CCD0"]
+        self.assertEqual(queued["transport"], "gateway_wss")
+        self.assertEqual(sent[-1]["type"], "command")
+        self.assertEqual(sent[-1]["payload"]["command"], "apply_update")
+        self.assertEqual(sent[-1]["payload"]["request_id"], "req-apply")
 
-        self.assertEqual(queued["transport"], "arduino_tcp")
-        self.assertEqual(latest["last_result"]["message"], "update_started")
-        self.assertEqual(latest["last_status"]["update_state"]["phase"], "downloading")
-        self.assertEqual(latest["last_status"]["update_state"]["operation"], "apply_update")
-        self.assertEqual(latest["last_status"]["update_state"]["version"], "v0.5.10")
-
-    def test_legacy_arduino_apply_update_timeout_is_treated_as_started(self):
+    def test_gateway_sender_relays_apply_update_without_direct_tcp_shortcut(self):
         service = NewHorizonsService(mock_mode=False)
         sent = []
         service.register_gateway("gw-main", sent.append, {"gateway_name": "Bench Gateway"})
@@ -373,17 +340,12 @@ class IndependentNewHorizonsTest(unittest.TestCase):
             "firmware_version": "v0.5.9",
         })
 
-        with patch.object(service, "_send_arduino_command", side_effect=TimeoutError("timed out")):
-            queued = service.publish_command("3CDC7545CCD0", {"command": "apply_update", "request_id": "req-legacy-apply"})
+        queued = service.publish_command("3CDC7545CCD0", {"command": "apply_update", "request_id": "req-legacy-apply"})
 
-        devices = {item["device_uid"]: item for item in service.list_devices()}
-        latest = devices["3CDC7545CCD0"]
-
-        self.assertEqual(queued["transport"], "arduino_tcp")
-        self.assertEqual(latest["last_result"]["message"], "update_started")
-        self.assertEqual(latest["last_status"]["update_state"]["phase"], "downloading")
-        self.assertEqual(latest["last_status"]["update_state"]["version"], "v0.5.10")
-        self.assertEqual(sent, [])
+        self.assertEqual(queued["transport"], "gateway_wss")
+        self.assertEqual(sent[-1]["type"], "command")
+        self.assertEqual(sent[-1]["payload"]["command"], "apply_update")
+        self.assertEqual(sent[-1]["payload"]["request_id"], "req-legacy-apply")
 
     def test_removed_recovery_reboot_to_os_is_not_queued(self):
         service = NewHorizonsService(mock_mode=False)

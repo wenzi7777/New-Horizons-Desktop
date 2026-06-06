@@ -1,4 +1,5 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import packageJson from "../package.json";
 
 import { DeviceFilesPage } from "./pages/DeviceFilesPage";
 import { DeviceSettingsPage } from "./pages/DeviceSettingsPage";
@@ -13,6 +14,7 @@ import { useI18n, type Locale } from "./i18n";
 import { useAuth } from "./lib/auth";
 
 type Role = "admin" | "user";
+const APP_VERSION = `v${packageJson.version}`;
 
 const NAV_ITEMS = [
   { to: "/", labelKey: "home", roles: ["admin"] as Role[] },
@@ -56,6 +58,7 @@ function AuthenticatedApp() {
       <header className="topbar">
         <div>
           <h1>{t("appTitle")}</h1>
+          <small className="app-version">{APP_VERSION}</small>
         </div>
         <div className="topbar-actions">
           <div className="topbar-session">

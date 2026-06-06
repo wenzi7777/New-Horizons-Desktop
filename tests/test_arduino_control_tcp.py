@@ -31,40 +31,39 @@ def arduino_heartbeat_packet(device_uid: bytes = bytes.fromhex("3CDC7545CCD0")) 
 
 
 class ArduinoControlTcpTest(unittest.TestCase):
-    def test_arduino_v3_stream_packet_registers_tcp_control_route(self):
+    def test_arduino_v3_stream_packet_registers_udp_control_route(self):
         service = NewHorizonsService(mock_mode=False)
+        service._udp_ingest = object()
         service._handle_udp_datagram(arduino_packet(), ("192.168.50.44", 49152))
 
         discovered = service.get_device("3CDC7545CCD0")
         self.assertEqual(discovered["device_name"], "New Horizons OS-3CDC7545CCD0")
 
-        with patch.object(service, "_send_arduino_command") as send_arduino:
-            send_arduino.return_value = {
-                "ok": True,
-                "cmd": "status",
-                "message": "status",
-                "data": {
-                    "protocol": "NHO/Arduino/1",
-                    "mode": "normal",
-                    "firmware_version": "v0.5.0",
-                    "hardware_model": "VD-CTL/R v1.0.F 2026.4",
-                },
-                "error": "",
+        with patch.object(service, "_send_udp_command") as send_udp:
+            send_udp.return_value = {
+                "status": "queued",
+                "transport": "udp",
+                "device_uid": "3CDC7545CCD0",
+                "payload": {"command": "status", "request_id": "req-1"},
+                "request_id": "req-1",
+                "peer": "192.168.50.44:49152",
             }
 
             queued = service.publish_command("3CDC7545CCD0", {"command": "status", "request_id": "req-1"})
 
-        self.assertEqual(queued["transport"], "arduino_tcp")
-        send_arduino.assert_called_once()
-        self.assertEqual(send_arduino.call_args.args[0], "192.168.50.44")
-        self.assertEqual(send_arduino.call_args.args[1]["command"], "status")
+        self.assertEqual(queued["transport"], "udp")
+        send_udp.assert_called_once()
+        self.assertEqual(send_udp.call_args.args[0], "3CDC7545CCD0")
+        self.assertEqual(send_udp.call_args.args[1]["command"], "status")
+        self.assertEqual(send_udp.call_args.args[2], ("192.168.50.44", 49152))
         device = service.get_device("3CDC7545CCD0")
         self.assertEqual(device["gateway_connected"], True)
         self.assertEqual(device["mode"], "normal")
-        self.assertEqual(device["last_status"]["firmware_version"], "v0.5.0")
+        self.assertEqual(service._udp_control_sessions["3CDC7545CCD0"], ("192.168.50.44", 49152))
 
-    def test_arduino_heartbeat_registers_control_route_without_visualization_frame(self):
+    def test_arduino_heartbeat_registers_udp_control_route_without_visualization_frame(self):
         service = NewHorizonsService(mock_mode=False)
+        service._udp_ingest = object()
         service._handle_udp_datagram(arduino_heartbeat_packet(), ("192.168.50.44", 49152))
 
         discovered = service.get_device("3CDC7545CCD0")
@@ -76,18 +75,19 @@ class ArduinoControlTcpTest(unittest.TestCase):
         self.assertEqual(discovered["findme"]["udp_port"], 13250)
         self.assertEqual(service.latest_visualization("3CDC7545CCD0"), [])
 
-        with patch.object(service, "_send_arduino_command") as send_arduino:
-            send_arduino.return_value = {
-                "ok": True,
-                "cmd": "status",
-                "message": "status",
-                "data": {"protocol": "NHO/Arduino/1", "mode": "normal"},
-                "error": "",
+        with patch.object(service, "_send_udp_command") as send_udp:
+            send_udp.return_value = {
+                "status": "queued",
+                "transport": "udp",
+                "device_uid": "3CDC7545CCD0",
+                "payload": {"command": "status", "request_id": "req-heartbeat"},
+                "request_id": "req-heartbeat",
+                "peer": "192.168.50.44:49152",
             }
             queued = service.publish_command("3CDC7545CCD0", {"command": "status", "request_id": "req-heartbeat"})
 
-        self.assertEqual(queued["transport"], "arduino_tcp")
-        self.assertEqual(send_arduino.call_args.args[0], "192.168.50.44")
+        self.assertEqual(queued["transport"], "udp")
+        self.assertEqual(send_udp.call_args.args[2], ("192.168.50.44", 49152))
 
     def test_partial_arduino_status_response_preserves_identity_fields(self):
         service = NewHorizonsService(mock_mode=False)
@@ -434,18 +434,16 @@ class ArduinoControlTcpTest(unittest.TestCase):
         self.assertEqual(device["last_status"]["indicators"]["external_led"]["initialized"], True)
         self.assertEqual(device["last_status"]["indicators"]["oled"]["mode"], "off")
 
-    def test_arduino_tcp_failure_marks_device_disconnected(self):
+    def test_udp_control_failure_clears_stale_session(self):
         service = NewHorizonsService(mock_mode=False)
+        service._udp_ingest = object()
         service._handle_udp_datagram(arduino_heartbeat_packet(), ("192.168.50.44", 49152))
 
-        with patch.object(service, "_send_arduino_command", side_effect=OSError("host unreachable")):
+        with patch.object(service, "_send_udp_command", side_effect=RuntimeError("udp unavailable")):
             with self.assertRaisesRegex(RuntimeError, "device_control_unavailable"):
                 service.publish_command("3CDC7545CCD0", {"command": "status", "request_id": "req-fail"})
 
-        device = service.get_device("3CDC7545CCD0")
-        self.assertEqual(device["gateway_connected"], False)
-        self.assertEqual(device["findme"]["state"], "disconnected")
-        self.assertNotIn("3CDC7545CCD0", service._arduino_control_sessions)
+        self.assertNotIn("3CDC7545CCD0", service._udp_control_sessions)
 
 
 if __name__ == "__main__":

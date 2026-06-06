@@ -6,7 +6,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SETTINGS_PAGE = ROOT / "frontend" / "src" / "pages" / "DeviceSettingsPage.tsx"
 DEVICE_LIB = ROOT / "frontend" / "src" / "lib" / "device.ts"
 DEVICE_COMMAND_LIB = ROOT / "frontend" / "src" / "lib" / "deviceCommand.ts"
+APP_TSX = ROOT / "frontend" / "src" / "App.tsx"
 STYLES = ROOT / "frontend" / "src" / "styles.css"
+SERVICE = ROOT / "backend" / "newhorizons_backend" / "service.py"
 
 
 class DeviceSettingsPageStaticTest(unittest.TestCase):
@@ -405,6 +407,23 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('command === "set_stream_buffer"', device_source)
         self.assertIn('"stream_buffer_updated"', device_source)
         self.assertIn('"storage_status"', device_source)
+
+    def test_app_shell_displays_desktop_version(self):
+        source = APP_TSX.read_text(encoding="utf-8")
+        styles = STYLES.read_text(encoding="utf-8")
+
+        self.assertIn('import packageJson from "../package.json"', source)
+        self.assertIn("const APP_VERSION = `v${packageJson.version}`", source)
+        self.assertIn('className="app-version"', source)
+        self.assertIn(".app-version", styles)
+
+    def test_backend_service_uses_udp_only_for_board_control(self):
+        source = SERVICE.read_text(encoding="utf-8")
+
+        self.assertNotIn("_arduino_control_sessions", source)
+        self.assertNotIn("send_control_command", source)
+        self.assertNotIn('"transport_path": "arduino_tcp"', source)
+        self.assertIn('"transport_path": "arduino_udp"', source)
 
     def test_booting_device_is_not_normalized_as_offline(self):
         source = DEVICE_LIB.read_text()
