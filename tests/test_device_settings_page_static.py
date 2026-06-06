@@ -382,6 +382,20 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("imuEnabled", source)
         self.assertIn('command: "memory_status"', source)
 
+    def test_diagnostics_exposes_stream_buffer_controls_and_metrics(self):
+        source = SETTINGS_PAGE.read_text()
+        i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
+
+        self.assertIn('command: "set_stream_buffer"', source)
+        self.assertIn("streamBufferEnabled", source)
+        self.assertIn("streamBufferMode", source)
+        self.assertIn("queue_capacity_frames", source)
+        self.assertIn("queue_dropped_frames", source)
+        self.assertIn("queue_max_occupied_frames", source)
+        self.assertIn("streamBufferDiagnostics", i18n)
+        self.assertIn("streamBufferStandardMode", i18n)
+        self.assertIn("streamBufferExtendedMode", i18n)
+
     def test_booting_device_is_not_normalized_as_offline(self):
         source = DEVICE_LIB.read_text()
 

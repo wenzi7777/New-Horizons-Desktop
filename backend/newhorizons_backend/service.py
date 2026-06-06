@@ -64,6 +64,7 @@ class NewHorizonsService:
         "enter_maintenance",
         "set_matrix_layout",
         "set_scan_timing",
+        "set_stream_buffer",
         "set_charge_profile",
         "power_set_state",
         "set_indicators",
@@ -632,6 +633,16 @@ class NewHorizonsService:
             self._merge_arduino_matrix_layout_payload(payload, request, data)
         elif command == "set_scan_timing" and ok:
             self._merge_arduino_scan_timing_payload(payload, request, data)
+        elif command == "set_stream_buffer" and ok:
+            stream_buffer_data = data.get("stream_buffer") if isinstance(data.get("stream_buffer"), dict) else {}
+            payload["stream_buffer"] = dict(stream_buffer_data) if stream_buffer_data else {
+                "enabled": bool(request.get("enabled", True)),
+                "mode": str(request.get("mode") or "standard"),
+                "depth_frames": 5 if str(request.get("mode") or "standard") == "extended" else (3 if bool(request.get("enabled", True)) else 0),
+            }
+            runtime_data = data.get("runtime") if isinstance(data.get("runtime"), dict) else {}
+            if isinstance(runtime_data.get("stream_buffer"), dict):
+                payload["runtime"] = dict(runtime_data)
         elif command == "set_imu" and ok:
             imu_data = data.get("imu") if isinstance(data.get("imu"), dict) else {}
             payload["imu"] = dict(imu_data) if imu_data else {
@@ -703,6 +714,7 @@ class NewHorizonsService:
         status_like = command in self.STATUS_COMMANDS or command in {
             "set_matrix_layout",
             "set_scan_timing",
+            "set_stream_buffer",
             "set_charge_profile",
             "power_set_state",
             "set_imu",
@@ -1381,6 +1393,28 @@ class NewHorizonsService:
                 if payload.get("send_every_n_frames") is not None:
                     scan_timing["send_every_n_frames"] = int(payload.get("send_every_n_frames"))
                 runtime["scan_timing"] = scan_timing
+            elif command == "set_stream_buffer":
+                enabled = bool(payload.get("enabled", True))
+                mode = str(payload.get("mode") or "standard")
+                depth_frames = 5 if enabled and mode == "extended" else (3 if enabled else 0)
+                stream_buffer = dict(runtime.get("stream_buffer") or {})
+                stream_buffer.update({
+                    "enabled": enabled,
+                    "mode": mode,
+                    "depth_frames": depth_frames,
+                })
+                runtime["stream_buffer"] = stream_buffer
+                status["stream_buffer"] = dict(stream_buffer)
+                scan_health = dict(status.get("scan_health") or {})
+                scan_health.update({
+                    "queue_enabled": enabled,
+                    "queue_depth_frames": depth_frames,
+                    "queue_capacity_frames": depth_frames,
+                    "queue_occupied_frames": 0,
+                    "queue_dropped_frames": int(scan_health.get("queue_dropped_frames", 0) or 0),
+                    "queue_max_occupied_frames": int(scan_health.get("queue_max_occupied_frames", 0) or 0),
+                })
+                status["scan_health"] = scan_health
             elif command == "set_charge_profile":
                 profile = str(payload.get("profile") or "compatible")
                 battery = dict(status.get("battery") or {})
@@ -1574,6 +1608,15 @@ class NewHorizonsService:
                     "message": "imu_updated",
                     "imu": runtime.get("imu", {}),
                     "runtime": {"imu": runtime.get("imu", {})},
+                    "applied": True,
+                })
+            elif command == "set_stream_buffer":
+                result_payload.update({
+                    "status": "ok",
+                    "message": "stream_buffer_updated",
+                    "stream_buffer": status.get("stream_buffer", {}),
+                    "scan_health": status.get("scan_health", {}),
+                    "runtime": {"stream_buffer": runtime.get("stream_buffer", {})},
                     "applied": True,
                 })
             elif command == "set_log":
@@ -1855,6 +1898,7 @@ class NewHorizonsService:
             "log_config_updated",
             "ota_config_updated",
             "update_checked",
+            "stream_buffer_updated",
         )
 
     def _record_parsed(self, device_uid: str, payload: dict[str, Any], source: str) -> None:
@@ -2639,6 +2683,7 @@ class NewHorizonsService:
                     "last_error": "",
                 },
                 "scan_timing": {"target_fps": 60, "settle_us": 20, "send_every_n_frames": 1},
+                "stream_buffer": {"enabled": True, "mode": "standard", "depth_frames": 3},
                 "logging": {"enabled": True, "capacity": "default", "serial": "status"},
                 "imu": {
                     "enabled": True,
@@ -2684,6 +2729,18 @@ class NewHorizonsService:
                 "last_error": "",
                 "last_result": "",
                 "reboot_required": False,
+            },
+            "stream_buffer": {"enabled": True, "mode": "standard", "depth_frames": 3},
+            "scan_health": {
+                "requested_target_fps": 60,
+                "settle_us": 20,
+                "send_every_n_frames": 1,
+                "queue_enabled": True,
+                "queue_depth_frames": 3,
+                "queue_capacity_frames": 3,
+                "queue_occupied_frames": 0,
+                "queue_dropped_frames": 0,
+                "queue_max_occupied_frames": 0,
             },
         }
 

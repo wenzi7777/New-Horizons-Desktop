@@ -898,6 +898,29 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(result["message"], "imu_updated")
         self.assertEqual(result["imu"]["state"], "disabled")
 
+    def test_mock_set_stream_buffer_updates_runtime_and_scan_health(self):
+        service = NewHorizonsService(mock_mode=True)
+        device_uid = "NH-MOCK-002"
+
+        queued = service.publish_command(
+            device_uid,
+            {"command": "set_stream_buffer", "enabled": True, "mode": "extended", "request_id": "req-buffer"},
+        )
+        devices = {item["device_uid"]: item for item in service.list_devices()}
+        latest = devices[device_uid]
+        runtime = latest["last_status"]["runtime"]["stream_buffer"]
+        scan_health = latest["last_status"]["scan_health"]
+        result = latest["last_result"]
+
+        self.assertEqual(queued["status"], "queued")
+        self.assertTrue(runtime["enabled"])
+        self.assertEqual(runtime["mode"], "extended")
+        self.assertEqual(runtime["depth_frames"], 5)
+        self.assertTrue(scan_health["queue_enabled"])
+        self.assertEqual(scan_health["queue_capacity_frames"], 5)
+        self.assertEqual(result["message"], "stream_buffer_updated")
+        self.assertEqual(result["stream_buffer"]["mode"], "extended")
+
     def test_mock_set_log_updates_logging_runtime(self):
         service = NewHorizonsService(mock_mode=True)
         device_uid = "NH-MOCK-002"

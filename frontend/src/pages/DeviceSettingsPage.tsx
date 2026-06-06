@@ -650,6 +650,7 @@ export function DeviceSettingsPage() {
   const scanHealthSource = recordValue(status.scan_health ?? lastResult.scan_health ?? (lastResultCommand === "scan_health" ? lastResult : undefined));
   const scanHealth = scanHealthSource;
   const scanTiming = recordValue(runtime.scan_timing);
+  const streamBuffer = recordValue(status.stream_buffer ?? runtime.stream_buffer ?? (lastResultCommand === "set_stream_buffer" ? lastResult.stream_buffer : undefined));
   const confirmedScanTiming = recordValue(lastAppliedScanTiming ?? scanTiming);
   const matrixLayout = recordValue(status.matrix_layout ?? device?.last_result?.matrix_layout);
   const analogPinsFromStatus = arrayCsv(matrixLayout.analog_pins ?? matrixLayout.active_rows);
@@ -707,6 +708,8 @@ export function DeviceSettingsPage() {
   const [settleUs, setSettleUs] = useState(numberValue(authoritativeScanTiming.settle_us ?? scanHealth.settle_us, 20));
   const [sendEveryNFrames, setSendEveryNFrames] = useState(numberValue(authoritativeScanTiming.send_every_n_frames ?? scanHealth.send_every_n_frames, 1));
   const [scanDraftDirty, setScanDraftDirty] = useState(false);
+  const [streamBufferEnabled, setStreamBufferEnabled] = useState(streamBuffer.enabled !== false);
+  const [streamBufferMode, setStreamBufferMode] = useState(stringValue(streamBuffer.mode, "standard"));
   const [chargeProfile, setChargeProfile] = useState(stringValue(batteryStatus.profile, "compatible"));
   const [imuEnabled, setImuEnabled] = useState(imu.enabled !== false);
   const [logEnabled, setLogEnabled] = useState(logging.enabled !== false);
@@ -796,6 +799,16 @@ export function DeviceSettingsPage() {
       setImuEnabled(imu.enabled !== false);
     }
   }, [imu.enabled]);
+
+  useEffect(() => {
+    if (streamBuffer.enabled !== undefined) {
+      setStreamBufferEnabled(streamBuffer.enabled !== false);
+    }
+    const nextMode = stringValue(streamBuffer.mode, "");
+    if (nextMode) {
+      setStreamBufferMode(nextMode);
+    }
+  }, [streamBuffer.enabled, streamBuffer.mode]);
 
   useEffect(() => {
     if (otaConfig.auto_apply_on_boot !== undefined) {
@@ -1018,6 +1031,14 @@ export function DeviceSettingsPage() {
 
   async function applyChargeProfile() {
     await run(t("saveChargeProfile"), { command: "set_charge_profile", profile: chargeProfile });
+  }
+
+  async function applyStreamBuffer() {
+    await run(t("saveStreamBuffer"), {
+      command: "set_stream_buffer",
+      enabled: streamBufferEnabled,
+      mode: streamBufferMode,
+    });
   }
 
   async function applyPowerState(state: "normal" | "soft_off_auto") {
@@ -1403,9 +1424,38 @@ export function DeviceSettingsPage() {
               <Metric label={t("udpSentFrames")} value={scanHealth.udp_sent_frames ?? "-"} />
               <Metric label={t("udpSendFailures")} value={scanHealth.udp_send_failures ?? "-"} />
               <Metric label={t("lastUdpSendUs")} value={scanHealth.last_udp_send_us ?? "-"} />
+              <Metric label={t("streamBufferQueueCapacity")} value={scanHealth.queue_capacity_frames ?? "-"} />
+              <Metric label={t("streamBufferQueueDropped")} value={scanHealth.queue_dropped_frames ?? "-"} />
+              <Metric label={t("streamBufferQueueMax")} value={scanHealth.queue_max_occupied_frames ?? "-"} />
               <Metric label="Wi-Fi" value={boolString(wifi.connected)} />
               <Metric label="IP" value={wifi.ip ?? "-"} small />
               <Metric label="RSSI" value={wifi.rssi ?? "-"} />
+            </div>
+            <div className="settings-card-subsection">
+              <h5>{t("streamBufferDiagnostics")}</h5>
+              <div className="field-grid">
+                <label className="switch-row">
+                  <input type="checkbox" checked={streamBufferEnabled} onChange={(event) => setStreamBufferEnabled(event.target.checked)} />
+                  <span>{t("paramEnabled")}</span>
+                </label>
+                <div className="field">
+                  <label>{t("streamBufferMode")}</label>
+                  <select value={streamBufferMode} disabled={!streamBufferEnabled} onChange={(event) => setStreamBufferMode(event.target.value)}>
+                    <option value="standard">{t("streamBufferStandardMode")}</option>
+                    <option value="extended">{t("streamBufferExtendedMode")}</option>
+                  </select>
+                </div>
+              </div>
+              <div className="metric-row">
+                <Metric label={t("streamBufferMode")} value={streamBuffer.mode ?? "-"} />
+                <Metric label={t("streamBufferDepth")} value={streamBuffer.depth_frames ?? "-"} />
+                <Metric label={t("streamBufferQueueOccupied")} value={scanHealth.queue_occupied_frames ?? "-"} />
+              </div>
+              <div className="actions compact">
+                <button className="button" type="button" disabled={isCommandBusy("set_stream_buffer") || !deviceUid || isDeviceOffline} onClick={() => void applyStreamBuffer()}>
+                  {isCommandBusy("set_stream_buffer") ? t("running") : t("saveStreamBuffer")}
+                </button>
+              </div>
             </div>
           </div>
           <div className="settings-card">

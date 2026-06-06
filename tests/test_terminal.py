@@ -143,6 +143,15 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertEqual(compiled["payload"], {"command": "set_imu", "enabled": False})
         self.assertEqual(payload["command"], "set_imu")
 
+    def test_set_stream_buffer_compiles_mode_and_enabled_flag(self):
+        compiled = compile_terminal_command("set-stream-buffer --enabled true --mode extended")
+        payload = validate_device_command_payload(compiled["payload"])
+
+        self.assertEqual(compiled["payload"]["command"], "set_stream_buffer")
+        self.assertTrue(compiled["payload"]["enabled"])
+        self.assertEqual(compiled["payload"]["mode"], "extended")
+        self.assertEqual(payload["command"], "set_stream_buffer")
+
     def test_power_set_state_is_allowed_and_compiles_from_terminal(self):
         payload = validate_device_command_payload({"command": "power_set_state", "state": "soft_off_auto", "request_id": "req-power"})
         compiled = compile_terminal_command("power-set-state --state normal")

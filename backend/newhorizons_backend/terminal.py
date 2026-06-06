@@ -30,6 +30,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "findme_switch_gateway",
     "set_matrix_layout",
     "set_scan_timing",
+    "set_stream_buffer",
     "set_charge_profile",
     "power_set_state",
     "set_log",
@@ -93,6 +94,11 @@ def terminal_help_items() -> list[dict[str, str]]:
             "command": "scan-health",
             "description": "Query lightweight scan, stream, memory, and control health.",
             "example": "scan-health",
+        },
+        {
+            "command": "set-stream-buffer",
+            "description": "Enable or disable the packet ring buffer and choose standard or extended depth.",
+            "example": "set-stream-buffer --enabled true --mode extended",
         },
         {
             "command": "calibration-status",
@@ -359,6 +365,18 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         if len(payload) == 1:
             raise ValueError("scan_timing_option_required")
         return {"command": "set_scan_timing", "payload": payload, "argv": argv}
+
+    if command == "set-stream-buffer":
+        parsed = _parse_options(args)
+        mode = parsed.get("mode", "standard")
+        if mode not in {"standard", "extended"}:
+            raise ValueError("invalid_stream_buffer_mode")
+        payload = {
+            "command": "set_stream_buffer",
+            "enabled": _as_bool(parsed.get("enabled", "true")),
+            "mode": mode,
+        }
+        return {"command": "set_stream_buffer", "payload": payload, "argv": argv}
 
     if command == "set-charge-profile":
         parsed = _parse_options(args)
