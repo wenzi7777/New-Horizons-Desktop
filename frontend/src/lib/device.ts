@@ -46,6 +46,14 @@ type UpdateState = {
   reboot_required?: boolean;
 };
 
+const STATUS_SNAPSHOT_COMMANDS = new Set([
+  "status",
+  "query",
+  "memory_status",
+  "scan_health",
+  "storage_status",
+]);
+
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -229,6 +237,47 @@ export function resultFromState(command: string, requestId: string, state: Updat
       update_state: resultState,
       reboot_required: Boolean(resultState.reboot_required ?? true),
     };
+  }
+  return null;
+}
+
+function statusSnapshotResult(command: string, requestId: string, device: DeviceEntry | undefined): Record<string, unknown> | null {
+  if (!STATUS_SNAPSHOT_COMMANDS.has(command)) return null;
+  const status = objectValue(device?.last_status);
+  if (Object.keys(status).length === 0) return null;
+  return {
+    ...status,
+    command,
+    request_id: requestId,
+  };
+}
+
+function streamBufferResult(requestId: string, device: DeviceEntry | undefined): Record<string, unknown> | null {
+  const status = objectValue(device?.last_status);
+  const runtime = objectValue(status.runtime);
+  const streamBuffer = objectValue(status.stream_buffer ?? runtime.stream_buffer);
+  if (Object.keys(streamBuffer).length === 0) return null;
+  const scanHealth = objectValue(status.scan_health);
+  const result: Record<string, unknown> = {
+    status: "ok",
+    message: "stream_buffer_updated",
+    command: "set_stream_buffer",
+    request_id: requestId,
+    stream_buffer: streamBuffer,
+  };
+  if (Object.keys(scanHealth).length > 0) {
+    result.scan_health = scanHealth;
+  }
+  return result;
+}
+
+export function resultFromDeviceState(command: string, requestId: string, device: DeviceEntry | undefined): Record<string, unknown> | null {
+  const stateResult = resultFromState(command, requestId, updateStateOf(device));
+  if (stateResult) return stateResult;
+  const snapshotResult = statusSnapshotResult(command, requestId, device);
+  if (snapshotResult) return snapshotResult;
+  if (command === "set_stream_buffer") {
+    return streamBufferResult(requestId, device);
   }
   return null;
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { api, type DeviceEntry } from "./api";
-import { deviceStatusToken, resultFromState, updateStateOf } from "./device";
+import { deviceStatusToken, resultFromDeviceState } from "./device";
 import { sendDeviceCommand } from "./wsClient";
 
 function sleep(ms: number) {
@@ -32,19 +32,9 @@ export function useDeviceCommand(deviceUid: string) {
         return result as Record<string, unknown>;
       }
       if (device && deviceStatusToken(device) !== previousStatusToken) {
-        const stateResult = resultFromState(command, requestId, updateStateOf(device));
+        const stateResult = resultFromDeviceState(command, requestId, device);
         if (stateResult) {
           return stateResult;
-        }
-      }
-      if (command === "status" || command === "query" || command === "memory_status" || command === "scan_health" || command === "storage_status") {
-        const status = device?.last_status;
-        if (status && deviceStatusToken(device) !== previousStatusToken) {
-          return {
-            ...(status as Record<string, unknown>),
-            command,
-            request_id: requestId,
-          };
         }
       }
     }

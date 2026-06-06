@@ -11,6 +11,7 @@ type UpdateState = {
   operation?: string;
   version?: string;
   manifest_url?: string;
+  changelog_url?: string;
   total_files?: number;
   applied_files?: number;
   skipped_files?: number;
@@ -514,6 +515,7 @@ function resultFromState(command: string, requestId: string, state: UpdateState)
       request_id: requestId,
       latest_version: state.version ?? "",
       manifest_url: state.manifest_url ?? "",
+      changelog_url: state.changelog_url ?? "",
       update_state: state,
       reboot_required: false,
     };
@@ -534,6 +536,55 @@ function resultFromState(command: string, requestId: string, state: UpdateState)
       update_state: resultState,
       reboot_required: Boolean(resultState.reboot_required ?? true),
     };
+  }
+  return null;
+}
+
+function statusSnapshotResult(command: string, requestId: string, device: DeviceEntry | undefined): Record<string, unknown> | null {
+  if (!["status", "query", "memory_status", "scan_health", "storage_status"].includes(command)) {
+    return null;
+  }
+  const status = device?.last_status;
+  if (!status) return null;
+  return {
+    ...(status as Record<string, unknown>),
+    command,
+    request_id: requestId,
+  };
+}
+
+function streamBufferResult(requestId: string, device: DeviceEntry | undefined): Record<string, unknown> | null {
+  const status = device?.last_status;
+  const runtime = status?.runtime && typeof status.runtime === "object" ? (status.runtime as Record<string, unknown>) : {};
+  const streamBufferSource = status?.stream_buffer ?? runtime.stream_buffer;
+  const streamBuffer = streamBufferSource && typeof streamBufferSource === "object"
+    ? (streamBufferSource as Record<string, unknown>)
+    : {};
+  if (Object.keys(streamBuffer).length === 0) return null;
+  const scanHealthSource = status?.scan_health;
+  const scanHealth = scanHealthSource && typeof scanHealthSource === "object"
+    ? (scanHealthSource as Record<string, unknown>)
+    : {};
+  const result: Record<string, unknown> = {
+    status: "ok",
+    message: "stream_buffer_updated",
+    command: "set_stream_buffer",
+    request_id: requestId,
+    stream_buffer: streamBuffer,
+  };
+  if (Object.keys(scanHealth).length > 0) {
+    result.scan_health = scanHealth;
+  }
+  return result;
+}
+
+function resultFromDeviceState(command: string, requestId: string, device: DeviceEntry | undefined): Record<string, unknown> | null {
+  const stateResult = resultFromState(command, requestId, updateStateOf(device));
+  if (stateResult) return stateResult;
+  const snapshotResult = statusSnapshotResult(command, requestId, device);
+  if (snapshotResult) return snapshotResult;
+  if (command === "set_stream_buffer") {
+    return streamBufferResult(requestId, device);
   }
   return null;
 }
@@ -870,7 +921,7 @@ export function TerminalPage() {
       }
 
       const state = updateStateOf(device);
-      const stateResult = resultFromState(command, requestId, state);
+      const stateResult = resultFromDeviceState(command, requestId, device);
       if (command === "apply_update" && state.operation === command) {
         const token = stateToken(state);
         if (token !== lastProgressToken) {
@@ -880,17 +931,6 @@ export function TerminalPage() {
       }
       if (stateResult) {
         return stateResult;
-      }
-
-      if (command === "status" || command === "query" || command === "memory_status" || command === "scan_health") {
-        const status = device?.last_status;
-        if (status && deviceStatusToken(device) !== previousStatusToken) {
-          return {
-            ...(status as Record<string, unknown>),
-            command,
-            request_id: requestId,
-          };
-        }
       }
     }
     return null;

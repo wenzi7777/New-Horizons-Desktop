@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS_PAGE = ROOT / "frontend" / "src" / "pages" / "DeviceSettingsPage.tsx"
 DEVICE_LIB = ROOT / "frontend" / "src" / "lib" / "device.ts"
+DEVICE_COMMAND_LIB = ROOT / "frontend" / "src" / "lib" / "deviceCommand.ts"
 STYLES = ROOT / "frontend" / "src" / "styles.css"
 
 
@@ -395,6 +396,15 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("streamBufferDiagnostics", i18n)
         self.assertIn("streamBufferStandardMode", i18n)
         self.assertIn("streamBufferExtendedMode", i18n)
+
+    def test_device_command_hook_keeps_stream_buffer_and_storage_status_fallbacks(self):
+        source = DEVICE_COMMAND_LIB.read_text()
+        device_source = DEVICE_LIB.read_text()
+
+        self.assertIn("resultFromDeviceState", source)
+        self.assertIn('command === "set_stream_buffer"', device_source)
+        self.assertIn('"stream_buffer_updated"', device_source)
+        self.assertIn('"storage_status"', device_source)
 
     def test_booting_device_is_not_normalized_as_offline(self):
         source = DEVICE_LIB.read_text()

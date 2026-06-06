@@ -152,6 +152,14 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertEqual(compiled["payload"]["mode"], "extended")
         self.assertEqual(payload["command"], "set_stream_buffer")
 
+    def test_terminal_wait_for_result_keeps_stream_buffer_and_storage_status_fallbacks(self):
+        source = TERMINAL_PAGE.read_text(encoding="utf-8")
+
+        self.assertIn('command === "set_stream_buffer"', source)
+        self.assertIn('"stream_buffer_updated"', source)
+        self.assertIn('"storage_status"', source)
+        self.assertIn("changelog_url: state.changelog_url ?? \"\"", source)
+
     def test_power_set_state_is_allowed_and_compiles_from_terminal(self):
         payload = validate_device_command_payload({"command": "power_set_state", "state": "soft_off_auto", "request_id": "req-power"})
         compiled = compile_terminal_command("power-set-state --state normal")
