@@ -417,12 +417,12 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('className="app-version"', source)
         self.assertIn(".app-version", styles)
 
-    def test_backend_service_uses_udp_only_for_board_control(self):
+    def test_backend_service_keeps_arduino_tcp_fallback_for_current_firmware(self):
         source = SERVICE.read_text(encoding="utf-8")
 
-        self.assertNotIn("_arduino_control_sessions", source)
-        self.assertNotIn("send_control_command", source)
-        self.assertNotIn('"transport_path": "arduino_tcp"', source)
+        self.assertIn("_arduino_control_sessions", source)
+        self.assertIn("send_control_command", source)
+        self.assertIn('"transport_path": "arduino_tcp"', source)
         self.assertIn('"transport_path": "arduino_udp"', source)
 
     def test_booting_device_is_not_normalized_as_offline(self):

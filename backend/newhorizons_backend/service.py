@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .arduino_protocol import is_arduino_heartbeat_packet, is_arduino_stream_packet, packet_device_uid
+from .arduino_protocol import CONTROL_PORT, is_arduino_heartbeat_packet, is_arduino_stream_packet, packet_device_uid, send_control_command
 from .packet_parser import PacketParseError, parse_binary_packet
 from .discovery import DiscoveryResponder
 from .udp_ingest import UDPIngestServer
@@ -128,6 +128,7 @@ class NewHorizonsService:
         self._gateway_session_senders: dict[str, Callable[[dict[str, Any]], None]] = {}
         self._gateway_device_ids: dict[str, str] = {}
         self._udp_control_sessions: dict[str, tuple[str, int]] = {}
+        self._arduino_control_sessions: dict[str, tuple[str, int]] = {}
         self._arduino_stream_status_at: dict[str, float] = {}
         self._gateways: dict[str, dict[str, Any]] = {}
         self._gateway_claims: dict[str, dict[str, Any]] = {}
@@ -484,11 +485,40 @@ class NewHorizonsService:
         with self._lock:
             gateway_sender = self._gateway_senders.get(device_uid)
             udp_addr = self._udp_control_sessions.get(device_uid)
-            if gateway_sender is None and udp_addr is None:
+            arduino_addr = self._arduino_control_sessions.get(device_uid)
+            if gateway_sender is None and udp_addr is None and arduino_addr is None:
                 if self._active_boot_transition_locked(device_uid):
                     raise RuntimeError(DEVICE_BOOTING)
                 raise RuntimeError(DEVICE_CONTROL_UNAVAILABLE)
             self._remember_pending_command(device_uid, payload)
+            if arduino_addr is not None:
+                try:
+                    response = self._send_arduino_command(arduino_addr[0], payload, port=arduino_addr[1], device_uid=device_uid)
+                except Exception as exc:
+                    if self._legacy_apply_update_started(device_uid, payload, exc):
+                        return {
+                            "status": "queued",
+                            "transport": "arduino_tcp",
+                            "device_uid": device_uid,
+                            "payload": payload,
+                            "request_id": str(payload.get("request_id") or ""),
+                            "peer": "{}:{}".format(arduino_addr[0], arduino_addr[1]),
+                        }
+                    self._arduino_control_sessions.pop(device_uid, None)
+                    self._mark_arduino_disconnected(device_uid, "arduino_control_failed")
+                    if gateway_sender is None and udp_addr is None:
+                        self._forget_pending_command(device_uid, payload)
+                        raise RuntimeError(DEVICE_CONTROL_UNAVAILABLE) from exc
+                else:
+                    self._record_arduino_response(device_uid, payload, response)
+                    return {
+                        "status": "queued",
+                        "transport": "arduino_tcp",
+                        "device_uid": device_uid,
+                        "payload": payload,
+                        "request_id": str(payload.get("request_id") or ""),
+                        "peer": "{}:{}".format(arduino_addr[0], arduino_addr[1]),
+                    }
             if gateway_sender is not None:
                 request_id = str(payload.get("request_id") or "")
                 message = {
@@ -550,6 +580,31 @@ class NewHorizonsService:
             "peer": "{}:{}".format(addr[0], addr[1]),
         }
 
+    def _send_arduino_command(
+        self,
+        host: str,
+        payload: dict[str, Any],
+        *,
+        port: int = CONTROL_PORT,
+        device_uid: str = "",
+    ) -> dict[str, Any]:
+        return send_control_command(host, payload, port=port)
+
+    def _mark_arduino_disconnected(self, device_uid: str, error: str) -> None:
+        self._record_status(
+            device_uid,
+            {
+                "device_uid": device_uid,
+                "protocol": "NHO/Arduino/1",
+                "gateway_connected": False,
+                "transport_path": "arduino_tcp",
+                "findme": {
+                    "state": "disconnected",
+                    "last_error": error,
+                },
+            },
+        )
+
     def _record_arduino_response(self, device_uid: str, request: dict[str, Any], response: dict[str, Any]) -> None:
         if not isinstance(response, dict):
             response = {"ok": False, "error": "invalid_arduino_response"}
@@ -564,7 +619,7 @@ class NewHorizonsService:
             "status": "ok" if ok else "error",
             "message": response.get("message") or response.get("error") or command,
             "protocol": data.get("protocol") or response.get("protocol") or "NHO/Arduino/1",
-            "transport_path": "arduino_udp",
+            "transport_path": "arduino_tcp",
             "gateway_connected": True,
         }
         payload.update(data)
@@ -1570,7 +1625,7 @@ class NewHorizonsService:
                 return
             now = datetime.now(timezone.utc).isoformat()
             with self._lock:
-                self._udp_control_sessions[device_uid] = addr
+                self._arduino_control_sessions[device_uid] = (addr[0], CONTROL_PORT)
             self._record_status(
                 device_uid,
                 {
@@ -1612,7 +1667,7 @@ class NewHorizonsService:
         now = time.monotonic()
         should_emit_status = False
         with self._lock:
-            self._udp_control_sessions[device_uid] = addr
+            self._arduino_control_sessions[device_uid] = (addr[0], CONTROL_PORT)
             last_status_at = float(self._arduino_stream_status_at.get(device_uid) or 0.0)
             if device_uid not in self._devices or now - last_status_at >= self.ARDUINO_STREAM_STATUS_INTERVAL_SEC:
                 self._arduino_stream_status_at[device_uid] = now
