@@ -658,7 +658,9 @@ export function DeviceSettingsPage() {
   const wifi = recordValue(status.wifi);
   const batteryStatus = recordValue(status.battery ?? (lastResultCommand === "set_charge_profile" ? lastResult.battery : undefined));
   const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" ? lastResult.power : undefined));
-  const memory = recordValue(status.memory ?? (lastResultCommand === "memory_status" ? lastResult : undefined));
+  // The backend hoists memory_status's `data` (heap_*) onto last_status's top
+  // level, so read from there; fall back to the fresh memory_status result.
+  const memory = recordValue(status.memory ?? (lastResultCommand === "memory_status" ? recordValue(lastResult.data) : undefined) ?? status);
   const logging = recordValue(status.logging ?? runtime.logging ?? (lastResultCommand === "set_log" ? lastResult.logging : undefined));
   const otaConfig = recordValue(status.ota ?? status.update_config ?? (lastResultCommand === "set_ota_config" ? lastResult.ota : undefined));
   const storage = recordValue(status.storage ?? (lastResultCommand === "storage_status" ? lastResult : undefined));
