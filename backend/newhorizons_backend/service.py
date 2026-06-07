@@ -1829,8 +1829,27 @@ class NewHorizonsService:
             merged = self._merge_device_entry(existing, entry)
             merged["last_result"] = payload
             if self._is_status_snapshot_result(payload):
-                self._latest_status[device_uid] = payload
-                merged["last_status"] = payload
+                # Firmware wraps all status fields under a "data" key
+                # (e.g. {"ok":true,"cmd":"status","data":{"wifi":{...},...}}).
+                # The frontend reads flat fields (status.wifi, status.battery …),
+                # matching the heartbeat/stream path.  Hoist the inner "data"
+                # dict to the top level so both paths produce the same shape.
+                inner = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+                if inner:
+                    status_payload: dict[str, Any] = dict(inner)
+                    for k in ("device_uid", "device_id", "received_at",
+                              "received_at_ms", "command", "request_id",
+                              "status", "message", "transport_path",
+                              "gateway_id", "gateway_connected", "mode",
+                              "protocol", "firmware_version"):
+                        if k in payload:
+                            status_payload[k] = payload[k]
+                else:
+                    status_payload = payload
+                existing_status = self._latest_status.get(device_uid) or {}
+                status_payload = self._merge_status_payload(existing_status, status_payload)
+                self._latest_status[device_uid] = status_payload
+                merged["last_status"] = status_payload
             self._clear_incompatible_visualization_locked(device_uid, merged)
             self._devices[device_uid] = merged
             if self._is_status_snapshot_result(payload):
