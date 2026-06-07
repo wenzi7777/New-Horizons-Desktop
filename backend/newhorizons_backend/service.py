@@ -1625,7 +1625,11 @@ class NewHorizonsService:
                 return
             now = datetime.now(timezone.utc).isoformat()
             with self._lock:
-                self._arduino_control_sessions[device_uid] = (addr[0], CONTROL_PORT)
+                # Only register a direct TCP session for real peer addresses.
+                # When packets arrive via the gateway relay, addr is a sentinel
+                # ("gateway", 0) and must not be used as a TCP control target.
+                if addr[0] != "gateway":
+                    self._arduino_control_sessions[device_uid] = (addr[0], CONTROL_PORT)
             self._record_status(
                 device_uid,
                 {
@@ -1667,7 +1671,8 @@ class NewHorizonsService:
         now = time.monotonic()
         should_emit_status = False
         with self._lock:
-            self._arduino_control_sessions[device_uid] = (addr[0], CONTROL_PORT)
+            if addr[0] != "gateway":
+                self._arduino_control_sessions[device_uid] = (addr[0], CONTROL_PORT)
             last_status_at = float(self._arduino_stream_status_at.get(device_uid) or 0.0)
             if device_uid not in self._devices or now - last_status_at >= self.ARDUINO_STREAM_STATUS_INTERVAL_SEC:
                 self._arduino_stream_status_at[device_uid] = now
