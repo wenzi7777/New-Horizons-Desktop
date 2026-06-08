@@ -240,6 +240,7 @@ export function ProfilesPage() {
   const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const zoomRef = useRef(1);
   const panRef = useRef({ x: 0, y: 0 });
+  const wheelHandlerRef = useRef<(e: globalThis.WheelEvent) => void>(() => {});
 
   const selectedSensor = useMemo(
     () => draft.sensors.find((sensor) => sensor.id === selectedSensorId) ?? null,
@@ -346,6 +347,14 @@ export function ProfilesPage() {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const el = stageViewportRef.current;
+    if (!el) return undefined;
+    const handler = (e: globalThis.WheelEvent) => wheelHandlerRef.current(e);
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, []);
+
   function scenePoint(event: Pick<PointerEvent<Element>, "clientX" | "clientY"> | Pick<WheelEvent<Element>, "clientX" | "clientY">) {
     const scene = stageSceneRef.current;
     if (!scene) return null;
@@ -369,17 +378,17 @@ export function ProfilesPage() {
   }
 
   function zoomAt(clientX: number, clientY: number, factor: number) {
-    const viewport = stageViewportRef.current;
-    if (!viewport) return;
-    const rect = viewport.getBoundingClientRect();
-    const cx = clientX - rect.left;
-    const cy = clientY - rect.top;
+    const scene = stageSceneRef.current;
+    if (!scene) return;
+    const rect = scene.getBoundingClientRect();
+    const sceneX = clientX - rect.left;
+    const sceneY = clientY - rect.top;
     const currentZoom = zoomRef.current;
     const nextZoom = clampZoom(currentZoom * factor);
     const appliedFactor = nextZoom / currentZoom;
     applyPan(
-      cx - (cx - panRef.current.x) * appliedFactor,
-      cy - (cy - panRef.current.y) * appliedFactor,
+      panRef.current.x + sceneX * (1 - appliedFactor),
+      panRef.current.y + sceneY * (1 - appliedFactor),
     );
     applyZoom(nextZoom);
   }
@@ -492,11 +501,13 @@ export function ProfilesPage() {
     setDragSensorId(null);
   }
 
-  function handleStageWheel(event: WheelEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
-    zoomAt(event.clientX, event.clientY, factor);
-  }
+  // Keep wheelHandlerRef always pointing at the latest handler so the
+  // non-passive native listener (added in useEffect) never has a stale closure.
+  wheelHandlerRef.current = (e: globalThis.WheelEvent) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    zoomAt(e.clientX, e.clientY, factor);
+  };
 
   async function handleSelect(name: string) {
     setSelectedName(name);
@@ -683,38 +694,6 @@ export function ProfilesPage() {
             <input ref={imageRef} hidden type="file" accept="image/*" onChange={(event) => handleImageUpload(event.target.files?.[0])} />
           </div>
 
-          <div className="profile-sidebar-section">
-            <h3>{t("profileTools")}</h3>
-            <div className="profile-tool-grid">
-              {(["add", "select", "move", "delete"] as const).map((item) => (
-                <button
-                  key={item}
-                  className={`button ${tool === item ? "primary" : ""}`}
-                  type="button"
-                  onClick={() => setTool(item)}
-                >
-                  {t(`profileTool_${item}`)}
-                </button>
-              ))}
-            </div>
-            <div className="profile-stage-controls">
-              <button className="button small" type="button" onClick={() => zoomFromCenter(1.25)}>+</button>
-              <button className="button small" type="button" onClick={() => zoomFromCenter(1 / 1.25)}>-</button>
-              <button className="button small" type="button" onClick={fitStageContent}>Fit</button>
-              <button className={`button small ${panMode ? "primary" : ""}`} type="button" onClick={() => setPanMode((value) => !value)}>Pan</button>
-            </div>
-            <p className="field-note">{t(`profileToolHint_${tool}`)}</p>
-            <button
-              className="button danger"
-              type="button"
-              onClick={() => {
-                setDraftProfile({ ...draft, sensors: [] });
-                setSelectedSensorId(null);
-              }}
-            >
-              {t("clearSensors")}
-            </button>
-          </div>
         </aside>
 
         <article className="panel profile-main profile-canvas-panel">
@@ -794,6 +773,44 @@ export function ProfilesPage() {
             </div>
           </div>
 
+          <div className="profile-canvas-toolbar">
+            <div className="profile-tool-row">
+              {(["add", "select", "move", "delete"] as const).map((item) => (
+                <button
+                  key={item}
+                  className={`button small ${tool === item ? "primary" : ""}`}
+                  type="button"
+                  onClick={() => setTool(item)}
+                >
+                  {t(`profileTool_${item}`)}
+                </button>
+              ))}
+              <span className="profile-canvas-toolbar-sep" />
+              <button
+                className={`button small ${panMode ? "primary" : ""}`}
+                type="button"
+                onClick={() => setPanMode((v) => !v)}
+              >
+                Pan
+              </button>
+            </div>
+            <div className="profile-canvas-toolbar-zoom">
+              <button className="button small" type="button" onClick={() => zoomFromCenter(1.25)}>＋</button>
+              <button className="button small" type="button" onClick={() => zoomFromCenter(1 / 1.25)}>－</button>
+              <button className="button small" type="button" onClick={fitStageContent}>Fit</button>
+              <button
+                className="button danger small"
+                type="button"
+                onClick={() => {
+                  setDraftProfile({ ...draft, sensors: [] });
+                  setSelectedSensorId(null);
+                }}
+              >
+                {t("clearSensors")}
+              </button>
+            </div>
+          </div>
+
           <div
             ref={stageViewportRef}
             className={`profile-stage profile-stage-viewport tool-${tool}`}
@@ -801,7 +818,6 @@ export function ProfilesPage() {
             onPointerMove={handleStagePointerMove}
             onPointerUp={handleStagePointerUp}
             onPointerCancel={handleStagePointerUp}
-            onWheel={handleStageWheel}
           >
             <div className="profile-stage-grid" />
             <div className="profile-stage-center">
@@ -857,6 +873,7 @@ export function ProfilesPage() {
             <span>Zoom: {zoomInfo}</span>
             <span>Cursor: {cursorInfo}</span>
             <span>{selectedSensor ? `${t("selectedSensor")}: ${selectedSensor.label}` : t("selectSensorFirst")}</span>
+            <span className="profile-tool-hint">{t(`profileToolHint_${tool}`)}</span>
           </div>
         </article>
 
