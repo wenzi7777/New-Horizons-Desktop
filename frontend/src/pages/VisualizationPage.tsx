@@ -337,16 +337,17 @@ function buildMatrixView(
   colMirror: boolean,
 ): MatrixView {
   const source = item?.p ?? [];
-  const profileShape = profileMatrixShape(profile);
   const deviceRows = asFiniteNumber(device?.matrix_shape?.rows, 0);
   const deviceCols = asFiniteNumber(device?.matrix_shape?.cols, 0);
-  let shape = profileShape;
+  let shape: { rows: number; cols: number } | null = null;
+  if (deviceRows > 0 && deviceCols > 0) {
+    shape = { rows: Math.floor(deviceRows), cols: Math.floor(deviceCols) };
+  }
   if (!shape) {
-    if (deviceRows > 0 && deviceCols > 0) {
-      shape = { rows: Math.floor(deviceRows), cols: Math.floor(deviceCols) };
-    } else {
-      shape = inferMatrixShape(source, deviceRows, deviceCols);
-    }
+    shape = profileMatrixShape(profile);
+  }
+  if (!shape) {
+    shape = inferMatrixShape(source, deviceRows, deviceCols);
   }
   const rows = Math.max(1, shape.rows);
   const cols = Math.max(1, shape.cols);
