@@ -501,12 +501,10 @@ export function ProfilesPage() {
     setDragSensorId(null);
   }
 
-  // Keep wheelHandlerRef always pointing at the latest handler so the
-  // non-passive native listener (added in useEffect) never has a stale closure.
+  // Prevent page scroll when the pointer is over the canvas.
+  // Zoom is intentionally not triggered here — use the +/− toolbar buttons.
   wheelHandlerRef.current = (e: globalThis.WheelEvent) => {
     e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    zoomAt(e.clientX, e.clientY, factor);
   };
 
   async function handleSelect(name: string) {
