@@ -724,6 +724,7 @@ export function DeviceSettingsPage() {
   const [oledPage, setOledPage] = useState(stringValue(oled.page, "live_status"));
   const [oledUpdateHz, setOledUpdateHz] = useState(numberValue(oled.update_hz, 1));
   const [oledContrast, setOledContrast] = useState(numberValue(oled.contrast, 128));
+  const [oledRotation, setOledRotation] = useState(numberValue(oled.rotation, 0));
   const [showIoModal, setShowIoModal] = useState(false);
   const [ramMonitorEnabled, setRamMonitorEnabled] = useState(false);
   const [ramRefreshInFlight, setRamRefreshInFlight] = useState(false);
@@ -859,7 +860,8 @@ export function DeviceSettingsPage() {
     if (nextOledPage) setOledPage(nextOledPage);
     if (oled.update_hz !== undefined) setOledUpdateHz(numberValue(oled.update_hz, 1));
     if (oled.contrast !== undefined) setOledContrast(numberValue(oled.contrast, 128));
-  }, [oled.contrast, oled.mode, oled.page, oled.update_hz]);
+    if (oled.rotation !== undefined) setOledRotation(numberValue(oled.rotation, 0));
+  }, [oled.contrast, oled.mode, oled.page, oled.update_hz, oled.rotation]);
 
   function isCommandBusy(command: string) {
     return busyCommand === command;
@@ -1389,9 +1391,18 @@ export function DeviceSettingsPage() {
                 <label>{t("oledContrast")}</label>
                 <input type="number" value={oledContrast} onChange={(event) => setOledContrast(Number(event.target.value) || 128)} />
               </div>
+              <div className="field">
+                <label>{t("oledRotation")}</label>
+                <select value={oledRotation} onChange={(event) => setOledRotation(Number(event.target.value))}>
+                  <option value={0}>{t("oledRotation_0")}</option>
+                  <option value={1}>{t("oledRotation_90")}</option>
+                  <option value={2}>{t("oledRotation_180")}</option>
+                  <option value={3}>{t("oledRotation_270")}</option>
+                </select>
+              </div>
             </div>
             <div className="actions">
-              <button className="button" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveScreen"), { command: "set_indicators", oled: { mode: oledMode, page: oledPage, update_hz: oledUpdateHz, contrast: oledContrast } })}>
+              <button className="button" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveScreen"), { command: "set_indicators", oled: { mode: oledMode, page: oledPage, update_hz: oledUpdateHz, contrast: oledContrast, rotation: oledRotation } })}>
                 {isCommandBusy("set_indicators") ? t("running") : t("saveScreen")}
               </button>
             </div>
