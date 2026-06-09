@@ -187,6 +187,36 @@ export type CsvPreviewResponse = {
   rows: string[][];
 };
 
+export type WikiDeviceEntry = {
+  slug: string;
+  name: string;
+  path: string;
+  document_count: number;
+};
+
+export type WikiEntry = {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  kind: string;
+  size?: number;
+};
+
+export type WikiDirectoryResponse = {
+  device: string;
+  path: string;
+  items: WikiEntry[];
+};
+
+export type WikiDocumentResponse = {
+  device: string;
+  path: string;
+  name: string;
+  content: string;
+  github_url: string;
+  raw_url: string;
+};
+
 export type AuthSession = {
   authenticated: boolean;
   username?: string;
@@ -322,6 +352,11 @@ export const api = {
     request<CsvDirectoryResponse>(`/files?device_uid=${encodeURIComponent(deviceUid)}&path=${encodeURIComponent(path)}`),
   previewCsv: (deviceUid: string, path: string) =>
     request<CsvPreviewResponse>(`/files/preview?device_uid=${encodeURIComponent(deviceUid)}&path=${encodeURIComponent(path)}`),
+  wikiDevices: () => request<{ items: WikiDeviceEntry[] }>("/wiki/devices"),
+  wikiDirectory: (device: string, path = "") =>
+    request<WikiDirectoryResponse>(`/wiki?device=${encodeURIComponent(device)}&path=${encodeURIComponent(path)}`),
+  wikiDocument: (device: string, path: string) =>
+    request<WikiDocumentResponse>(`/wiki/document?device=${encodeURIComponent(device)}&path=${encodeURIComponent(path)}`),
   deleteCsvEntry: (deviceUid: string, path: string) =>
     request<{ status: string; deleted_path: string; deleted_kind: "file" | "directory" }>(
       `/files?device_uid=${encodeURIComponent(deviceUid)}&path=${encodeURIComponent(path)}`,

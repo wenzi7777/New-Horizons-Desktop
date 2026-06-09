@@ -95,6 +95,9 @@ export function LaunchpadPage() {
                 <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/commands`}>
                   {t("advancedCommands")}
                 </Link>
+                <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/wiki`}>
+                  {t("deviceWiki")}
+                </Link>
               </div>
             </article>
           ))}

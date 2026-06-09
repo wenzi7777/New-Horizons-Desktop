@@ -3,6 +3,7 @@ import packageJson from "../package.json";
 
 import { DeviceFilesPage } from "./pages/DeviceFilesPage";
 import { DeviceSettingsPage } from "./pages/DeviceSettingsPage";
+import { DeviceWikiPage } from "./pages/DeviceWikiPage";
 import { FilesPage } from "./pages/FilesPage";
 import { GatewaysPage } from "./pages/GatewaysPage";
 import { LaunchpadPage } from "./pages/LaunchpadPage";
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { to: "/visualization", labelKey: "navVisualize", roles: ["admin", "user"] as Role[] },
   { to: "/gateways", labelKey: "navGateways", roles: ["admin"] as Role[] },
   { to: "/profiles", labelKey: "navProfile", roles: ["admin", "user"] as Role[] },
+  { to: "/wiki", labelKey: "navWiki", roles: ["admin", "user"] as Role[] },
   { to: "/csv", labelKey: "csvExport", roles: ["admin"] as Role[] },
 ];
 
@@ -117,6 +119,14 @@ function AuthenticatedApp() {
             }
           />
           <Route
+            path="/device/:deviceUid/wiki"
+            element={
+              <RequireRole roles={["admin", "user"]}>
+                <DeviceWikiPage />
+              </RequireRole>
+            }
+          />
+          <Route
             path="/device/:deviceUid/commands"
             element={
               <RequireRole roles={["admin"]}>
@@ -129,6 +139,14 @@ function AuthenticatedApp() {
             element={
               <RequireRole roles={["admin"]}>
                 <TerminalPage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/wiki"
+            element={
+              <RequireRole roles={["admin", "user"]}>
+                <DeviceWikiPage />
               </RequireRole>
             }
           />

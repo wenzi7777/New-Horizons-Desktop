@@ -15,6 +15,19 @@ TERMINAL_PAGE = ROOT / "frontend" / "src" / "pages" / "TerminalPage.tsx"
 
 
 class DeviceCommandValidationTest(unittest.TestCase):
+    def test_terminal_command_builder_covers_every_help_command(self):
+        source = TERMINAL_PAGE.read_text(encoding="utf-8")
+        block_commands = set()
+        for line in source.splitlines():
+            marker = 'command: "'
+            if marker in line:
+                block_commands.add(line.split(marker, 1)[1].split('"', 1)[0])
+
+        help_commands = {entry["command"] for entry in terminal_help_items() if entry["command"] != "io-config"}
+
+        self.assertFalse({"calibration-sample-cell", "calibration-sample-all", "calibration-save", "set-filter"} & block_commands)
+        self.assertTrue(help_commands.issubset(block_commands))
+
     def test_memory_status_is_allowed(self):
         payload = validate_device_command_payload({"command": "memory_status", "request_id": "req-memory"})
 

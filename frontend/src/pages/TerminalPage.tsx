@@ -116,37 +116,90 @@ const COMMAND_GROUP_ORDER = [
 
 const COMMAND_BLOCKS: CommandBlock[] = [
   { command: "status", groupKey: "commandGroupCore", params: [] },
-  { command: "reboot", groupKey: "commandGroupCore", params: [] },
   { command: "check-update", groupKey: "commandGroupCore", params: [{ key: "manifest-url", labelKey: "paramManifestUrl", type: "text", placeholder: "https://..." }] },
   { command: "apply-update", groupKey: "commandGroupDanger", params: [{ key: "manifest-url", labelKey: "paramManifestUrl", type: "text", placeholder: "https://..." }] },
   {
     command: "enter-maintenance",
     groupKey: "commandGroupMaintenance",
-    params: [
-      { key: "reason", labelKey: "paramReason", type: "text", placeholder: "calibration", defaultValue: "calibration" },
-    ],
+    params: [{ key: "reason", labelKey: "paramReason", type: "text", placeholder: "calibration", defaultValue: "calibration" }],
   },
   { command: "exit-maintenance", groupKey: "commandGroupMaintenance", params: [] },
   { command: "scan-health", groupKey: "commandGroupCore", params: [] },
   {
-    command: "calibration-sample-cell",
+    command: "set-stream-buffer",
+    groupKey: "commandGroupConfig",
+    params: [
+      {
+        key: "enabled",
+        labelKey: "paramEnabled",
+        type: "select",
+        defaultValue: "true",
+        options: [
+          { labelKey: "optionTrue", value: "true" },
+          { labelKey: "optionFalse", value: "false" },
+        ],
+      },
+      {
+        key: "mode",
+        labelKey: "logMode",
+        type: "select",
+        defaultValue: "standard",
+        options: [
+          { labelKey: "capacityDefault", value: "standard" },
+          { labelKey: "capacityExtended", value: "extended" },
+        ],
+      },
+    ],
+  },
+  { command: "calibration-status", groupKey: "commandGroupMaintenance", params: [] },
+  { command: "calibration-enable", groupKey: "commandGroupMaintenance", params: [] },
+  { command: "calibration-disable", groupKey: "commandGroupMaintenance", params: [] },
+  { command: "calibration-clear-profile", groupKey: "commandGroupDanger", params: [] },
+  { command: "calibration-session-begin", groupKey: "commandGroupMaintenance", params: [] },
+  { command: "calibration-session-abort", groupKey: "commandGroupMaintenance", params: [] },
+  {
+    command: "calibration-session-commit",
     groupKey: "commandGroupMaintenance",
     params: [
-      { key: "analog-pin", labelKey: "paramAnalogPin", type: "number", required: true, defaultValue: "1" },
-      { key: "select-pin", labelKey: "paramSelectPin", type: "number", required: true, defaultValue: "13" },
-      { key: "duration-ms", labelKey: "paramDurationMs", type: "number", defaultValue: "3000" },
-      { key: "level", labelKey: "paramLevel", type: "number", defaultValue: "10" },
+      {
+        key: "auto-enable",
+        labelKey: "paramAutoEnable",
+        type: "select",
+        defaultValue: "true",
+        options: [
+          { labelKey: "optionTrue", value: "true" },
+          { labelKey: "optionFalse", value: "false" },
+        ],
+      },
     ],
   },
   {
-    command: "calibration-sample-all",
+    command: "calibration-dump-level",
+    groupKey: "commandGroupMaintenance",
+    params: [{ key: "level", labelKey: "paramLevel", type: "number", required: true, defaultValue: "10" }],
+  },
+  {
+    command: "calibration-delete-level",
+    groupKey: "commandGroupDanger",
+    params: [{ key: "level", labelKey: "paramLevel", type: "number", required: true, defaultValue: "10" }],
+  },
+  {
+    command: "calibration-capture-cell",
     groupKey: "commandGroupMaintenance",
     params: [
-      { key: "duration-ms", labelKey: "paramDurationMs", type: "number", defaultValue: "3000" },
-      { key: "level", labelKey: "paramLevel", type: "number", required: true, defaultValue: "10" },
+      { key: "sensor-index", labelKey: "paramSensorIndex", type: "number", required: true, defaultValue: "0" },
+      { key: "level", labelKey: "paramLevel", type: "number", defaultValue: "10" },
+      { key: "duration-ms", labelKey: "paramDurationMs", type: "number", defaultValue: "2500" },
     ],
   },
-  { command: "calibration-save", groupKey: "commandGroupMaintenance", params: [] },
+  {
+    command: "calibration-capture-all",
+    groupKey: "commandGroupMaintenance",
+    params: [
+      { key: "level", labelKey: "paramLevel", type: "number", required: true, defaultValue: "10" },
+      { key: "duration-ms", labelKey: "paramDurationMs", type: "number", defaultValue: "2500" },
+    ],
+  },
   { command: "findme-discover", groupKey: "commandGroupConfig", params: [] },
   {
     command: "findme-switch-gateway",
@@ -166,7 +219,48 @@ const COMMAND_BLOCKS: CommandBlock[] = [
     ],
   },
   {
-    command: "set-filter",
+    command: "set-scan-timing",
+    groupKey: "commandGroupConfig",
+    params: [
+      { key: "target-fps", labelKey: "paramTargetFps", type: "number", defaultValue: "60" },
+      { key: "settle-us", labelKey: "paramSettleUs", type: "number", defaultValue: "20" },
+      { key: "send-every-n-frames", labelKey: "paramSendEveryNFrames", type: "number", defaultValue: "1" },
+    ],
+  },
+  {
+    command: "set-charge-profile",
+    groupKey: "commandGroupConfig",
+    params: [
+      {
+        key: "profile",
+        labelKey: "paramProfile",
+        type: "select",
+        defaultValue: "compatible",
+        options: [
+          { labelKey: "compatibleChargingMode", value: "compatible" },
+          { labelKey: "fastChargingMode", value: "fast" },
+        ],
+      },
+    ],
+  },
+  {
+    command: "power-set-state",
+    groupKey: "commandGroupDanger",
+    params: [
+      {
+        key: "state",
+        labelKey: "paramState",
+        type: "select",
+        defaultValue: "soft_off_auto",
+        options: [
+          { labelKey: "resumeNormalMode", value: "normal" },
+          { labelKey: "softOffAuto", value: "soft_off_auto" },
+        ],
+      },
+    ],
+  },
+  {
+    command: "set-log",
     groupKey: "commandGroupConfig",
     params: [
       {
@@ -179,14 +273,45 @@ const COMMAND_BLOCKS: CommandBlock[] = [
           { labelKey: "optionFalse", value: "false" },
         ],
       },
+      {
+        key: "level",
+        labelKey: "logLevel",
+        type: "select",
+        defaultValue: "error",
+        options: [
+          { labelKey: "error", value: "error" },
+          { labelKey: "warn", value: "warn" },
+          { labelKey: "info", value: "info" },
+          { labelKey: "debug", value: "debug" },
+        ],
+      },
+      {
+        key: "mode",
+        labelKey: "logMode",
+        type: "select",
+        defaultValue: "standard",
+        options: [
+          { labelKey: "capacityDefault", value: "standard" },
+          { labelKey: "capacityExtended", value: "extended" },
+        ],
+      },
     ],
   },
   {
-    command: "set-scan-timing",
+    command: "set-ota-config",
     groupKey: "commandGroupConfig",
     params: [
-      { key: "target-fps", labelKey: "paramTargetFps", type: "number", defaultValue: "60" },
-      { key: "settle-us", labelKey: "paramSettleUs", type: "number", defaultValue: "20" },
+      {
+        key: "auto-apply-on-boot",
+        labelKey: "autoOtaOnBoot",
+        type: "select",
+        defaultValue: "true",
+        options: [
+          { labelKey: "optionTrue", value: "true" },
+          { labelKey: "optionFalse", value: "false" },
+        ],
+      },
+      { key: "manifest-url", labelKey: "paramManifestUrl", type: "text", placeholder: "https://..." },
     ],
   },
   {
@@ -241,6 +366,22 @@ const COMMAND_BLOCKS: CommandBlock[] = [
       { key: "oled-contrast", labelKey: "paramOledContrast", type: "number" },
     ],
   },
+  {
+    command: "set-imu",
+    groupKey: "commandGroupConfig",
+    params: [
+      {
+        key: "enabled",
+        labelKey: "paramEnabled",
+        type: "select",
+        defaultValue: "true",
+        options: [
+          { labelKey: "optionTrue", value: "true" },
+          { labelKey: "optionFalse", value: "false" },
+        ],
+      },
+    ],
+  },
   { command: "io-config", groupKey: "commandGroupConfig", params: [] },
   {
     command: "file-list",
@@ -260,31 +401,6 @@ const COMMAND_BLOCKS: CommandBlock[] = [
     ],
   },
   {
-    command: "file-write-begin",
-    groupKey: "commandGroupFiles",
-    params: [
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "configs/profile.json" },
-      { key: "size", labelKey: "paramSize", type: "number", required: true, defaultValue: "2" },
-      { key: "sha256", labelKey: "paramSha256", type: "text", placeholder: "optional" },
-    ],
-  },
-  {
-    command: "file-write-chunk",
-    groupKey: "commandGroupFiles",
-    params: [
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "configs/profile.json" },
-      { key: "offset", labelKey: "paramOffset", type: "number", defaultValue: "0" },
-      { key: "data", labelKey: "paramDataHex", type: "text", required: true, placeholder: "7b7d" },
-    ],
-  },
-  {
-    command: "file-write-finish",
-    groupKey: "commandGroupFiles",
-    params: [
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "configs/profile.json" },
-    ],
-  },
-  {
     command: "file-read-begin",
     groupKey: "commandGroupFiles",
     params: [
@@ -299,7 +415,7 @@ const COMMAND_BLOCKS: CommandBlock[] = [
           { labelKey: "fileScope_calibration", value: "calibration" },
         ],
       },
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "logs/device.log" },
+      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "device.log" },
     ],
   },
   {
@@ -317,9 +433,67 @@ const COMMAND_BLOCKS: CommandBlock[] = [
           { labelKey: "fileScope_calibration", value: "calibration" },
         ],
       },
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "logs/device.log" },
+      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "device.log" },
       { key: "offset", labelKey: "paramOffset", type: "number", defaultValue: "0" },
       { key: "length", labelKey: "paramLength", type: "number", defaultValue: "1024" },
+    ],
+  },
+  {
+    command: "file-write-begin",
+    groupKey: "commandGroupFiles",
+    params: [
+      {
+        key: "scope",
+        labelKey: "paramScope",
+        type: "select",
+        defaultValue: "user",
+        options: [
+          { labelKey: "fileScope_user", value: "user" },
+          { labelKey: "fileScope_logs", value: "logs" },
+          { labelKey: "fileScope_calibration", value: "calibration" },
+        ],
+      },
+      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "configs/profile.json" },
+      { key: "size", labelKey: "paramSize", type: "number", required: true, defaultValue: "2" },
+      { key: "sha256", labelKey: "paramSha256", type: "text", placeholder: "optional" },
+    ],
+  },
+  {
+    command: "file-write-chunk",
+    groupKey: "commandGroupFiles",
+    params: [
+      {
+        key: "scope",
+        labelKey: "paramScope",
+        type: "select",
+        defaultValue: "user",
+        options: [
+          { labelKey: "fileScope_user", value: "user" },
+          { labelKey: "fileScope_logs", value: "logs" },
+          { labelKey: "fileScope_calibration", value: "calibration" },
+        ],
+      },
+      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "configs/profile.json" },
+      { key: "offset", labelKey: "paramOffset", type: "number", defaultValue: "0" },
+      { key: "data", labelKey: "paramDataHex", type: "text", required: true, placeholder: "7b7d" },
+    ],
+  },
+  {
+    command: "file-write-finish",
+    groupKey: "commandGroupFiles",
+    params: [
+      {
+        key: "scope",
+        labelKey: "paramScope",
+        type: "select",
+        defaultValue: "user",
+        options: [
+          { labelKey: "fileScope_user", value: "user" },
+          { labelKey: "fileScope_logs", value: "logs" },
+          { labelKey: "fileScope_calibration", value: "calibration" },
+        ],
+      },
+      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "configs/profile.json" },
     ],
   },
   {
@@ -343,11 +517,10 @@ const COMMAND_BLOCKS: CommandBlock[] = [
   {
     command: "log-tail",
     groupKey: "commandGroupFiles",
-    params: [
-      { key: "lines", labelKey: "paramLines", type: "number", defaultValue: "50" },
-    ],
+    params: [{ key: "lines", labelKey: "paramLines", type: "number", defaultValue: "50" }],
   },
   { command: "log-clear", groupKey: "commandGroupFiles", params: [] },
+  { command: "reboot", groupKey: "commandGroupDanger", params: [] },
 ];
 
 function updateStateOf(device: DeviceEntry | undefined): UpdateState {

@@ -9,6 +9,7 @@ AUTH = ROOT / "frontend" / "src" / "lib" / "auth.tsx"
 RUNTIME = ROOT / "frontend" / "src" / "lib" / "runtime.ts"
 API = ROOT / "frontend" / "src" / "lib" / "api.ts"
 WS_CLIENT = ROOT / "frontend" / "src" / "lib" / "wsClient.ts"
+LAUNCHPAD = ROOT / "frontend" / "src" / "pages" / "LaunchpadPage.tsx"
 
 
 class AppAuthStaticTest(unittest.TestCase):
@@ -57,6 +58,20 @@ class AppAuthStaticTest(unittest.TestCase):
         self.assertIn("gatewayDeleted", i18n_source)
         self.assertIn("gatewayDeleteFailed", i18n_source)
         self.assertIn("deleteGateway: (gatewayId: string)", api_source)
+
+    def test_app_and_launchpad_expose_device_wiki_navigation(self):
+        app_source = APP.read_text(encoding="utf-8")
+        api_source = API.read_text(encoding="utf-8")
+        launchpad_source = LAUNCHPAD.read_text(encoding="utf-8")
+        i18n_source = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
+
+        self.assertIn('path="/wiki"', app_source)
+        self.assertIn('path="/device/:deviceUid/wiki"', app_source)
+        self.assertIn("wikiDevices", api_source)
+        self.assertIn("wikiDocument", api_source)
+        self.assertIn('/device/${encodeURIComponent(device.uid)}/wiki', launchpad_source)
+        self.assertIn("deviceWiki", i18n_source)
+        self.assertIn("navWiki", i18n_source)
 
 
 if __name__ == "__main__":

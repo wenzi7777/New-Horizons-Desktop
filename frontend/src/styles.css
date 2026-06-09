@@ -331,6 +331,85 @@ button:disabled {
   padding-bottom: 12px;
 }
 
+.wiki-workspace {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(220px, 280px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.wiki-device-panel,
+.wiki-document-panel,
+.wiki-preview-panel {
+  min-height: 420px;
+}
+
+.wiki-list {
+  display: grid;
+  gap: 8px;
+}
+
+.wiki-list .button {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.wiki-list .button.active {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.wiki-preview-content {
+  display: grid;
+  gap: 12px;
+  line-height: 1.55;
+}
+
+.wiki-preview-content h1,
+.wiki-preview-content h2,
+.wiki-preview-content h3,
+.wiki-preview-content p,
+.wiki-preview-content ul {
+  margin: 0;
+}
+
+.wiki-preview-content ul {
+  padding-left: 18px;
+}
+
+.wiki-preview-content code,
+.wiki-preview-content pre {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.wiki-preview-content pre {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 12px;
+  overflow: auto;
+}
+
+.wiki-table-wrap {
+  overflow: auto;
+}
+
+.wiki-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.wiki-table th,
+.wiki-table td {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
 .device-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
@@ -3564,7 +3643,8 @@ button:disabled {
   .visualization-card-controls,
   .profile-workspace,
   .profile-form-grid,
-  .csv-explorer-layout {
+  .csv-explorer-layout,
+  .wiki-workspace {
     grid-template-columns: 1fr;
   }
 

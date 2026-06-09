@@ -22,6 +22,7 @@ MOCK_DATA_ROOT = MOCK_ROOT / "mqtt_store"
 DEFAULT_PROFILES_ROOT = PROJECT_ROOT / "data" / "profiles"
 DEFAULT_DATA_ROOT = PROJECT_ROOT / "data" / "mqtt_store"
 DEFAULT_AUTH_DB = PROJECT_ROOT / "data" / "auth.sqlite3"
+DEFAULT_WIKI_ROOT = PROJECT_ROOT / "wiki"
 
 
 def create_standalone_app() -> Flask:
@@ -29,6 +30,7 @@ def create_standalone_app() -> Flask:
     autostart = os.getenv("NEWHORIZONS_AUTOSTART", "1") != "0"
     profiles_root = Path(os.getenv("NEWHORIZONS_PROFILES_DIR", str(MOCK_PROFILES_ROOT if mock_mode else DEFAULT_PROFILES_ROOT)))
     data_root = Path(os.getenv("NEWHORIZONS_DATA_ROOT", str(MOCK_DATA_ROOT if mock_mode else DEFAULT_DATA_ROOT)))
+    wiki_root = Path(os.getenv("NEWHORIZONS_WIKI_ROOT", str(DEFAULT_WIKI_ROOT)))
     frontend_dist = Path(os.getenv("NEWHORIZONS_FRONTEND_DIST", str(FRONTEND_DIST)))
     auth_db = Path(os.getenv("NEWHORIZONS_AUTH_DB", str(DEFAULT_AUTH_DB)))
     base_path = _normalize_base_path(os.getenv("NEWHORIZONS_BASE_PATH", "/newhorizons"))
@@ -44,6 +46,7 @@ def create_standalone_app() -> Flask:
     app.permanent_session_lifetime = timedelta(seconds=DEFAULT_SESSION_LIFETIME_SEC)
     app.config["NEWHORIZONS_PROFILES_DIR"] = str(profiles_root)
     app.config["NEWHORIZONS_DATA_ROOT"] = str(data_root)
+    app.config["NEWHORIZONS_WIKI_ROOT"] = str(wiki_root)
     app.config["NEWHORIZONS_AUTH_DB"] = str(auth_db)
     app.config["NEWHORIZONS_BASE_PATH"] = base_path
     app.config["NEWHORIZONS_SERVICE"] = service

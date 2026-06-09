@@ -93,6 +93,52 @@ def create_blueprint(
         configured = current_app.config.get("NEWHORIZONS_PROFILES_DIR")
         return Path(configured) if configured else Path(__file__).resolve().parents[2] / "web" / "profiles"
 
+    def _wiki_root() -> Path:
+        configured = current_app.config.get("NEWHORIZONS_WIKI_ROOT")
+        return Path(configured) if configured else Path(__file__).resolve().parents[2] / "wiki"
+
+    def _wiki_devices_root() -> Path:
+        return _wiki_root() / "devices"
+
+    def _wiki_device_dir(slug: str) -> Path:
+        clean_slug = str(slug or "").strip()
+        if not GATEWAY_ID_PATTERN.fullmatch(clean_slug):
+            raise ValueError("invalid_device")
+        return (_wiki_devices_root() / clean_slug).resolve()
+
+    def _resolve_wiki_path(slug: str, raw_path: str) -> tuple[Path, Path]:
+        device_dir = _wiki_device_dir(slug)
+        relative = Path(str(raw_path or "").strip().strip("/"))
+        target = (device_dir / relative).resolve()
+        try:
+            target.relative_to(device_dir)
+        except ValueError as exc:
+            raise PermissionError("forbidden") from exc
+        return device_dir, target
+
+    def _wiki_item(device_dir: Path, target: Path) -> dict[str, Any] | None:
+        relative = target.relative_to(device_dir).as_posix()
+        if target.is_dir():
+            return {
+                "name": target.name,
+                "path": relative,
+                "is_dir": True,
+                "kind": "directory",
+            }
+        if target.is_file() and target.suffix.lower() == ".md":
+            return {
+                "name": target.name,
+                "path": relative,
+                "is_dir": False,
+                "kind": "markdown",
+                "size": target.stat().st_size,
+            }
+        return None
+
+    def _wiki_sort_key(path: Path) -> tuple[int, str]:
+        name = path.name.lower()
+        return (0 if name == "readme.md" else 1, name)
+
     def _data_dir() -> Path:
         if data_dir_override is not None:
             return data_dir_override
@@ -330,6 +376,103 @@ def create_blueprint(
     @_require_roles("admin")
     def terminal_help() -> Response:
         return json_response({"items": terminal_help_items()})
+
+    @bp.get("/api/wiki/devices")
+    @auth
+    @_require_roles("admin", "user")
+    def wiki_devices() -> Response:
+        root = _wiki_devices_root()
+        if not root.exists():
+            return json_response({"items": []})
+        items: list[dict[str, Any]] = []
+        for child in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+            if not child.is_dir():
+                continue
+            markdown_files = [path for path in child.rglob("*.md") if path.is_file()]
+            items.append(
+                {
+                    "slug": child.name,
+                    "name": child.name,
+                    "path": child.name,
+                    "document_count": len(markdown_files),
+                }
+            )
+        return json_response({"items": items})
+
+    @bp.get("/api/wiki")
+    @auth
+    @_require_roles("admin", "user")
+    def wiki_directory() -> tuple[Response, int] | Response:
+        slug = str(request.args.get("device") or "").strip()
+        if not slug:
+            return json_response({"error": "device_required"}), 400
+        raw_path = str(request.args.get("path") or "").strip()
+        try:
+            device_dir, target = _resolve_wiki_path(slug, raw_path)
+        except ValueError:
+            return json_response({"error": "invalid_device"}), 400
+        except PermissionError:
+            return json_response({"error": "forbidden"}), 403
+        if not device_dir.exists():
+            return json_response({"error": "device_not_found"}), 404
+        if not target.exists():
+            return json_response({"error": "not_found"}), 404
+        if not target.is_dir():
+            return json_response({"error": "directory_required"}), 400
+        directories: list[dict[str, Any]] = []
+        files: list[dict[str, Any]] = []
+        for child in sorted(target.iterdir(), key=_wiki_sort_key):
+            payload = _wiki_item(device_dir, child)
+            if payload is None:
+                continue
+            if payload["is_dir"]:
+                directories.append(payload)
+            else:
+                files.append(payload)
+        current_path = target.relative_to(device_dir).as_posix() if target != device_dir else ""
+        return json_response(
+            {
+                "device": slug,
+                "path": current_path,
+                "items": directories + files,
+            }
+        )
+
+    @bp.get("/api/wiki/document")
+    @auth
+    @_require_roles("admin", "user")
+    def wiki_document() -> tuple[Response, int] | Response:
+        slug = str(request.args.get("device") or "").strip()
+        raw_path = str(request.args.get("path") or "").strip()
+        if not slug:
+            return json_response({"error": "device_required"}), 400
+        if not raw_path:
+            return json_response({"error": "path_required"}), 400
+        try:
+            device_dir, target = _resolve_wiki_path(slug, raw_path)
+        except ValueError:
+            return json_response({"error": "invalid_device"}), 400
+        except PermissionError:
+            return json_response({"error": "forbidden"}), 403
+        if not device_dir.exists():
+            return json_response({"error": "device_not_found"}), 404
+        if not target.exists():
+            return json_response({"error": "not_found"}), 404
+        if target.is_dir() or target.suffix.lower() != ".md":
+            return json_response({"error": "markdown_required"}), 400
+        relative_path = target.relative_to(device_dir).as_posix()
+        github_url = f"https://github.com/wenzi7777/New-Horizons-Desktop/blob/main/wiki/devices/{slug}/{relative_path}"
+        raw_url = f"https://raw.githubusercontent.com/wenzi7777/New-Horizons-Desktop/main/wiki/devices/{slug}/{relative_path}"
+        return json_response(
+            {
+                "device": slug,
+                "path": relative_path,
+                "name": target.name,
+                "content": target.read_text(encoding="utf-8", errors="replace"),
+                "github_url": github_url,
+                "raw_url": raw_url,
+            }
+        )
 
     @bp.post("/api/terminal/execute")
     @auth
