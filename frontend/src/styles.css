@@ -2312,6 +2312,11 @@ button:disabled {
   background: var(--panel);
 }
 
+.list-item.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .list-item-copy {
   min-width: 0;
 }
@@ -2414,6 +2419,46 @@ button:disabled {
   display: grid;
   gap: 14px;
   min-width: 0;
+}
+
+.file-preview-panel {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+}
+
+.file-preview-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.file-preview-header h3,
+.file-preview-header p {
+  margin: 0;
+}
+
+.file-preview-header p {
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.file-preview-content {
+  margin: 0;
+  min-height: 320px;
+  max-height: 68vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .csv-entry-row {

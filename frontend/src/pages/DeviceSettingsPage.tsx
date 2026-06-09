@@ -8,8 +8,8 @@ import { appHref } from "../lib/runtime";
 import { BoardIoModal } from "./TerminalPage";
 
 const DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-latest.json";
-const STANDARD_LOG_BYTES = 16 * 1024;
-const EXTENDED_LOG_BYTES = 32 * 1024;
+const STANDARD_LOG_BYTES = 12 * 1024;
+const EXTENDED_LOG_BYTES = 24 * 1024;
 const DEFAULT_EXTERNAL_LED_BRIGHTNESS = 0.35;
 const EXTERNAL_LED_BRIGHTNESS_OPTIONS = [
   { value: 0.1, labelKey: "brightnessOption_10" },
@@ -620,9 +620,6 @@ function CalibrationWorkbench({
             <button className="button" type="button" disabled={busyCommand === "storage_status" || !deviceUid || isDeviceOffline} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
               {busyCommand === "storage_status" ? t("running") : t("refreshFlashUsage")}
             </button>
-            <button className="button" type="button" disabled={busyCommand === "log_tail" || !deviceUid || isDeviceOffline} onClick={() => void run("Log tail", { command: "log_tail", max_lines: 80 })}>
-              {busyCommand === "log_tail" ? t("running") : "Logs"}
-            </button>
             <a className="button" href={appHref(`device/${encodeURIComponent(deviceUid)}/files`)} target="_blank" rel="noreferrer">
               {t("maintenanceFiles")}
             </a>
@@ -661,7 +658,7 @@ export function DeviceSettingsPage() {
   // The backend hoists memory_status's `data` (heap_*) onto last_status's top
   // level, so read from there; fall back to the fresh memory_status result.
   const memory = recordValue(status.memory ?? (lastResultCommand === "memory_status" ? recordValue(lastResult.data) : undefined) ?? status);
-  const logging = recordValue(status.logging ?? runtime.logging ?? (lastResultCommand === "set_log" ? lastResult.logging : undefined));
+  const logging = recordValue(status.logging ?? runtime.logging ?? (lastResultCommand === "set_log" ? lastResult.log_status ?? lastResult.logging : undefined));
   const otaConfig = recordValue(status.ota ?? status.update_config ?? (lastResultCommand === "set_ota_config" ? lastResult.ota : undefined));
   const storage = recordValue(status.storage ?? (lastResultCommand === "storage_status" ? lastResult : undefined));
   const storageUsage = storageCategories(storage.categories);
@@ -715,7 +712,7 @@ export function DeviceSettingsPage() {
   const [chargeProfile, setChargeProfile] = useState(stringValue(batteryStatus.profile, "compatible"));
   const [imuEnabled, setImuEnabled] = useState(imu.enabled !== false);
   const [logEnabled, setLogEnabled] = useState(logging.enabled !== false);
-  const [logLevel, setLogLevel] = useState(stringValue(logging.level, "info"));
+  const [logLevel, setLogLevel] = useState(stringValue(logging.level, "error"));
   const [logMode, setLogMode] = useState(stringValue(logging.mode, "standard"));
   const [externalLedMode, setExternalLedMode] = useState(stringValue(externalLed.mode, "off"));
   const [brightness, setBrightness] = useState(externalLedBrightnessValue(externalLed.brightness));
@@ -1668,9 +1665,9 @@ export function DeviceSettingsPage() {
               <button className="button primary" type="button" disabled={isCommandBusy("set_log") || !deviceUid} onClick={() => void saveLogSettings()}>
                 {isCommandBusy("set_log") ? t("running") : t("saveLogSettings")}
               </button>
-              <button className="button" type="button" disabled={isCommandBusy("log_tail") || !deviceUid || isDeviceOffline} onClick={() => void run("Log tail", { command: "log_tail", max_lines: 50 })}>
-                {isCommandBusy("log_tail") ? t("running") : "Logs"}
-              </button>
+              <a className="button" href={appHref(`device/${encodeURIComponent(deviceUid)}/files`)} target="_blank" rel="noreferrer">
+                {t("fileBrowser")}
+              </a>
               <button className="button danger" type="button" disabled={isCommandBusy("log_clear") || !deviceUid} onClick={() => void run("Log clear", { command: "log_clear" })}>
                 {isCommandBusy("log_clear") ? t("running") : "Clear logs"}
               </button>
@@ -1679,7 +1676,9 @@ export function DeviceSettingsPage() {
               <DetailBox label={t("paramEnabled")} value={boolString(logging.enabled)} />
               <DetailBox label={t("logLevel")} value={logging.level ?? "-"} />
               <DetailBox label={t("logMode")} value={logging.mode ?? "-"} />
-              <DetailBox label="Max bytes" value={logging.max_bytes ?? "-"} />
+              <DetailBox label="Max bytes" value={logging.max_bytes ? bytesLabel(logging.max_bytes) : "-"} />
+              <DetailBox label={t("logFlashFootprint")} value={logging.effective_total_bytes ? bytesLabel(logging.effective_total_bytes) : "-"} />
+              <DetailBox label={t("logCurrentBytes")} value={logging.bytes !== undefined ? bytesLabel(logging.bytes) : "-"} />
             </div>
           </div>
         </div>

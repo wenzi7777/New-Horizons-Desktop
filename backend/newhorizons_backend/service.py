@@ -649,12 +649,15 @@ class NewHorizonsService:
                 "enabled": bool(request.get("enabled", True)),
             }
         elif command == "set_log" and ok:
-            logging_data = data.get("logging") if isinstance(data.get("logging"), dict) else {}
+            logging_data = data.get("log_status") if isinstance(data.get("log_status"), dict) else {}
+            if not logging_data:
+                logging_data = data.get("logging") if isinstance(data.get("logging"), dict) else {}
             payload["logging"] = logging_data or {
                 "enabled": bool(request.get("enabled", True)),
-                "level": request.get("level", "info"),
+                "level": request.get("level", "error"),
                 "mode": request.get("mode", "standard"),
-                "max_bytes": int(request.get("max_bytes", 16384) or 16384),
+                "max_bytes": int(request.get("max_bytes", 12288) or 12288),
+                "effective_total_bytes": int(request.get("max_bytes", 12288) or 12288) * 2,
             }
         elif command == "set_ota_config" and ok:
             ota_data = data.get("ota") if isinstance(data.get("ota"), dict) else {}
@@ -1420,11 +1423,13 @@ class NewHorizonsService:
                 status["imu"] = imu
             elif command == "set_log":
                 mode = str(payload.get("mode") or "standard")
+                max_bytes = int(payload.get("max_bytes") or (24576 if mode == "extended" else 12288))
                 logging_cfg.update({
                     "enabled": bool(payload.get("enabled", True)),
                     "mode": mode,
-                    "level": str(payload.get("level") or "info"),
-                    "max_bytes": int(payload.get("max_bytes") or (32768 if mode == "extended" else 16384)),
+                    "level": str(payload.get("level") or "error"),
+                    "max_bytes": max_bytes,
+                    "effective_total_bytes": max_bytes * 2,
                 })
                 runtime["logging"] = logging_cfg
                 status["logging"] = logging_cfg
@@ -1468,7 +1473,20 @@ class NewHorizonsService:
 
             runtime["transport"] = transport or runtime.get("transport") or {"mode": "udp"}
             runtime.setdefault("mode", status.get("mode", "normal"))
-            runtime.setdefault("logging", logging_cfg or {"enabled": True, "capacity": "default", "serial": "status"})
+            runtime.setdefault(
+                "logging",
+                logging_cfg or {
+                    "enabled": True,
+                    "capacity": "standard",
+                    "serial": "status",
+                    "level": "error",
+                    "mode": "standard",
+                    "max_bytes": 12288,
+                    "effective_total_bytes": 24576,
+                    "bytes": 0,
+                    "path": "/logs/device.log",
+                },
+            )
             status["runtime"] = runtime
             status["mode"] = runtime.get("mode", status.get("mode", "normal"))
             status["logging"] = runtime.get("logging", status.get("logging", {}))
@@ -2622,7 +2640,17 @@ class NewHorizonsService:
                 "protocol": "NHO/Arduino/1",
             },
             "matrix_shape": shape,
-            "logging": {"enabled": True, "capacity": "default", "serial": "status"},
+            "logging": {
+                "enabled": True,
+                "capacity": "standard",
+                "serial": "status",
+                "level": "error",
+                "mode": "standard",
+                "max_bytes": 12288,
+                "effective_total_bytes": 24576,
+                "bytes": 0,
+                "path": "/logs/device.log",
+            },
             "services": self._mock_services(mode=mode),
             "memory": {
                 "heap_free": 154624,
@@ -2670,7 +2698,17 @@ class NewHorizonsService:
                 },
                 "scan_timing": {"target_fps": 60, "settle_us": 20, "send_every_n_frames": 1},
                 "stream_buffer": {"enabled": True, "mode": "standard", "depth_frames": 3},
-                "logging": {"enabled": True, "capacity": "default", "serial": "status"},
+                "logging": {
+                    "enabled": True,
+                    "capacity": "standard",
+                    "serial": "status",
+                    "level": "error",
+                    "mode": "standard",
+                    "max_bytes": 12288,
+                    "effective_total_bytes": 24576,
+                    "bytes": 0,
+                    "path": "/logs/device.log",
+                },
                 "imu": {
                     "enabled": True,
                     "runtime_enabled": True,

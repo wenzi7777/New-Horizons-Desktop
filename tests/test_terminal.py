@@ -152,6 +152,20 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertEqual(compiled["payload"]["mode"], "extended")
         self.assertEqual(payload["command"], "set_stream_buffer")
 
+    def test_set_log_defaults_to_error_and_new_capacity_limits(self):
+        compiled = compile_terminal_command("set-log")
+        payload = validate_device_command_payload(compiled["payload"])
+
+        self.assertEqual(compiled["payload"]["command"], "set_log")
+        self.assertTrue(compiled["payload"]["enabled"])
+        self.assertEqual(compiled["payload"]["level"], "error")
+        self.assertEqual(compiled["payload"]["mode"], "standard")
+        self.assertEqual(compiled["payload"]["max_bytes"], 12288)
+        self.assertEqual(payload["command"], "set_log")
+
+        extended = compile_terminal_command("set-log --mode extended")
+        self.assertEqual(extended["payload"]["max_bytes"], 24576)
+
     def test_terminal_wait_for_result_keeps_stream_buffer_and_storage_status_fallbacks(self):
         source = TERMINAL_PAGE.read_text(encoding="utf-8")
 

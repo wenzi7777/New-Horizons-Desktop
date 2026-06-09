@@ -300,7 +300,7 @@ class ArduinoControlTcpTest(unittest.TestCase):
                         "enabled": True,
                         "level": "debug",
                         "mode": "extended",
-                        "max_bytes": 32768,
+                        "max_bytes": 24576,
                     }
                 },
                 "error": "",
@@ -309,7 +309,7 @@ class ArduinoControlTcpTest(unittest.TestCase):
 
         device = service.get_device("3CDC7545CCD0")
         self.assertEqual(device["last_status"]["logging"]["mode"], "extended")
-        self.assertEqual(device["last_status"]["logging"]["max_bytes"], 32768)
+        self.assertEqual(device["last_status"]["logging"]["max_bytes"], 24576)
 
     def test_arduino_charge_profile_response_updates_battery_status(self):
         service = NewHorizonsService(mock_mode=False)

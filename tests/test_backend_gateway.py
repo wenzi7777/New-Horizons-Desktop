@@ -894,7 +894,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
                 "enabled": True,
                 "mode": "extended",
                 "level": "debug",
-                "max_bytes": 32768,
+                "max_bytes": 24576,
                 "request_id": "req-log",
             },
         )

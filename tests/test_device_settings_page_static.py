@@ -270,19 +270,26 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('disabled={isCommandBusy("status") || !deviceUid || isDeviceOffline}', source)
         self.assertIn('disabled={isCommandBusy("findme_discover") || !deviceUid || isDeviceOffline}', source)
         self.assertIn('disabled={busyCommand === "storage_status" || !deviceUid || isDeviceOffline}', source)
-        self.assertIn('disabled={busyCommand === "log_tail" || !deviceUid || isDeviceOffline}', source)
         self.assertIn('disabled={busyCommand === "calibration_status" || !deviceUid || isDeviceOffline}', source)
 
     def test_flash_tab_exposes_log_settings(self):
         source = SETTINGS_PAGE.read_text()
+        i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
 
         self.assertIn("logEnabled", source)
         self.assertIn("logLevel", source)
         self.assertIn("logMode", source)
         self.assertIn('command: "set_log"', source)
         self.assertIn("max_bytes", source)
+        self.assertIn('const STANDARD_LOG_BYTES = 12 * 1024;', source)
+        self.assertIn('const EXTENDED_LOG_BYTES = 24 * 1024;', source)
+        self.assertIn('useState(stringValue(logging.level, "error"))', source)
         self.assertIn('value="standard"', source)
         self.assertIn('value="extended"', source)
+        self.assertIn('<option value="warn">warn</option>', source)
+        self.assertNotIn("warning", source)
+        self.assertIn('logModeStandard: "Standard 12KB (up to 24KB on flash)"', i18n)
+        self.assertIn('logModeExtended: "Extended 24KB (up to 48KB on flash)"', i18n)
 
     def test_maintenance_section_exposes_calibration_workbench_commands(self):
         source = SETTINGS_PAGE.read_text()
@@ -300,7 +307,6 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
             'command: "calibration_dump_level"',
             'command: "calibration_delete_level"',
             'command: "storage_status"',
-            'command: "log_tail"',
             'command: "log_clear"',
         ):
             self.assertIn(command, source)
@@ -450,6 +456,19 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
             self.assertIn(command, source)
         for legacy in ("file_download_begin", "file_download_chunk", "file_upload_begin", "file_upload_chunk", "file_upload_finish", "offlineSegmentToCsv"):
             self.assertNotIn(legacy, source)
+
+    def test_device_files_page_defaults_to_log_preview_workspace(self):
+        source = (ROOT / "frontend" / "src" / "pages" / "DeviceFilesPage.tsx").read_text(encoding="utf-8")
+
+        self.assertIn('const [activeScope, setActiveScope] = useState<FileScope>("logs")', source)
+        self.assertIn("selectedFile", source)
+        self.assertIn("previewOpen", source)
+        self.assertIn("previewText", source)
+        self.assertIn("device.log", source)
+        self.assertIn("device.log.1", source)
+        self.assertIn("setPreviewOpen(false)", source)
+        self.assertIn("file-preview-panel", source)
+        self.assertIn('t("preview")', source)
 
 
 if __name__ == "__main__":

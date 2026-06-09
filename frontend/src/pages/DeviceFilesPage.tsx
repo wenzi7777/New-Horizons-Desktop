@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { useI18n } from "../i18n";
@@ -37,6 +37,13 @@ function normalizeItems(result: Record<string, unknown> | null | undefined, scop
     .filter((item) => item.path);
 }
 
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
 export function DeviceFilesPage() {
   const { t } = useI18n();
   const { deviceUid = "" } = useParams();
@@ -46,7 +53,7 @@ export function DeviceFilesPage() {
   const normalized = device ? normalizeDevice(device) : null;
   const maintenanceMode = normalized?.mode === "maintenance" || normalized?.mode === "safe_maintenance" || normalized?.mode === "SafeMaintenance";
 
-  const [activeScope, setActiveScope] = useState<FileScope>("user");
+  const [activeScope, setActiveScope] = useState<FileScope>("logs");
   const [itemsByScope, setItemsByScope] = useState<Record<FileScope, DeviceFileEntry[]>>({
     user: [],
     logs: [],
@@ -55,6 +62,11 @@ export function DeviceFilesPage() {
   const [statusMessage, setStatusMessage] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadPath, setUploadPath] = useState("");
+  const [selectedFile, setSelectedFile] = useState<DeviceFileEntry | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(true);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [previewText, setPreviewText] = useState("");
 
   const items = useMemo(() => itemsByScope[activeScope], [activeScope, itemsByScope]);
 
@@ -64,6 +76,74 @@ export function DeviceFilesPage() {
     setItemsByScope((current) => ({ ...current, [scope]: nextItems }));
     setStatusMessage(`${t("fileListUpdated")}: ${scope}`);
   }
+
+  useEffect(() => {
+    if (!deviceUid) return;
+    if (activeScope === "logs") {
+      setPreviewOpen(true);
+    }
+    void refreshScope(activeScope);
+  }, [activeScope, deviceUid]);
+
+  useEffect(() => {
+    if (activeScope !== "logs") {
+      setSelectedFile(null);
+      setPreviewError("");
+      setPreviewText("");
+      return;
+    }
+    const nextSelected = items.find((item) => item.path === (selectedFile?.path ?? ""))
+      ?? items.find((item) => item.path === "device.log")
+      ?? items.find((item) => item.path === "device.log.1")
+      ?? items[0]
+      ?? null;
+    if (nextSelected?.path !== selectedFile?.path) {
+      setSelectedFile(nextSelected);
+    }
+  }, [activeScope, items, selectedFile?.path]);
+
+  useEffect(() => {
+    if (activeScope !== "logs" || !previewOpen || !selectedFile) return;
+    let cancelled = false;
+    const file = selectedFile;
+
+    async function loadPreview() {
+      setPreviewLoading(true);
+      setPreviewError("");
+      try {
+        const begin = await queue({ command: "file_read_begin", scope: file.scope, path: file.path });
+        const size = Number(begin.result?.size ?? file.size ?? 0);
+        const length = Math.min(size || 32768, 32768);
+        const offset = Math.max(size - length, 0);
+        const chunk = await queue({
+          command: "file_read_chunk",
+          scope: file.scope,
+          path: file.path,
+          offset,
+          length,
+        });
+        const data = String(chunk.result?.data ?? "");
+        const bytes = /^[0-9a-fA-F]*$/.test(data) ? hexToBytes(data) : new TextEncoder().encode(data);
+        if (!cancelled) {
+          setPreviewText(new TextDecoder().decode(bytes));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPreviewText("");
+          setPreviewError(error instanceof Error ? error.message : "request_failed");
+        }
+      } finally {
+        if (!cancelled) {
+          setPreviewLoading(false);
+        }
+      }
+    }
+
+    void loadPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeScope, previewOpen, queue, selectedFile]);
 
   async function downloadFileBytes(file: DeviceFileEntry) {
     const begin = await queue({ command: "file_read_begin", scope: file.scope, path: file.path });
@@ -164,7 +244,7 @@ export function DeviceFilesPage() {
             {t("refresh")}
           </button>
         </aside>
-        <article className="panel span-8">
+        <article className={`panel ${activeScope === "logs" && previewOpen ? "span-5" : "span-8"}`}>
           {activeScope === "user" ? (
             <div className="upload-panel">
               <div className="field-grid">
@@ -185,12 +265,17 @@ export function DeviceFilesPage() {
           <div className="list">
             {items.length === 0 ? <div className="empty">{t("emptyFiles")}</div> : null}
             {items.map((file) => (
-              <div key={`${file.scope}:${file.path}`} className="list-item">
+              <div key={`${file.scope}:${file.path}`} className={`list-item${selectedFile?.path === file.path ? " selected" : ""}`}>
                 <div className="list-item-copy">
                   <strong>{file.name || file.path}</strong>
-                  <span>{file.scope} / {file.path} / {file.size ?? 0} B</span>
+                  <span>{file.scope} / {file.path} / {formatFileSize(Number(file.size ?? 0))}</span>
                 </div>
                 <div className="actions compact">
+                  {file.scope === "logs" ? (
+                    <button className="button" disabled={running} type="button" onClick={() => { setSelectedFile(file); setPreviewOpen(true); }}>
+                      {t("preview")}
+                    </button>
+                  ) : null}
                   <button className="button primary" disabled={running || !maintenanceMode} type="button" onClick={() => void downloadFile(file)}>
                     {t("download")}
                   </button>
@@ -203,6 +288,28 @@ export function DeviceFilesPage() {
           </div>
           {statusMessage ? <p className="notice success">{statusMessage}</p> : null}
         </article>
+        {activeScope === "logs" && previewOpen ? (
+          <article className="panel span-3 file-preview-panel">
+            <div className="file-preview-header">
+              <div>
+                <h3>{t("preview")}</h3>
+                <p>{selectedFile?.path ?? "device.log"}</p>
+              </div>
+              <button className="button" type="button" onClick={() => setPreviewOpen(false)}>
+                {t("hidePreview")}
+              </button>
+            </div>
+            <div className="csv-preview-summary">
+              <div>
+                <span>{t("logCurrentBytes")}</span>
+                <strong>{formatFileSize(Number(selectedFile?.size ?? 0))}</strong>
+              </div>
+            </div>
+            {previewLoading ? <p className="notice">{t("loadingPreview")}</p> : null}
+            {previewError ? <p className="notice error">{previewError}</p> : null}
+            {!previewLoading && !previewError ? <pre className="file-preview-content">{previewText}</pre> : null}
+          </article>
+        ) : null}
       </section>
     </>
   );

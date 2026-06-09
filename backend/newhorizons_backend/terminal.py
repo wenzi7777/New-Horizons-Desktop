@@ -400,9 +400,9 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         payload = {
             "command": "set_log",
             "enabled": _as_bool(parsed.get("enabled", "true")),
-            "level": parsed.get("level", "info"),
+            "level": parsed.get("level", "error"),
             "mode": mode,
-            "max_bytes": int(parsed.get("max_bytes", 32768 if mode == "extended" else 16384)),
+            "max_bytes": int(parsed.get("max_bytes", 24576 if mode == "extended" else 12288)),
         }
         return {"command": "set_log", "payload": payload, "argv": argv}
 
