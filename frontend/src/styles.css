@@ -2540,6 +2540,31 @@ button:disabled {
   line-height: 1.55;
 }
 
+.download-progress {
+  position: relative;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+}
+
+.download-progress-bar {
+  position: absolute;
+  inset: 0;
+  background: var(--accent-soft);
+  transition: width 0.15s ease;
+}
+
+.download-progress span {
+  position: relative;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 .csv-entry-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { api, type DeviceEntry } from "./api";
 import { deviceStatusToken, resultFromDeviceState } from "./device";
@@ -12,36 +12,37 @@ function findDevice(items: DeviceEntry[], deviceUid: string) {
   return items.find((device) => device.device_uid === deviceUid);
 }
 
+async function waitForResult(
+  deviceUid: string,
+  requestId: string,
+  command: string,
+  previousStatusToken = "",
+  timeoutMs = 20000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await sleep(500);
+    const response = await api.devices();
+    const device = findDevice(response.items, deviceUid);
+    const result = device?.last_result;
+    if (result && String(result.request_id ?? "") === requestId) {
+      return result as Record<string, unknown>;
+    }
+    if (device && deviceStatusToken(device) !== previousStatusToken) {
+      const stateResult = resultFromDeviceState(command, requestId, device);
+      if (stateResult) {
+        return stateResult;
+      }
+    }
+  }
+  return null;
+}
+
 export function useDeviceCommand(deviceUid: string) {
   const [running, setRunning] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
-  async function waitForResult(
-    requestId: string,
-    command: string,
-    previousStatusToken = "",
-    timeoutMs = 20000,
-  ) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      await sleep(500);
-      const response = await api.devices();
-      const device = findDevice(response.items, deviceUid);
-      const result = device?.last_result;
-      if (result && String(result.request_id ?? "") === requestId) {
-        return result as Record<string, unknown>;
-      }
-      if (device && deviceStatusToken(device) !== previousStatusToken) {
-        const stateResult = resultFromDeviceState(command, requestId, device);
-        if (stateResult) {
-          return stateResult;
-        }
-      }
-    }
-    return null;
-  }
-
-  async function queue(payload: Record<string, unknown>, timeoutMs?: number) {
+  const queue = useCallback(async (payload: Record<string, unknown>, timeoutMs?: number) => {
     if (!deviceUid) throw new Error("device_uid_required");
     setRunning(true);
     setErrorMessage("");
@@ -58,13 +59,13 @@ export function useDeviceCommand(deviceUid: string) {
         }
         const requestId = response.queued?.request_id ?? String(response.queued?.items[0]?.payload?.request_id ?? payload.request_id ?? "");
         const queuedCommand = String(payload.command ?? response.queued?.items[0]?.payload?.command ?? "");
-        const result = requestId ? await waitForResult(requestId, queuedCommand, previousStatusToken, defaultTimeout) : null;
+        const result = requestId ? await waitForResult(deviceUid, requestId, queuedCommand, previousStatusToken, defaultTimeout) : null;
         return { queued: response.queued, result };
       } catch {
         const queued = await api.queueDeviceCommand(deviceUid, payload);
         const requestId = queued.request_id ?? String(queued.items[0]?.payload?.request_id ?? "");
         const queuedCommand = String(payload.command ?? queued.items[0]?.payload?.command ?? "");
-        const result = requestId ? await waitForResult(requestId, queuedCommand, previousStatusToken, defaultTimeout) : null;
+        const result = requestId ? await waitForResult(deviceUid, requestId, queuedCommand, previousStatusToken, defaultTimeout) : null;
         return { queued, result };
       }
     } catch (error) {
@@ -74,7 +75,7 @@ export function useDeviceCommand(deviceUid: string) {
     } finally {
       setRunning(false);
     }
-  }
+  }, [deviceUid]);
 
   return { queue, running, errorMessage };
 }

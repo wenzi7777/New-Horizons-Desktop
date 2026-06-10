@@ -74,6 +74,7 @@ export function DeviceFilesPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [previewText, setPreviewText] = useState("");
+  const [downloadProgress, setDownloadProgress] = useState<{ loaded: number; total: number } | null>(null);
 
   const items = useMemo(() => itemsByScope[activeScope], [activeScope, itemsByScope]);
 
@@ -150,20 +151,26 @@ export function DeviceFilesPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeScope, previewOpen, queue, selectedFile]);
+  // queue is stable (useCallback in useDeviceCommand) — intentionally omitted from deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScope, previewOpen, selectedFile]);
 
-  async function downloadFileBytes(file: DeviceFileEntry) {
+  async function downloadFileBytes(
+    file: DeviceFileEntry,
+    onProgress?: (loaded: number, total: number) => void,
+  ) {
     const begin = await queue({ command: "file_read_begin", scope: file.scope, path: file.path });
     const size = Number(begin.result?.size ?? file.size ?? 0);
     let offset = 0;
     const chunks: Uint8Array[] = [];
+    onProgress?.(0, size);
     while (offset < size || chunks.length === 0) {
       const chunk = await queue({
         command: "file_read_chunk",
         scope: file.scope,
         path: file.path,
         offset,
-        length: 1024,
+        length: 4096,
       });
       const data = String(chunk.result?.data ?? "");
       const bytes = /^[0-9a-fA-F]*$/.test(data) ? hexToBytes(data) : new TextEncoder().encode(data);
@@ -171,6 +178,7 @@ export function DeviceFilesPage() {
       const nextOffset = Number(chunk.result?.next_offset ?? offset + bytes.length);
       const hasMore = Boolean(chunk.result?.has_more ?? nextOffset < size);
       offset = nextOffset;
+      onProgress?.(Math.min(offset, size), size);
       if (!hasMore) break;
     }
     const merged = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0));
@@ -183,7 +191,8 @@ export function DeviceFilesPage() {
   }
 
   async function downloadFile(file: DeviceFileEntry) {
-    const bytes = await downloadFileBytes(file);
+    setDownloadProgress({ loaded: 0, total: Number(file.size ?? 0) });
+    const bytes = await downloadFileBytes(file, (loaded, total) => setDownloadProgress({ loaded, total }));
     const blob = new Blob([bytes]);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -193,6 +202,7 @@ export function DeviceFilesPage() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    setDownloadProgress(null);
     setStatusMessage(`${t("download")}: ${file.path}`);
   }
 
@@ -293,6 +303,12 @@ export function DeviceFilesPage() {
               </div>
             ))}
           </div>
+          {downloadProgress ? (
+            <div className="download-progress">
+              <div className="download-progress-bar" style={{ width: `${downloadProgress.total > 0 ? Math.round((downloadProgress.loaded / downloadProgress.total) * 100) : 0}%` }} />
+              <span>{formatFileSize(downloadProgress.loaded)} / {formatFileSize(downloadProgress.total)}</span>
+            </div>
+          ) : null}
           {statusMessage ? <p className="notice success">{statusMessage}</p> : null}
         </article>
         {activeScope === "logs" && previewOpen && selectedFile ? (
