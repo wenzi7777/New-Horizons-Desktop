@@ -665,6 +665,18 @@ class NewHorizonsService:
                 "auto_apply_on_boot": bool(request.get("auto_apply_on_boot", False)),
                 "manifest_url": request.get("manifest_url", ""),
             }
+        elif command == "enter_maintenance" and ok:
+            runtime_data = data.get("runtime") if isinstance(data.get("runtime"), dict) else {}
+            payload["mode"] = "maintenance"
+            payload["scan_stopped"] = True
+            payload["maintenance_reason"] = request.get("reason", "")
+            payload["runtime"] = {**runtime_data, "mode": "maintenance"}
+        elif command == "exit_maintenance" and ok:
+            runtime_data = data.get("runtime") if isinstance(data.get("runtime"), dict) else {}
+            payload["mode"] = "normal"
+            payload["scan_stopped"] = False
+            payload["maintenance_reason"] = ""
+            payload["runtime"] = {**runtime_data, "mode": "normal"}
         elif command == "check_update" and ok:
             payload["update_state"] = {
                 "phase": "ready" if payload.get("available") else ("error" if payload.get("error") else "current"),
@@ -724,6 +736,8 @@ class NewHorizonsService:
             "set_indicators",
             "set_log",
             "set_ota_config",
+            "enter_maintenance",
+            "exit_maintenance",
             "check_update",
             "apply_update",
         } or command == "query"
@@ -1894,7 +1908,7 @@ class NewHorizonsService:
     def _is_status_snapshot_result(payload: dict[str, Any]) -> bool:
         command = str(payload.get("command") or "")
         message = str(payload.get("message") or "")
-        return command in ("status", "query", "memory_status", "scan_health", "storage_status", "set_log", "set_ota_config", "check_update") or message in (
+        return command in ("status", "query", "memory_status", "scan_health", "storage_status", "set_log", "set_ota_config", "check_update", "enter_maintenance", "exit_maintenance") or message in (
             "status",
             "memory_status",
             "scan_health",
@@ -1903,6 +1917,8 @@ class NewHorizonsService:
             "ota_config_updated",
             "update_checked",
             "stream_buffer_updated",
+            "maintenance_entered",
+            "maintenance_exited",
         )
 
     def _record_parsed(self, device_uid: str, payload: dict[str, Any], source: str) -> None:
@@ -2269,6 +2285,20 @@ class NewHorizonsService:
             result["request_id"] = request_id
             result.setdefault("status", "ok")
             result.setdefault("message", command)
+            return result
+        if command == "enter_maintenance" and str(payload.get("mode") or "") == "maintenance":
+            result = dict(payload)
+            result["command"] = command
+            result["request_id"] = request_id
+            result.setdefault("status", "ok")
+            result.setdefault("message", "maintenance_entered")
+            return result
+        if command == "exit_maintenance" and str(payload.get("mode") or "") == "normal":
+            result = dict(payload)
+            result["command"] = command
+            result["request_id"] = request_id
+            result.setdefault("status", "ok")
+            result.setdefault("message", "maintenance_exited")
             return result
 
         operation = str(state.get("operation") or "")

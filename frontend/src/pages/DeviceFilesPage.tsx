@@ -108,6 +108,8 @@ export function DeviceFilesPage() {
   const storageTotal = Number(storage.total_bytes ?? 0);
   const storageUsed = Number(storage.used_bytes ?? 0);
   const storageUsage = storageCategories(storage.categories);
+  const isUserScope = activeScope === "user";
+  const maintenanceBadgeClass = maintenanceMode ? "maintenance" : "normal";
 
   async function refreshStorage() {
     const response = await queue({ command: "storage_status" });
@@ -310,68 +312,85 @@ export function DeviceFilesPage() {
           </button>
         </aside>
         <article className={`panel ${activeScope === "logs" && previewOpen ? "span-4" : "span-8"}`}>
-          <div className="storage-card">
-            <div className="storage-card-header">
-              <span>{t("deviceStorage")}</span>
-              <strong>{storageTotal ? `${formatFileSize(storageUsed)} / ${formatFileSize(storageTotal)}` : t("flashUnavailable")}</strong>
-            </div>
-            <div className="storage-bar-track" aria-label={t("deviceStorage")}>
-              {storageUsage.length > 0 ? storageUsage.map((item) => (
-                <span
-                  key={item.scope}
-                  className={`storage-segment ${item.scope}`}
-                  style={{ width: `${percent(item.bytes, storageTotal)}%` }}
-                />
-              )) : null}
-            </div>
-            <div className="storage-summary">
-              <span>{t("used")}: {formatFileSize(storageUsed)}</span>
-              <span>{t("free")}: {formatFileSize(Number(storage.free_bytes ?? 0))}</span>
-              <span>{t("total")}: {storageTotal ? formatFileSize(storageTotal) : "-"}</span>
-            </div>
-            <div className="storage-legend">
-              {storageUsage.length === 0 ? <span>{t("flashUnavailable")}</span> : null}
-              {storageUsage.map((item) => (
-                <span key={item.scope}>
-                  <i className={`storage-dot ${item.scope}`} />
-                  {item.scope}: {formatFileSize(item.bytes)}
-                </span>
-              ))}
-            </div>
-          </div>
-          {activeScope === "user" ? (
-            <div className="upload-panel">
+          <div className="file-ops-toolbar">
+            <div className="storage-card">
               <div className="storage-card-header">
-                <span>{t("maintenanceModeLabel")}</span>
-                <strong>{maintenanceMode ? t("enabledState") : t("disabledState")}</strong>
-              </div>
-              <div className="actions compact">
-                <button className="button primary" type="button" disabled={running || !deviceUid || maintenanceMode} onClick={() => void toggleMaintenance(true)}>
-                  {t("enterMaintenance")}
-                </button>
-                <button className="button" type="button" disabled={running || !deviceUid || !maintenanceMode} onClick={() => void toggleMaintenance(false)}>
-                  {t("exitMaintenance")}
-                </button>
+                <div className="storage-card-header-copy">
+                  <span>{t("deviceStorage")}</span>
+                  <strong>{storageTotal ? `${formatFileSize(storageUsed)} / ${formatFileSize(storageTotal)}` : t("flashUnavailable")}</strong>
+                </div>
                 <button className="button" type="button" disabled={running || !deviceUid} onClick={() => void refreshStorage()}>
                   {t("refreshFlashUsage")}
                 </button>
               </div>
-              {!maintenanceMode ? <p className="notice">{t("fileWriteRequiresMaintenance")}</p> : null}
-              <div className="field-grid">
-                <div className="field">
-                  <label>{t("upload")}</label>
-                  <input type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
+              <div className="storage-bar-track" aria-label={t("deviceStorage")}>
+                {storageUsage.length > 0 ? storageUsage.map((item) => (
+                  <span
+                    key={item.scope}
+                    className={`storage-segment ${item.scope}`}
+                    style={{ width: `${percent(item.bytes, storageTotal)}%` }}
+                  />
+                )) : null}
+              </div>
+              <div className="storage-stat-grid">
+                <div>
+                  <span>{t("used")}</span>
+                  <strong>{formatFileSize(storageUsed)}</strong>
                 </div>
-                <div className="field">
-                  <label>{t("paramPath")}</label>
-                  <input value={uploadPath} onChange={(event) => setUploadPath(event.target.value)} placeholder={uploadFile?.name ?? "configs/profile.json"} />
+                <div>
+                  <span>{t("free")}</span>
+                  <strong>{formatFileSize(Number(storage.free_bytes ?? 0))}</strong>
+                </div>
+                <div>
+                  <span>{t("total")}</span>
+                  <strong>{storageTotal ? formatFileSize(storageTotal) : "-"}</strong>
                 </div>
               </div>
-              <button className="button primary" type="button" disabled={running || !uploadFile || !maintenanceMode} onClick={() => void uploadSelectedFile()}>
-                {t("upload")}
-              </button>
+              <div className="storage-legend">
+                {storageUsage.length === 0 ? <span>{t("flashUnavailable")}</span> : null}
+                {storageUsage.map((item) => (
+                  <span key={item.scope}>
+                    <i className={`storage-dot ${item.scope}`} />
+                    {item.scope}: {formatFileSize(item.bytes)}
+                  </span>
+                ))}
+              </div>
             </div>
-          ) : null}
+            {isUserScope ? (
+              <div className="maintenance-strip">
+                <div className="maintenance-strip-header">
+                  <div className="maintenance-strip-copy">
+                    <span>{t("maintenanceModeLabel")}</span>
+                    <strong className={`device-badge ${maintenanceBadgeClass}`}>
+                      {maintenanceMode ? t("enabledState") : t("disabledState")}
+                    </strong>
+                  </div>
+                  <div className="actions compact maintenance-strip-actions">
+                    <button className="button primary" type="button" disabled={running || !deviceUid || maintenanceMode} onClick={() => void toggleMaintenance(true)}>
+                      {t("enterMaintenance")}
+                    </button>
+                    <button className="button" type="button" disabled={running || !deviceUid || !maintenanceMode} onClick={() => void toggleMaintenance(false)}>
+                      {t("exitMaintenance")}
+                    </button>
+                  </div>
+                </div>
+                {!maintenanceMode ? <p className="field-note maintenance-hint">{t("fileWriteRequiresMaintenance")}</p> : null}
+                <div className="upload-inline-form">
+                  <div className="field upload-field">
+                    <label>{t("upload")}</label>
+                    <input type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
+                  </div>
+                  <div className="field upload-path-field">
+                    <label>{t("paramPath")}</label>
+                    <input value={uploadPath} onChange={(event) => setUploadPath(event.target.value)} placeholder={uploadFile?.name ?? "configs/profile.json"} />
+                  </div>
+                  <button className="button primary upload-submit" type="button" disabled={running || !uploadFile || !maintenanceMode} onClick={() => void uploadSelectedFile()}>
+                    {t("upload")}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
           <div className="list">
             {items.length === 0 ? <div className="empty">{t("emptyFiles")}</div> : null}
             {items.map((file) => (

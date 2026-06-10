@@ -274,6 +274,24 @@ class ArduinoControlTcpTest(unittest.TestCase):
         self.assertEqual(device["last_status"]["storage"]["total_bytes"], 1000)
         self.assertEqual(device["last_status"]["storage"]["categories"][0]["scope"], "user")
 
+    def test_arduino_enter_maintenance_response_updates_status_cache(self):
+        service = NewHorizonsService(mock_mode=False)
+        service._record_arduino_response(
+            "3CDC7545CCD0",
+            {"command": "enter_maintenance", "request_id": "req-maint"},
+            {
+                "ok": True,
+                "cmd": "enter_maintenance",
+                "message": "maintenance_entered",
+                "data": {},
+                "error": "",
+            },
+        )
+
+        device = service.get_device("3CDC7545CCD0")
+        self.assertEqual(device["last_status"]["mode"], "maintenance")
+        self.assertEqual(device["mode"], "maintenance")
+
     def test_arduino_imu_response_updates_runtime_status_and_filter_is_not_ui_command(self):
         service = NewHorizonsService(mock_mode=False)
         service._record_arduino_response(
