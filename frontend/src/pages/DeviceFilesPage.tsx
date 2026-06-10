@@ -23,17 +23,24 @@ function hexToBytes(hex: string) {
 }
 
 function normalizeItems(result: Record<string, unknown> | null | undefined, scope: FileScope): DeviceFileEntry[] {
-  const rawItems = Array.isArray(result?.items) ? result.items : [];
+  const rawItems = Array.isArray(result?.items) ? result.items
+    : Array.isArray(result?.data) ? result.data
+    : [];
   return rawItems
     .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
     .filter((item) => !item.is_dir)
-    .map((item) => ({
-      scope: String(item.scope ?? scope),
-      path: String(item.path ?? ""),
-      name: String(item.name ?? item.path ?? ""),
-      size: Number(item.size ?? 0),
-      is_dir: Boolean(item.is_dir),
-    }))
+    .map((item) => {
+      const rawPath = String(item.path ?? "");
+      const scopePrefix = `/${scope}/`;
+      const relativePath = rawPath.startsWith(scopePrefix) ? rawPath.slice(scopePrefix.length) : rawPath;
+      return {
+        scope: String(item.scope ?? scope),
+        path: relativePath,
+        name: String(item.name ?? relativePath ?? ""),
+        size: Number(item.size ?? 0),
+        is_dir: Boolean(item.is_dir),
+      };
+    })
     .filter((item) => item.path);
 }
 
@@ -244,7 +251,7 @@ export function DeviceFilesPage() {
             {t("refresh")}
           </button>
         </aside>
-        <article className={`panel ${activeScope === "logs" && previewOpen ? "span-5" : "span-8"}`}>
+        <article className={`panel ${activeScope === "logs" && previewOpen ? "span-4" : "span-8"}`}>
           {activeScope === "user" ? (
             <div className="upload-panel">
               <div className="field-grid">
@@ -288,12 +295,12 @@ export function DeviceFilesPage() {
           </div>
           {statusMessage ? <p className="notice success">{statusMessage}</p> : null}
         </article>
-        {activeScope === "logs" && previewOpen ? (
-          <article className="panel span-3 file-preview-panel">
+        {activeScope === "logs" && previewOpen && selectedFile ? (
+          <article className="panel span-4 file-preview-panel">
             <div className="file-preview-header">
               <div>
                 <h3>{t("preview")}</h3>
-                <p>{selectedFile?.path ?? "device.log"}</p>
+                <p>{selectedFile.path}</p>
               </div>
               <button className="button" type="button" onClick={() => setPreviewOpen(false)}>
                 {t("hidePreview")}
