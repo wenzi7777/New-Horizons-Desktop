@@ -469,6 +469,8 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("setPreviewOpen(false)", source)
         self.assertIn("file-preview-panel", source)
         self.assertIn('t("preview")', source)
+        self.assertIn("chunkResult.data", source)
+        self.assertNotIn('String(chunk.result?.data ?? "")', source)
 
 
 if __name__ == "__main__":

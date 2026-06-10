@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 
 import { api, type DeviceEntry } from "./api";
+import { normalizeCommandResult } from "./commandResult";
 import { deviceStatusToken, resultFromDeviceState } from "./device";
 import { sendDeviceCommand } from "./wsClient";
 
@@ -26,12 +27,12 @@ async function waitForResult(
     const device = findDevice(response.items, deviceUid);
     const result = device?.last_result;
     if (result && String(result.request_id ?? "") === requestId) {
-      return result as Record<string, unknown>;
+      return normalizeCommandResult(result);
     }
     if (device && deviceStatusToken(device) !== previousStatusToken) {
       const stateResult = resultFromDeviceState(command, requestId, device);
       if (stateResult) {
-        return stateResult;
+        return normalizeCommandResult(stateResult);
       }
     }
   }
@@ -55,7 +56,7 @@ export function useDeviceCommand(deviceUid: string) {
       try {
         const response = await sendDeviceCommand(deviceUid, payload, defaultTimeout);
         if (response.result) {
-          return { queued: response.queued, result: response.result };
+          return { queued: response.queued, result: normalizeCommandResult(response.result) };
         }
         const requestId = response.queued?.request_id ?? String(response.queued?.items[0]?.payload?.request_id ?? payload.request_id ?? "");
         const queuedCommand = String(payload.command ?? response.queued?.items[0]?.payload?.command ?? "");

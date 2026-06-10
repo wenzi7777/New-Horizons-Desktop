@@ -22,6 +22,11 @@ function hexToBytes(hex: string) {
   return bytes;
 }
 
+function chunkDataText(result: Record<string, unknown> | null | undefined) {
+  const chunkResult = result ?? {};
+  return typeof chunkResult.data === "string" ? chunkResult.data : "";
+}
+
 function normalizeItems(result: Record<string, unknown> | null | undefined, scope: FileScope): DeviceFileEntry[] {
   const rawItems = Array.isArray(result?.items) ? result.items
     : Array.isArray(result?.data) ? result.data
@@ -130,7 +135,7 @@ export function DeviceFilesPage() {
           offset,
           length,
         });
-        const data = String(chunk.result?.data ?? "");
+        const data = chunkDataText(chunk.result);
         const bytes = /^[0-9a-fA-F]*$/.test(data) ? hexToBytes(data) : new TextEncoder().encode(data);
         if (!cancelled) {
           setPreviewText(new TextDecoder().decode(bytes));
@@ -172,11 +177,12 @@ export function DeviceFilesPage() {
         offset,
         length: 4096,
       });
-      const data = String(chunk.result?.data ?? "");
+      const chunkResult = chunk.result ?? {};
+      const data = typeof chunkResult.data === "string" ? chunkResult.data : "";
       const bytes = /^[0-9a-fA-F]*$/.test(data) ? hexToBytes(data) : new TextEncoder().encode(data);
       chunks.push(bytes);
-      const nextOffset = Number(chunk.result?.next_offset ?? offset + bytes.length);
-      const hasMore = Boolean(chunk.result?.has_more ?? nextOffset < size);
+      const nextOffset = Number(chunkResult.next_offset ?? offset + bytes.length);
+      const hasMore = Boolean(chunkResult.has_more ?? nextOffset < size);
       offset = nextOffset;
       onProgress?.(Math.min(offset, size), size);
       if (!hasMore) break;
