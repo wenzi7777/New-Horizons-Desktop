@@ -27,6 +27,10 @@ function chunkDataText(result: Record<string, unknown> | null | undefined) {
   return typeof chunkResult.data === "string" ? chunkResult.data : "";
 }
 
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 function normalizeItems(result: Record<string, unknown> | null | undefined, scope: FileScope): DeviceFileEntry[] {
   const rawItems = Array.isArray(result?.items) ? result.items
     : Array.isArray(result?.data) ? result.data
@@ -56,6 +60,24 @@ function formatFileSize(bytes: number) {
   return `${bytes} B`;
 }
 
+function percent(used: unknown, total: unknown) {
+  const usedNumber = Number(used);
+  const totalNumber = Number(total);
+  if (!Number.isFinite(usedNumber) || !Number.isFinite(totalNumber) || totalNumber <= 0) return 0;
+  return Math.max(0, Math.min(100, (usedNumber / totalNumber) * 100));
+}
+
+function storageCategories(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    .map((item) => ({
+      scope: String(item.scope ?? "other"),
+      bytes: Number(item.bytes ?? 0),
+    }))
+    .filter((item) => Number.isFinite(item.bytes) && item.bytes > 0);
+}
+
 export function DeviceFilesPage() {
   const { t } = useI18n();
   const { deviceUid = "" } = useParams();
@@ -80,8 +102,17 @@ export function DeviceFilesPage() {
   const [previewError, setPreviewError] = useState("");
   const [previewText, setPreviewText] = useState("");
   const [downloadProgress, setDownloadProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [storage, setStorage] = useState<Record<string, unknown>>({});
 
   const items = useMemo(() => itemsByScope[activeScope], [activeScope, itemsByScope]);
+  const storageTotal = Number(storage.total_bytes ?? 0);
+  const storageUsed = Number(storage.used_bytes ?? 0);
+  const storageUsage = storageCategories(storage.categories);
+
+  async function refreshStorage() {
+    const response = await queue({ command: "storage_status" });
+    setStorage(recordValue(response.result));
+  }
 
   async function refreshScope(scope: FileScope = activeScope) {
     const response = await queue({ command: "file_list", scope });
@@ -96,6 +127,7 @@ export function DeviceFilesPage() {
       setPreviewOpen(true);
     }
     void refreshScope(activeScope);
+    void refreshStorage();
   }, [activeScope, deviceUid]);
 
   useEffect(() => {
@@ -216,6 +248,7 @@ export function DeviceFilesPage() {
     await queue({ command: "file_delete", scope: file.scope, path: file.path });
     setStatusMessage(`${t("delete")}: ${file.path}`);
     await refreshScope(file.scope as FileScope);
+    await refreshStorage();
   }
 
   async function uploadSelectedFile() {
@@ -241,6 +274,16 @@ export function DeviceFilesPage() {
     setUploadFile(null);
     setUploadPath("");
     await refreshScope("user");
+    await refreshStorage();
+  }
+
+  async function toggleMaintenance(enable: boolean) {
+    await queue(enable
+      ? { command: "enter_maintenance", reason: "file_browser_upload" }
+      : { command: "exit_maintenance" });
+    await queue({ command: "status" });
+    await refreshStorage();
+    await refreshScope(activeScope);
   }
 
   return (
@@ -253,7 +296,6 @@ export function DeviceFilesPage() {
         <Link className="button" to="/">{t("home")}</Link>
       </section>
       {errorMessage ? <p className="notice error">{errorMessage}</p> : null}
-      {!maintenanceMode ? <p className="notice">Upload and delete are enabled in maintenance mode.</p> : null}
       <section className="panel-grid">
         <aside className="panel span-4 file-scope-panel">
           <h3>{t("fileScopes")}</h3>
@@ -263,13 +305,58 @@ export function DeviceFilesPage() {
               <strong>{itemsByScope[scope].length}</strong>
             </button>
           ))}
-          <button className="button primary" type="button" disabled={running || !deviceUid} onClick={() => void refreshScope()}>
+          <button className="button primary" type="button" disabled={running || !deviceUid} onClick={() => { void refreshScope(); void refreshStorage(); }}>
             {t("refresh")}
           </button>
         </aside>
         <article className={`panel ${activeScope === "logs" && previewOpen ? "span-4" : "span-8"}`}>
+          <div className="storage-card">
+            <div className="storage-card-header">
+              <span>{t("deviceStorage")}</span>
+              <strong>{storageTotal ? `${formatFileSize(storageUsed)} / ${formatFileSize(storageTotal)}` : t("flashUnavailable")}</strong>
+            </div>
+            <div className="storage-bar-track" aria-label={t("deviceStorage")}>
+              {storageUsage.length > 0 ? storageUsage.map((item) => (
+                <span
+                  key={item.scope}
+                  className={`storage-segment ${item.scope}`}
+                  style={{ width: `${percent(item.bytes, storageTotal)}%` }}
+                />
+              )) : null}
+            </div>
+            <div className="storage-summary">
+              <span>{t("used")}: {formatFileSize(storageUsed)}</span>
+              <span>{t("free")}: {formatFileSize(Number(storage.free_bytes ?? 0))}</span>
+              <span>{t("total")}: {storageTotal ? formatFileSize(storageTotal) : "-"}</span>
+            </div>
+            <div className="storage-legend">
+              {storageUsage.length === 0 ? <span>{t("flashUnavailable")}</span> : null}
+              {storageUsage.map((item) => (
+                <span key={item.scope}>
+                  <i className={`storage-dot ${item.scope}`} />
+                  {item.scope}: {formatFileSize(item.bytes)}
+                </span>
+              ))}
+            </div>
+          </div>
           {activeScope === "user" ? (
             <div className="upload-panel">
+              <div className="storage-card-header">
+                <span>{t("maintenanceModeLabel")}</span>
+                <strong>{maintenanceMode ? t("enabledState") : t("disabledState")}</strong>
+              </div>
+              <div className="actions compact">
+                <button className="button primary" type="button" disabled={running || !deviceUid || maintenanceMode} onClick={() => void toggleMaintenance(true)}>
+                  {t("enterMaintenance")}
+                </button>
+                <button className="button" type="button" disabled={running || !deviceUid || !maintenanceMode} onClick={() => void toggleMaintenance(false)}>
+                  {t("exitMaintenance")}
+                </button>
+                <button className="button" type="button" disabled={running || !deviceUid} onClick={() => void refreshStorage()}>
+                  {t("refreshFlashUsage")}
+                </button>
+              </div>
+              {!maintenanceMode ? <p className="notice">{t("fileWriteRequiresMaintenance")}</p> : null}
               <div className="field-grid">
                 <div className="field">
                   <label>{t("upload")}</label>

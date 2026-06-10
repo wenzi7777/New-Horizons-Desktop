@@ -472,6 +472,20 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("chunkResult.data", source)
         self.assertNotIn('String(chunk.result?.data ?? "")', source)
 
+    def test_device_files_page_shows_storage_usage_and_maintenance_actions(self):
+        source = (ROOT / "frontend" / "src" / "pages" / "DeviceFilesPage.tsx").read_text(encoding="utf-8")
+
+        self.assertIn('command: "storage_status"', source)
+        self.assertIn("storage-bar-track", source)
+        self.assertIn("storage-summary", source)
+        self.assertIn("storage-legend", source)
+        self.assertIn('t("deviceStorage")', source)
+        self.assertIn('t("refreshFlashUsage")', source)
+        self.assertIn('t("maintenanceModeLabel")', source)
+        self.assertIn('command: "enter_maintenance"', source)
+        self.assertIn('command: "exit_maintenance"', source)
+        self.assertIn('t("fileWriteRequiresMaintenance")', source)
+
 
 if __name__ == "__main__":
     unittest.main()
