@@ -237,7 +237,7 @@ export function DeviceFilesPage() {
         <Link className="button" to="/">{t("home")}</Link>
       </section>
       {errorMessage ? <p className="notice error">{errorMessage}</p> : null}
-      {!maintenanceMode ? <p className="notice">Upload, download, and delete are enabled in maintenance mode.</p> : null}
+      {!maintenanceMode ? <p className="notice">Upload and delete are enabled in maintenance mode.</p> : null}
       <section className="panel-grid">
         <aside className="panel span-4 file-scope-panel">
           <h3>{t("fileScopes")}</h3>
@@ -283,7 +283,7 @@ export function DeviceFilesPage() {
                       {t("preview")}
                     </button>
                   ) : null}
-                  <button className="button primary" disabled={running || !maintenanceMode} type="button" onClick={() => void downloadFile(file)}>
+                  <button className="button primary" disabled={running} type="button" onClick={() => void downloadFile(file)}>
                     {t("download")}
                   </button>
                   <button className="button danger" disabled={running || !maintenanceMode} type="button" onClick={() => void deleteFile(file)}>
