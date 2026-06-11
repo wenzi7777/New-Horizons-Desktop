@@ -60,6 +60,21 @@ function formatFileSize(bytes: number) {
   return `${bytes} B`;
 }
 
+function formatSpeed(bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "";
+  if (bytesPerSec >= 1024 * 1024) return `${(bytesPerSec / 1024 / 1024).toFixed(1)} MB/s`;
+  if (bytesPerSec >= 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${Math.round(bytesPerSec)} B/s`;
+}
+
+function formatEta(remainingBytes: number, bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "";
+  const secs = remainingBytes / bytesPerSec;
+  if (secs >= 3600) return `~${Math.round(secs / 3600)}h`;
+  if (secs >= 60) return `~${Math.round(secs / 60)}m`;
+  return `~${Math.round(secs)}s`;
+}
+
 function percent(used: unknown, total: unknown) {
   const usedNumber = Number(used);
   const totalNumber = Number(total);
@@ -101,8 +116,8 @@ export function DeviceFilesPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [previewText, setPreviewText] = useState("");
-  const [downloadProgress, setDownloadProgress] = useState<{ loaded: number; total: number } | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{ loaded: number; total: number; startTime: number } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ loaded: number; total: number; startTime: number } | null>(null);
   const [storage, setStorage] = useState<Record<string, unknown>>({});
 
   const items = useMemo(() => itemsByScope[activeScope], [activeScope, itemsByScope]);
@@ -232,8 +247,9 @@ export function DeviceFilesPage() {
   }
 
   async function downloadFile(file: DeviceFileEntry) {
-    setDownloadProgress({ loaded: 0, total: Number(file.size ?? 0) });
-    const bytes = await downloadFileBytes(file, (loaded, total) => setDownloadProgress({ loaded, total }));
+    const dlStartTime = Date.now();
+    setDownloadProgress({ loaded: 0, total: Number(file.size ?? 0), startTime: dlStartTime });
+    const bytes = await downloadFileBytes(file, (loaded, total) => setDownloadProgress({ loaded, total, startTime: dlStartTime }));
     const blob = new Blob([bytes]);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -269,7 +285,8 @@ export function DeviceFilesPage() {
       return;
     }
     const bytes = new Uint8Array(await uploadFile.arrayBuffer());
-    setUploadProgress({ loaded: 0, total: bytes.length });
+    const ulStartTime = Date.now();
+    setUploadProgress({ loaded: 0, total: bytes.length, startTime: ulStartTime });
     try {
       const begin = await queue({ command: "file_write_begin", scope: "user", path: targetPath, size: bytes.length });
       ensureWriteOk(begin.result);
@@ -286,7 +303,7 @@ export function DeviceFilesPage() {
         });
         ensureWriteOk(written.result);
         offset += chunk.length;
-        setUploadProgress({ loaded: offset, total: bytes.length });
+        setUploadProgress({ loaded: offset, total: bytes.length, startTime: ulStartTime });
       }
       const finish = await queue({ command: "file_write_finish", scope: "user", path: targetPath });
       ensureWriteOk(finish.result);
@@ -415,7 +432,13 @@ export function DeviceFilesPage() {
                 {uploadProgress ? (
                   <div className="download-progress">
                     <div className="download-progress-bar" style={{ width: `${uploadProgress.total > 0 ? Math.round((uploadProgress.loaded / uploadProgress.total) * 100) : 0}%` }} />
-                    <span>{formatFileSize(uploadProgress.loaded)} / {formatFileSize(uploadProgress.total)}</span>
+                    {(() => {
+                      const elapsed = (Date.now() - uploadProgress.startTime) / 1000;
+                      const speed = elapsed > 0.5 ? uploadProgress.loaded / elapsed : 0;
+                      const speedStr = formatSpeed(speed);
+                      const eta = formatEta(uploadProgress.total - uploadProgress.loaded, speed);
+                      return <span>{formatFileSize(uploadProgress.loaded)} / {formatFileSize(uploadProgress.total)}{speedStr ? ` · ${speedStr}` : ""}{eta ? ` · ${eta}` : ""}</span>;
+                    })()}
                   </div>
                 ) : null}
               </div>
@@ -448,7 +471,13 @@ export function DeviceFilesPage() {
           {downloadProgress ? (
             <div className="download-progress">
               <div className="download-progress-bar" style={{ width: `${downloadProgress.total > 0 ? Math.round((downloadProgress.loaded / downloadProgress.total) * 100) : 0}%` }} />
-              <span>{formatFileSize(downloadProgress.loaded)} / {formatFileSize(downloadProgress.total)}</span>
+              {(() => {
+                const elapsed = (Date.now() - downloadProgress.startTime) / 1000;
+                const speed = elapsed > 0.5 ? downloadProgress.loaded / elapsed : 0;
+                const speedStr = formatSpeed(speed);
+                const eta = formatEta(downloadProgress.total - downloadProgress.loaded, speed);
+                return <span>{formatFileSize(downloadProgress.loaded)} / {formatFileSize(downloadProgress.total)}{speedStr ? ` · ${speedStr}` : ""}{eta ? ` · ${eta}` : ""}</span>;
+              })()}
             </div>
           ) : null}
           {statusMessage ? <p className="notice success">{statusMessage}</p> : null}
