@@ -102,6 +102,7 @@ export function DeviceFilesPage() {
   const [previewError, setPreviewError] = useState("");
   const [previewText, setPreviewText] = useState("");
   const [downloadProgress, setDownloadProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [storage, setStorage] = useState<Record<string, unknown>>({});
 
   const items = useMemo(() => itemsByScope[activeScope], [activeScope, itemsByScope]);
@@ -253,30 +254,48 @@ export function DeviceFilesPage() {
     await refreshStorage();
   }
 
+  function ensureWriteOk(result: Record<string, unknown> | null) {
+    if (result && (result.status === "error" || result.ok === false)) {
+      throw new Error(String(result.error ?? result.message ?? "file_write_failed"));
+    }
+  }
+
   async function uploadSelectedFile() {
     if (!uploadFile) return;
     const targetPath = uploadPath.trim() || uploadFile.name;
     const bytes = new Uint8Array(await uploadFile.arrayBuffer());
-    await queue({ command: "file_write_begin", scope: "user", path: targetPath, size: bytes.length });
-    let offset = 0;
-    const chunkSize = 768;
-    while (offset < bytes.length) {
-      const chunk = bytes.slice(offset, offset + chunkSize);
-      await queue({
-        command: "file_write_chunk",
-        scope: "user",
-        path: targetPath,
-        offset,
-        data: bytesToHex(chunk),
-      });
-      offset += chunk.length;
+    setUploadProgress({ loaded: 0, total: bytes.length });
+    try {
+      const begin = await queue({ command: "file_write_begin", scope: "user", path: targetPath, size: bytes.length });
+      ensureWriteOk(begin.result);
+      let offset = 0;
+      const chunkSize = 768;
+      while (offset < bytes.length) {
+        const chunk = bytes.slice(offset, offset + chunkSize);
+        const written = await queue({
+          command: "file_write_chunk",
+          scope: "user",
+          path: targetPath,
+          offset,
+          data: bytesToHex(chunk),
+        });
+        ensureWriteOk(written.result);
+        offset += chunk.length;
+        setUploadProgress({ loaded: offset, total: bytes.length });
+      }
+      const finish = await queue({ command: "file_write_finish", scope: "user", path: targetPath });
+      ensureWriteOk(finish.result);
+      setStatusMessage(`${t("uploadComplete")}: ${targetPath}`);
+      setUploadFile(null);
+      setUploadPath("");
+      await refreshScope("user");
+      await refreshStorage();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      setStatusMessage(`${t("uploadFailed")}: ${reason}`);
+    } finally {
+      setUploadProgress(null);
     }
-    await queue({ command: "file_write_finish", scope: "user", path: targetPath });
-    setStatusMessage(`${t("uploadComplete")}: ${targetPath}`);
-    setUploadFile(null);
-    setUploadPath("");
-    await refreshScope("user");
-    await refreshStorage();
   }
 
   async function toggleMaintenance(enable: boolean) {
@@ -388,6 +407,12 @@ export function DeviceFilesPage() {
                     {t("upload")}
                   </button>
                 </div>
+                {uploadProgress ? (
+                  <div className="download-progress">
+                    <div className="download-progress-bar" style={{ width: `${uploadProgress.total > 0 ? Math.round((uploadProgress.loaded / uploadProgress.total) * 100) : 0}%` }} />
+                    <span>{formatFileSize(uploadProgress.loaded)} / {formatFileSize(uploadProgress.total)}</span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
