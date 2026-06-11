@@ -269,7 +269,7 @@ export function DeviceFilesPage() {
       const begin = await queue({ command: "file_write_begin", scope: "user", path: targetPath, size: bytes.length });
       ensureWriteOk(begin.result);
       let offset = 0;
-      const chunkSize = 768;
+      const chunkSize = 96;
       while (offset < bytes.length) {
         const chunk = bytes.slice(offset, offset + chunkSize);
         const written = await queue({
