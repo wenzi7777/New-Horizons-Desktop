@@ -1880,11 +1880,19 @@ class NewHorizonsService:
                         if k in payload:
                             status_payload[k] = payload[k]
                 else:
-                    status_payload = payload
+                    status_payload = dict(payload)
+                maintenance_mode = self._maintenance_mode_from_result(payload)
+                if maintenance_mode is not None:
+                    status_payload["mode"] = maintenance_mode
+                    runtime_data = status_payload.get("runtime") if isinstance(status_payload.get("runtime"), dict) else {}
+                    status_payload["runtime"] = {**runtime_data, "mode": maintenance_mode}
+                    status_payload["scan_stopped"] = maintenance_mode != "normal"
                 existing_status = self._latest_status.get(device_uid) or {}
                 status_payload = self._merge_status_payload(existing_status, status_payload)
                 self._latest_status[device_uid] = status_payload
                 merged["last_status"] = status_payload
+                if maintenance_mode is not None:
+                    merged["mode"] = maintenance_mode
             self._clear_incompatible_visualization_locked(device_uid, merged)
             self._devices[device_uid] = merged
             if self._is_status_snapshot_result(payload):
@@ -2159,6 +2167,22 @@ class NewHorizonsService:
         if allowed is not None and command not in allowed:
             return "wrong_mode"
         return ""
+
+    @staticmethod
+    def _maintenance_mode_from_result(payload: dict[str, Any]) -> str | None:
+        # enter/exit_maintenance acks from the firmware do not include a "mode"
+        # field, and the device does not push a status afterwards.  Derive the
+        # resulting mode from the command/message so it is recorded on every
+        # transport (UDP, gateway, TCP) rather than only the synchronous TCP path.
+        if payload.get("ok") is False or str(payload.get("status") or "") == "error":
+            return None
+        command = str(payload.get("command") or payload.get("cmd") or "")
+        message = str(payload.get("message") or "")
+        if command == "enter_maintenance" or message == "maintenance_entered":
+            return "maintenance"
+        if command == "exit_maintenance" or message == "maintenance_exited":
+            return "normal"
+        return None
 
     @staticmethod
     def _mode_from_payload(payload: dict[str, Any]) -> str:

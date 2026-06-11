@@ -997,5 +997,75 @@ class IndependentNewHorizonsTest(unittest.TestCase):
 
         self.assertEqual(service.visualization_target_fps("3CDC7545CCD0"), 123)
 
+    def test_enter_maintenance_result_without_mode_field_updates_device_mode(self):
+        # The firmware enter_maintenance ack does not carry a "mode" field and
+        # the device does not proactively push a status afterwards.  The mode
+        # must still be recorded across UDP/gateway transports (not only the
+        # synchronous TCP path).
+        service = NewHorizonsService(mock_mode=False)
+        device_uid = "3CDC7545CCD0"
+        service.register_gateway_device(device_uid, lambda _msg: None)
+        service.record_gateway_status(device_uid, {
+            "device_uid": device_uid,
+            "message": "status",
+            "mode": "normal",
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal")
+
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "ok": True,
+            "cmd": "enter_maintenance",
+            "message": "maintenance_entered",
+            "request_id": "req-maint-1",
+            "data": {},
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "maintenance")
+
+    def test_maintenance_mode_survives_heartbeat_without_mode_field(self):
+        service = NewHorizonsService(mock_mode=False)
+        device_uid = "3CDC7545CCD0"
+        service.register_gateway_device(device_uid, lambda _msg: None)
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "ok": True,
+            "cmd": "enter_maintenance",
+            "message": "maintenance_entered",
+            "request_id": "req-maint-2",
+            "data": {},
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "maintenance")
+
+        # A heartbeat/stream status without a mode field must not revert to normal.
+        service.record_gateway_status(device_uid, {
+            "device_uid": device_uid,
+            "transport_path": "arduino_heartbeat",
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "maintenance")
+
+    def test_exit_maintenance_result_without_mode_field_updates_device_mode(self):
+        service = NewHorizonsService(mock_mode=False)
+        device_uid = "3CDC7545CCD0"
+        service.register_gateway_device(device_uid, lambda _msg: None)
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "ok": True,
+            "cmd": "enter_maintenance",
+            "message": "maintenance_entered",
+            "request_id": "req-maint-3",
+            "data": {},
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "maintenance")
+
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "ok": True,
+            "cmd": "exit_maintenance",
+            "message": "maintenance_exited",
+            "request_id": "req-exit-1",
+            "data": {},
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal")
+
 if __name__ == "__main__":
     unittest.main()
