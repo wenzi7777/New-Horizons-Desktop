@@ -263,6 +263,11 @@ export function DeviceFilesPage() {
   async function uploadSelectedFile() {
     if (!uploadFile) return;
     const targetPath = uploadPath.trim() || uploadFile.name;
+    // SPIFFS_OBJ_NAME_LEN=32 (1 byte for null), /files/ prefix = 7 chars → max 24
+    if (targetPath.length > 24) {
+      setStatusMessage(`${t("uploadFailed")}: path_too_long (${targetPath.length}/24)`);
+      return;
+    }
     const bytes = new Uint8Array(await uploadFile.arrayBuffer());
     setUploadProgress({ loaded: 0, total: bytes.length });
     try {
