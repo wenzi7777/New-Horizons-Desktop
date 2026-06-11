@@ -1067,5 +1067,96 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         })
         self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal")
 
+    def test_gateway_status_normal_does_not_overwrite_known_maintenance_mode(self):
+        # Regression: gateway_status fires every 5s with mode="normal" (before
+        # FindMe updates gateway state).  The backend must not let a stale
+        # gateway snapshot downgrade a maintenance mode it already knows about
+        # from an authoritative enter_maintenance result (_latest_status).
+        service = NewHorizonsService(mock_mode=False)
+        gateway_id = "gw-001"
+        device_uid = "3CDC7545CCD0"
+        service.register_gateway_device(device_uid, lambda _msg: None, gateway_id=gateway_id)
+
+        # Step 1: enter_maintenance result arrives → backend correctly knows "maintenance"
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "ok": True,
+            "cmd": "enter_maintenance",
+            "message": "maintenance_entered",
+            "request_id": "req-maint-1",
+            "data": {},
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "maintenance")
+
+        # Step 2: gateway_status fires with stale mode="normal" (gateway hasn't
+        # received FindMe with "maintenance" yet).  Backend must NOT downgrade.
+        service.record_gateway_summary(gateway_id, {
+            "gateway_name": "test-gw",
+            "gateway_id": gateway_id,
+            "enabled": True,
+            "version": "v0.2.2",
+            "state": {
+                "devices": [{
+                    "device_uid": device_uid,
+                    "device_name": "New Horizons OS-3CDC7545CCD0",
+                    "mode": "normal",
+                    "connected": True,
+                    "findme_state": "attached",
+                }],
+                "denied_devices": [],
+                "claims": [],
+            },
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "maintenance",
+                         "gateway_status with stale mode='normal' must not overwrite backend's known 'maintenance'")
+
+    def test_gateway_status_normal_allowed_after_exit_maintenance(self):
+        # After exit_maintenance, the backend's _latest_status has mode="normal".
+        # A subsequent gateway_status with mode="normal" is legitimate and must
+        # be accepted (the protection must not block valid normal-mode updates).
+        service = NewHorizonsService(mock_mode=False)
+        gateway_id = "gw-001"
+        device_uid = "3CDC7545CCD0"
+        service.register_gateway_device(device_uid, lambda _msg: None, gateway_id=gateway_id)
+
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "ok": True,
+            "cmd": "enter_maintenance",
+            "message": "maintenance_entered",
+            "request_id": "req-m1",
+            "data": {},
+        })
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "ok": True,
+            "cmd": "exit_maintenance",
+            "message": "maintenance_exited",
+            "request_id": "req-e1",
+            "data": {},
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal")
+
+        service.record_gateway_summary(gateway_id, {
+            "gateway_name": "test-gw",
+            "gateway_id": gateway_id,
+            "enabled": True,
+            "version": "v0.2.2",
+            "state": {
+                "devices": [{
+                    "device_uid": device_uid,
+                    "device_name": "New Horizons OS-3CDC7545CCD0",
+                    "mode": "normal",
+                    "connected": True,
+                    "findme_state": "attached",
+                }],
+                "denied_devices": [],
+                "claims": [],
+            },
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal",
+                         "gateway_status with mode='normal' must be accepted after exit_maintenance")
+
+
 if __name__ == "__main__":
     unittest.main()

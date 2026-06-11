@@ -1056,6 +1056,13 @@ class NewHorizonsService:
         }
         runtime = device.get("runtime") if isinstance(device.get("runtime"), dict) else {}
         mode = device.get("mode") or runtime.get("mode")
+        # Don't let a stale gateway snapshot silently downgrade a maintenance mode
+        # that the backend already knows about from an authoritative device result.
+        # _known_mode_from_status_locked reads _latest_status under the same lock.
+        if mode == "normal":
+            known_mode = self._known_mode_from_status_locked(device_uid)
+            if known_mode == "maintenance":
+                mode = "maintenance"
         if boot_transition is not None:
             incoming["mode"] = "booting"
             incoming["booting"] = True
