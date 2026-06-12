@@ -77,15 +77,15 @@ class FirmwareFindMeStaticTest(unittest.TestCase):
         source = CONTROL_CPP.read_text()
 
         for token in (
-            '\\"device_name\\"',
-            '\\"firmware_version\\"',
-            '\\"hardware_model\\"',
-            '\\"matrix_shape\\"',
-            '\\"matrix_layout\\"',
-            '\\"runtime\\"',
-            '\\"scan_timing\\"',
-            '\\"scan_health\\"',
-            '\\"findme\\"',
+            'jsonStringField(data, "device_name"',
+            'jsonStringField(data, "firmware_version"',
+            'jsonStringField(data, "hardware_model"',
+            'jsonRawField(data, "matrix_shape"',
+            'jsonRawField(data, "matrix_layout"',
+            'jsonRawField(data, "runtime"',
+            'jsonRawField(runtime, "scan_timing"',
+            'jsonRawField(data, "scan_health"',
+            'jsonRawField(data, "findme"',
         ):
             self.assertIn(token, source)
 
@@ -95,8 +95,8 @@ class FirmwareFindMeStaticTest(unittest.TestCase):
         self.assertIn("matrixLayoutJson", source)
         self.assertIn("layoutStatusJson", source)
         self.assertIn("scanTimingStatusJson", source)
-        self.assertIn('\\"matrix_shape\\"', source)
-        self.assertIn('\\"matrix_layout\\"', source)
+        self.assertIn('jsonRawField(data, "matrix_shape"', source)
+        self.assertIn('jsonRawField(data, "matrix_layout"', source)
 
     def test_scan_overrun_yields_to_control_loop(self):
         scanner = (ARDUINO_ROOT / "MatrixScanner.cpp").read_text(encoding="utf-8")

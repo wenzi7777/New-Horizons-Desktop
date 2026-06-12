@@ -6,7 +6,8 @@ New Horizons 現在是獨立專案，來源目錄固定在：
 /Users/nickxu/Documents/vd-ctl-r-os-lts/apps/newhorizons
 ```
 
-本地開發與真機測試預設使用 Docker，不需要啟動 `mqtt_test`。
+Desktop WebUI/backend 本地開發預設使用 Docker，不需要啟動 `mqtt_test`。
+Gateway 必須直接運行在 LAN host，不使用 Docker。
 
 ## Docker 啟動
 
@@ -21,11 +22,11 @@ cd /Users/nickxu/Documents/vd-ctl-r-os-lts/apps/newhorizons
 
 - `http://127.0.0.1:5051/newhorizons`
 
-啟動 Gateway 中繼 app：
+在 host 啟動 Gateway 中繼 app：
 
 ```bash
-cd /Users/nickxu/Documents/vd-ctl-r-os-lts/apps/newhorizons-gateway
-./scripts/start_gateway.sh --build
+cd /Users/nickxu/Documents/vd-ctl-r-os-lts/New-Horizons-Gateway
+./scripts/start.sh
 ```
 
 兩者永遠分開啟動。Gateway 可以跑在同一台電腦，也可以跑在與板子同一個 LAN 的另一台電腦。
@@ -49,16 +50,11 @@ server host/port；Gateway 會負責 production/local/manual 目標伺服器。
 
 ```bash
 export NEWHORIZONS_GATEWAY_SERVER_URL=ws://<backend-ip>:5051/newhorizons/gateway/ws
-./scripts/start_gateway.sh --build
+./scripts/start.sh
 ```
 
-Gateway 腳本預設使用 host-side FindMe proxy，避免 Docker Desktop 不轉發 LAN broadcast 的問題。這個 proxy 會讀取 Gateway WebUI status API，因此被拒絕的設備在預設 Docker 模式下也會收到 FindMe reject。
-
-Linux Docker 若想讓容器自己回覆 discovery，可以改用：
-
-```bash
-./scripts/start_gateway.sh --build --container-discovery
-```
+Gateway host process 直接接收 FindMe、heartbeat、sensor data 與 command
+response，確保記錄真實設備 IP 並能將 offer/command 回送至設備。
 
 停止 WebUI/backend：
 
@@ -70,8 +66,8 @@ docker compose down
 停止 Gateway：
 
 ```bash
-cd /Users/nickxu/Documents/vd-ctl-r-os-lts/apps/newhorizons-gateway
-docker compose down
+cd /Users/nickxu/Documents/vd-ctl-r-os-lts/New-Horizons-Gateway
+./scripts/stop.sh
 ```
 
 ## 前端單獨驗證

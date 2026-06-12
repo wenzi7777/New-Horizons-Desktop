@@ -21,10 +21,13 @@ Start the Gateway relay separately:
 
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/New-Horizons-Gateway
-./scripts/start_gateway.sh --build
+./scripts/start.sh
 ```
 
 The backend and Gateway are intentionally separate apps. This matches the real deployment model where the Gateway can run on any computer in the same LAN as the device.
+The Gateway itself must run directly on that host. Docker Gateway deployments
+are unsupported because Docker Desktop rewrites UDP source addresses and breaks
+FindMe replies and device command routing.
 
 Gateway ports:
 
@@ -52,15 +55,7 @@ Run this on the computer that is in the same LAN as the device:
 ```bash
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/New-Horizons-Gateway
 export NEWHORIZONS_GATEWAY_SERVER_URL=ws://<backend-ip>:5051/newhorizons/gateway/ws
-./scripts/start_gateway.sh --build
-```
-
-The Gateway start script uses host-side FindMe discovery by default because Docker Desktop may not forward LAN broadcast discovery into containers reliably. The proxy reads the Gateway WebUI status API, so denied devices still receive FindMe reject offers.
-
-On Linux Docker, container-side discovery can also be used:
-
-```bash
-./scripts/start_gateway.sh --build --container-discovery
+./scripts/start.sh
 ```
 
 The Gateway forwards to:
@@ -82,7 +77,7 @@ cd /Users/nickxu/Documents/vd-ctl-r-os-lts/New-Horizons-Desktop
 docker compose down
 
 cd /Users/nickxu/Documents/vd-ctl-r-os-lts/New-Horizons-Gateway
-docker compose down
+./scripts/stop.sh
 ```
 
 ## Notes

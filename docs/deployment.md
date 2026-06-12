@@ -29,8 +29,12 @@ cd /Users/nickxu/Documents/vd-ctl-r-os-lts/apps/newhorizons
 Gateway 目錄：
 
 ```text
-/Users/nickxu/Documents/vd-ctl-r-os-lts/apps/newhorizons-gateway
+/Users/nickxu/Documents/vd-ctl-r-os-lts/New-Horizons-Gateway
 ```
+
+Gateway 必須直接運行於設備所在 LAN 的 host，不能部署在 Docker Desktop。
+Docker Desktop 會改寫 UDP peer 位址，使 FindMe offer 與控制封包無法可靠
+回送。Desktop WebUI/backend 仍可使用 Docker。
 
 ## 實驗室伺服器部署方向
 

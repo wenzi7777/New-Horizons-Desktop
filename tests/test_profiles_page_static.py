@@ -19,15 +19,16 @@ class ProfilesPageStaticTest(unittest.TestCase):
         self.assertIn("profile-stage-scene", source)
         self.assertIn("background.aspectRatio", source)
 
-    def test_profiles_page_supports_zoom_pan_and_fit_controls(self):
+    def test_profiles_page_supports_toolbar_zoom_pan_and_fit_controls(self):
         source = PROFILES_PAGE.read_text()
 
-        self.assertIn("zoomAt", source)
-        self.assertIn("handleStageWheel", source)
+        self.assertIn("wheelHandlerRef", source)
+        self.assertIn("e.preventDefault();", source)
         self.assertIn("panMode", source)
         self.assertIn("beginPanning", source)
         self.assertIn("zoomInfo", source)
-        self.assertIn('onWheel={handleStageWheel}', source)
+        self.assertNotIn("handleStageWheel", source)
+        self.assertNotIn("onWheel=", source)
         self.assertIn('onClick={() => zoomFromCenter(1.25)}', source)
         self.assertIn('onClick={() => zoomFromCenter(1 / 1.25)}', source)
         self.assertIn('onClick={fitStageContent}', source)
