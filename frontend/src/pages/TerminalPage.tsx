@@ -766,7 +766,7 @@ function togglePin(values: number[], value: number) {
   if (values.includes(value)) {
     return values.filter((item) => item !== value);
   }
-  return [...values, value].sort((a, b) => a - b);
+  return [...values, value];
 }
 
 function pinCommand(analogPins: number[], selectPins: number[]) {
@@ -897,21 +897,25 @@ export function BoardIoModal({
     setApplyStatus("");
   }
 
-  function renderPinList(pins: MatrixPin[], keyPrefix: string) {
+  function renderPinList(pins: MatrixPin[], keyPrefix: string, selectedPins: number[]) {
     return (
       <ol>
         {pins.map((pin, index) => {
           const selectable = pin.role && pin.gpio !== undefined;
+          const selected = isSelected(pin);
+          const selectionOrder = selected && pin.gpio !== undefined ? selectedPins.indexOf(pin.gpio) + 1 : null;
           return (
-            <li key={`${keyPrefix}-${index}`} className={isSelected(pin) ? "selected" : ""}>
+            <li key={`${keyPrefix}-${index}`} className={selected ? "selected" : ""}>
               <button
                 type="button"
                 className="pin-button"
                 disabled={!selectable}
                 onClick={() => handleToggle(pin)}
-                aria-pressed={selectable ? isSelected(pin) : undefined}
+                aria-pressed={selectable ? selected : undefined}
               >
-                <span>{index + 1}</span>
+                <span className={selectionOrder !== null ? "pin-order" : undefined}>
+                  {selectionOrder !== null ? selectionOrder : index + 1}
+                </span>
                 <strong>{pin.label}</strong>
                 <em>{pin.gpio !== undefined ? `GPIO ${pin.gpio}` : "-"}</em>
               </button>
@@ -979,11 +983,11 @@ export function BoardIoModal({
             <div className="pin-table">
             <div>
               <h4>{t("ioAna")}</h4>
-              {renderPinList(ANA_FPC_PINS, "ana")}
+              {renderPinList(ANA_FPC_PINS, "ana", selectedAnalogPins)}
             </div>
             <div>
               <h4>{t("ioDig")}</h4>
-              {renderPinList(DIG_FPC_PINS, "dig")}
+              {renderPinList(DIG_FPC_PINS, "dig", selectedSelectPins)}
               </div>
             </div>
           </div>

@@ -3669,6 +3669,11 @@ button:disabled {
   background: var(--accent-soft);
 }
 
+.pin-button span.pin-order {
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .pin-button span,
 .pin-button em {
   color: var(--text-muted);
