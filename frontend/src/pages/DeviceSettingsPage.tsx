@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { useI18n } from "../i18n";
+import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
 import { normalizeDevice, useDevicesPolling } from "../lib/device";
 import { useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
 import { BoardIoModal } from "./TerminalPage";
 
-const DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-latest.json";
 const STANDARD_LOG_BYTES = 12 * 1024;
 const EXTENDED_LOG_BYTES = 24 * 1024;
 const DEFAULT_EXTERNAL_LED_BRIGHTNESS = 0.35;
@@ -692,7 +692,8 @@ export function DeviceSettingsPage() {
   const updateChangelogUrl = stringValue(updateState.changelog_url ?? (lastResultCommand === "check_update" ? lastResult.changelog_url : undefined), "");
 
   const [activeSection, setActiveSection] = useState<SettingsSection>("about");
-  const [manifestUrl, setManifestUrl] = useState(DEFAULT_MANIFEST_URL);
+  const boardProfile = useMemo(() => boardProfileForHardwareModel(normalized?.hardwareModel), [normalized?.hardwareModel]);
+  const [manifestUrl, setManifestUrl] = useState(() => defaultManifestUrlForHardwareModel(normalized?.hardwareModel));
   const [autoOtaOnBoot, setAutoOtaOnBoot] = useState(otaConfig.auto_apply_on_boot === true);
   const [updateChangelogVisible, setUpdateChangelogVisible] = useState(false);
   const [updateChangelogBody, setUpdateChangelogBody] = useState("");
@@ -817,8 +818,10 @@ export function DeviceSettingsPage() {
     const nextManifestUrl = stringValue(otaConfig.manifest_url, "");
     if (nextManifestUrl) {
       setManifestUrl(nextManifestUrl);
+      return;
     }
-  }, [otaConfig.auto_apply_on_boot, otaConfig.manifest_url]);
+    setManifestUrl(defaultManifestUrlForHardwareModel(normalized?.hardwareModel));
+  }, [normalized?.hardwareModel, otaConfig.auto_apply_on_boot, otaConfig.manifest_url]);
 
   useEffect(() => {
     setUpdateChangelogVisible(false);
@@ -1745,6 +1748,10 @@ export function DeviceSettingsPage() {
           onClose={() => setShowIoModal(false)}
           initialAnalogPins={numberCsv(analogPins)}
           initialSelectPins={numberCsv(selectPins)}
+          defaultAnalogPins={boardProfile.defaultAnalogPins}
+          defaultSelectPins={boardProfile.defaultSelectPins}
+          boardName={boardProfile.hardwareModel}
+          supportsPinVisualizer={boardProfile.supportsIoVisualizer}
           onApply={applyIoPins}
           applyDisabled={isCommandBusy("set_matrix_layout") || !deviceUid}
         />

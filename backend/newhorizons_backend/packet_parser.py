@@ -11,7 +11,11 @@ MAGIC = 0xA55A
 PACKET_VERSION = 2
 ARDUINO_PACKET_VERSION = 3
 IMU_BYTES = 7 * 4
+MAG_BYTES = 3 * 4
 BATTERY_BYTES = 4
+FLAG_IMU = 0x01
+FLAG_BATTERY = 0x02
+FLAG_MAG = 0x04
 
 
 class PacketParseError(ValueError):
@@ -20,9 +24,11 @@ class PacketParseError(ValueError):
 
 def infer_sensor_count(flags: int, payload_len: int) -> int:
     matrix_bytes = payload_len
-    if flags & 0x01:
+    if flags & FLAG_IMU:
         matrix_bytes -= IMU_BYTES
-    if flags & 0x02:
+    if flags & FLAG_MAG:
+        matrix_bytes -= MAG_BYTES
+    if flags & FLAG_BATTERY:
         matrix_bytes -= BATTERY_BYTES
     if matrix_bytes < 0 or matrix_bytes % 4 != 0:
         raise PacketParseError("invalid_payload_layout")
@@ -60,7 +66,7 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
     imu_payload = None
     acc = None
     gyro = None
-    if flags & 0x01:
+    if flags & FLAG_IMU:
         imu_values = list(struct.unpack("<7f", payload[offset:offset + IMU_BYTES]))
         offset += IMU_BYTES
         acc = _round_list(imu_values[0:3])
@@ -71,8 +77,16 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
             "temperature_c": round(float(imu_values[6]), 6),
         }
 
+    mag = None
+    if flags & FLAG_MAG:
+        mag = _round_list(struct.unpack("<3f", payload[offset:offset + MAG_BYTES]))
+        offset += MAG_BYTES
+        if imu_payload is None:
+            imu_payload = {}
+        imu_payload["mag"] = mag
+
     battery_payload = None
-    if flags & 0x02:
+    if flags & FLAG_BATTERY:
         status, fault, vbat_mv = struct.unpack("<BBH", payload[offset:offset + BATTERY_BYTES])
         offset += BATTERY_BYTES
         battery_payload = {
@@ -96,6 +110,7 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
         "p": matrix,
         "acc": acc,
         "gyro": gyro,
+        "mag": mag,
         "imu": imu_payload,
         "battery": battery_payload,
         "flags": int(flags),

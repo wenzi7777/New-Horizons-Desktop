@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { api, type DeviceEntry, type TerminalHelpEntry } from "../lib/api";
+import { DEFAULT_BOARD_PROFILE, boardProfileForHardwareModel } from "../lib/boardProfile";
 import { commandDescriptionKey, useI18n } from "../i18n";
 import { valueToCsv } from "../lib/valueFormat";
 import boardOverviewImage from "../assets/VDCTLRv10F20264OVERVIEW.png";
@@ -94,11 +95,6 @@ const DIG_FPC_PINS: MatrixPin[] = [
   { label: "D17", gpio: 38, role: "select" },
   { label: "D18", gpio: 39, role: "select" },
 ];
-
-const DEFAULT_ANALOG_PINS = ANA_FPC_PINS.filter((pin) => pin.role === "analog").map((pin) => Number(pin.gpio));
-const DEFAULT_SELECT_PINS = [...DIG_FPC_PINS, ...ANA_FPC_PINS]
-  .filter((pin) => pin.role === "select")
-  .map((pin) => Number(pin.gpio));
 
 const LOCAL_HELP: TerminalHelpEntry = {
   command: "io-config",
@@ -214,8 +210,8 @@ const COMMAND_BLOCKS: CommandBlock[] = [
     command: "set-matrix-layout",
     groupKey: "commandGroupConfig",
     params: [
-      { key: "analog-pins", labelKey: "analogPins", type: "text", required: true, defaultValue: DEFAULT_ANALOG_PINS.join(",") },
-      { key: "select-pins", labelKey: "selectPins", type: "text", required: true, defaultValue: DEFAULT_SELECT_PINS.join(",") },
+      { key: "analog-pins", labelKey: "analogPins", type: "text", required: true },
+      { key: "select-pins", labelKey: "selectPins", type: "text", required: true },
     ],
   },
   {
@@ -777,10 +773,23 @@ function commandBlock(command: string) {
   return COMMAND_BLOCKS.find((block) => block.command === command) ?? COMMAND_BLOCKS[0];
 }
 
-function commandParamDefaults(command: string) {
+function commandParamDefaultValue(command: string, key: string, profile = DEFAULT_BOARD_PROFILE) {
+  if (command === "set-matrix-layout" && key === "analog-pins") {
+    return profile.defaultAnalogPins.join(",");
+  }
+  if (command === "set-matrix-layout" && key === "select-pins") {
+    return profile.defaultSelectPins.join(",");
+  }
+  if ((command === "check-update" || command === "apply-update") && key === "manifest-url") {
+    return profile.defaultManifestUrl;
+  }
+  return "";
+}
+
+function commandParamDefaults(command: string, profile = DEFAULT_BOARD_PROFILE) {
   const block = commandBlock(command);
   return block.params.reduce<Record<string, string>>((values, param) => {
-    values[param.key] = param.defaultValue ?? "";
+    values[param.key] = param.defaultValue ?? commandParamDefaultValue(command, param.key, profile);
     return values;
   }, {});
 }
@@ -829,6 +838,10 @@ type BoardIoModalProps = {
   onClose: () => void;
   initialAnalogPins?: number[];
   initialSelectPins?: number[];
+  defaultAnalogPins?: number[];
+  defaultSelectPins?: number[];
+  boardName?: string;
+  supportsPinVisualizer?: boolean;
   onApply?: (analogPins: number[], selectPins: number[]) => void | Promise<void>;
   applyDisabled?: boolean;
 };
@@ -837,12 +850,16 @@ export function BoardIoModal({
   onClose,
   initialAnalogPins = [],
   initialSelectPins = [],
+  defaultAnalogPins = DEFAULT_BOARD_PROFILE.defaultAnalogPins,
+  defaultSelectPins = DEFAULT_BOARD_PROFILE.defaultSelectPins,
+  boardName = DEFAULT_BOARD_PROFILE.hardwareModel,
+  supportsPinVisualizer = true,
   onApply,
   applyDisabled = false,
 }: BoardIoModalProps) {
   const { t } = useI18n();
-  const [selectedAnalogPins, setSelectedAnalogPins] = useState<number[]>(initialAnalogPins);
-  const [selectedSelectPins, setSelectedSelectPins] = useState<number[]>(initialSelectPins);
+  const [selectedAnalogPins, setSelectedAnalogPins] = useState<number[]>(() => initialAnalogPins.length ? initialAnalogPins : defaultAnalogPins);
+  const [selectedSelectPins, setSelectedSelectPins] = useState<number[]>(() => initialSelectPins.length ? initialSelectPins : defaultSelectPins);
   const [copyStatus, setCopyStatus] = useState("");
   const [applyStatus, setApplyStatus] = useState("");
   const command = pinCommand(selectedAnalogPins, selectedSelectPins);
@@ -884,8 +901,8 @@ export function BoardIoModal({
   }
 
   function resetPins() {
-    setSelectedAnalogPins(DEFAULT_ANALOG_PINS);
-    setSelectedSelectPins(DEFAULT_SELECT_PINS);
+    setSelectedAnalogPins(defaultAnalogPins);
+    setSelectedSelectPins(defaultSelectPins);
     setCopyStatus("");
     setApplyStatus("");
   }
@@ -932,7 +949,7 @@ export function BoardIoModal({
         <div className="modal-header">
           <div>
             <h3 id="io-config-title">{t("ioConfigTitle")}</h3>
-            <p>{t("ioOrientation")}</p>
+            <p>{supportsPinVisualizer ? t("ioOrientation") : boardName}</p>
           </div>
           <button className="button" type="button" onClick={onClose}>
             {t("ioConfigClose")}
@@ -940,7 +957,13 @@ export function BoardIoModal({
         </div>
         <div className="board-diagram">
           <div className="board-outline board-image-outline">
-            <img className="board-overview-image" src={boardOverviewImage} alt="VD-CTL/R v1.0.F 2026.4 overview" />
+            {supportsPinVisualizer ? (
+              <img className="board-overview-image" src={boardOverviewImage} alt={`${boardName} overview`} />
+            ) : (
+              <div className="board-overview-image" aria-label={boardName}>
+                <strong>{boardName}</strong>
+              </div>
+            )}
           </div>
           <div className="io-config-panel">
             <div className="command-copy">
@@ -980,16 +1003,18 @@ export function BoardIoModal({
                 <strong>{selectedSelectPins.join(",") || "-"}</strong>
               </div>
             </div>
-            <div className="pin-table">
-            <div>
-              <h4>{t("ioAna")}</h4>
-              {renderPinList(ANA_FPC_PINS, "ana", selectedAnalogPins)}
-            </div>
-            <div>
-              <h4>{t("ioDig")}</h4>
-              {renderPinList(DIG_FPC_PINS, "dig", selectedSelectPins)}
+            {supportsPinVisualizer ? (
+              <div className="pin-table">
+                <div>
+                  <h4>{t("ioAna")}</h4>
+                  {renderPinList(ANA_FPC_PINS, "ana", selectedAnalogPins)}
+                </div>
+                <div>
+                  <h4>{t("ioDig")}</h4>
+                  {renderPinList(DIG_FPC_PINS, "dig", selectedSelectPins)}
+                </div>
               </div>
-            </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1004,7 +1029,7 @@ export function TerminalPage() {
   const [helpItems, setHelpItems] = useState<TerminalHelpEntry[]>([]);
   const [selectedDevice, setSelectedDevice] = useState("");
   const [selectedCommand, setSelectedCommand] = useState("status");
-  const [paramValues, setParamValues] = useState<Record<string, string>>(() => commandParamDefaults("status"));
+  const [paramValues, setParamValues] = useState<Record<string, string>>(() => commandParamDefaults("status", DEFAULT_BOARD_PROFILE));
   const [logs, setLogs] = useState<TerminalLogEntry[]>([{ type: "line", text: t("terminalReady") }]);
   const [errorMessage, setErrorMessage] = useState("");
   const [running, setRunning] = useState(false);
@@ -1057,10 +1082,17 @@ export function TerminalPage() {
       })).filter((group) => group.items.length > 0),
     [],
   );
+  const selectedDeviceProfile = useMemo(
+    () => boardProfileForHardwareModel(selectedDeviceEntry()?.hardware_model),
+    [devices, selectedDevice],
+  );
+
+  useEffect(() => {
+    setParamValues(commandParamDefaults(selectedCommand, selectedDeviceProfile));
+  }, [selectedCommand, selectedDeviceProfile]);
 
   function selectCommand(command: string) {
     setSelectedCommand(command);
-    setParamValues(commandParamDefaults(command));
     setErrorMessage("");
   }
 
@@ -1300,7 +1332,15 @@ export function TerminalPage() {
           </div>
         </aside>
       </section>
-      {showIoModal ? <BoardIoModal onClose={() => setShowIoModal(false)} /> : null}
+      {showIoModal ? (
+        <BoardIoModal
+          onClose={() => setShowIoModal(false)}
+          defaultAnalogPins={selectedDeviceProfile.defaultAnalogPins}
+          defaultSelectPins={selectedDeviceProfile.defaultSelectPins}
+          boardName={selectedDeviceProfile.hardwareModel}
+          supportsPinVisualizer={selectedDeviceProfile.supportsIoVisualizer}
+        />
+      ) : null}
     </>
   );
 }

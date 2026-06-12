@@ -21,10 +21,13 @@ class WikiApiAndPageTest(unittest.TestCase):
         tmpdir = tempfile.TemporaryDirectory()
         data_root = Path(tmpdir.name) / "mqtt_store"
         wiki_root = Path(tmpdir.name) / "wiki"
-        device_dir = wiki_root / "devices" / "vd-ctl-r-v1.0f"
-        device_dir.mkdir(parents=True, exist_ok=True)
-        (device_dir / "README.md").write_text("# VD-CTL/R\n\n- Overview\n", encoding="utf-8")
-        (device_dir / "indicators.md").write_text("| LED | State |\n| --- | --- |\n| white pulse | wake |\n", encoding="utf-8")
+        legacy_dir = wiki_root / "devices" / "vd-ctl-r-v1.0f"
+        legacy_dir.mkdir(parents=True, exist_ok=True)
+        (legacy_dir / "README.md").write_text("# VD-CTL/R\n\n- Overview\n", encoding="utf-8")
+        (legacy_dir / "indicators.md").write_text("| LED | State |\n| --- | --- |\n| white pulse | wake |\n", encoding="utf-8")
+        gcu_dir = wiki_root / "devices" / "vd-ctl-r-v2-3-d-gcu-lts"
+        gcu_dir.mkdir(parents=True, exist_ok=True)
+        (gcu_dir / "README.md").write_text("# VD-CTL/R GCU LTS\n\n- 15x15\n", encoding="utf-8")
 
         env = {
             "NEWHORIZONS_AUTOSTART": "0",
@@ -50,7 +53,10 @@ class WikiApiAndPageTest(unittest.TestCase):
         document = client.get("/newhorizons/api/wiki/document?device=vd-ctl-r-v1.0f&path=README.md")
 
         self.assertEqual(devices.status_code, 200)
-        self.assertEqual(devices.get_json()["items"][0]["slug"], "vd-ctl-r-v1.0f")
+        self.assertEqual(
+            [item["slug"] for item in devices.get_json()["items"]],
+            ["vd-ctl-r-v1.0f", "vd-ctl-r-v2-3-d-gcu-lts"],
+        )
         self.assertEqual(docs.status_code, 200)
         self.assertEqual([item["path"] for item in docs.get_json()["items"]], ["README.md", "indicators.md"])
         self.assertEqual(document.status_code, 200)
@@ -64,6 +70,8 @@ class WikiApiAndPageTest(unittest.TestCase):
         self.assertIn("api.wikiDirectory(", source)
         self.assertIn("api.wikiDocument(", source)
         self.assertIn("renderMarkdown", source)
+        self.assertIn("wikiSlugFromHardwareModel", source)
+        self.assertIn("vd-ctl-r-v2-3-d-gcu-lts", (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8"))
         self.assertIn("wiki-workspace", source)
         self.assertIn("wiki-preview-panel", source)
         self.assertIn("wiki-preview-content", styles)

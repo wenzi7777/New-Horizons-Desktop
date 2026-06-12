@@ -37,6 +37,29 @@ class ArduinoPacketV3ParserTest(unittest.TestCase):
         self.assertEqual(parsed["gyro"], [4.0, 5.0, 6.0])
         self.assertEqual(parsed["battery"], {"status": 1, "fault": 0, "vbat_mv": 4190})
 
+    def test_parse_arduino_packet_v3_with_magnetometer_extension(self):
+        flags = 0x01 | 0x04
+        device_uid = bytes.fromhex("3CDC7545CCD0")
+        matrix = struct.pack("<4f", 1.25, 2.5, 3.75, 5.0)
+        imu = struct.pack("<7f", 0.1, 0.2, 0.3, 4.0, 5.0, 6.0, 27.5)
+        mag = struct.pack("<3f", 7.0, 8.0, 9.0)
+        body = matrix + imu + mag
+        packet = bytearray(20 + len(body))
+        struct.pack_into("<HBB", packet, 0, 0xA55A, 3, flags)
+        packet[4:10] = device_uid
+        struct.pack_into("<IIH", packet, 10, 43, 123457, len(body))
+        packet[20:] = body
+
+        parsed = parse_binary_packet(bytes(packet))
+
+        self.assertEqual(parsed["packet_version"], 3)
+        self.assertEqual(parsed["sn"], 4)
+        self.assertEqual(parsed["flags"], 0x05)
+        self.assertEqual(parsed["acc"], [0.1, 0.2, 0.3])
+        self.assertEqual(parsed["gyro"], [4.0, 5.0, 6.0])
+        self.assertEqual(parsed["mag"], [7.0, 8.0, 9.0])
+        self.assertEqual(parsed["imu"]["mag"], [7.0, 8.0, 9.0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,16 +3,8 @@ import { Link, useParams } from "react-router-dom";
 
 import { useI18n } from "../i18n";
 import { api, type WikiDeviceEntry, type WikiDocumentResponse, type WikiEntry } from "../lib/api";
+import { wikiSlugFromHardwareModel } from "../lib/boardProfile";
 import { normalizeDevice, useDevicesPolling } from "../lib/device";
-
-function slugFromHardwareModel(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/-2026-4$/, "")
-    .replace(/-v1-0-f$/, "-v1.0f")
-    .replace(/^-+|-+$/g, "");
-}
 
 function inlineNodes(text: string) {
   const nodes: JSX.Element[] = [];
@@ -185,7 +177,7 @@ export function DeviceWikiPage() {
 
   useEffect(() => {
     if (!deviceEntries.length) return;
-    const inferredSlug = selectedRuntimeDevice ? slugFromHardwareModel(selectedRuntimeDevice.hardwareModel) : "";
+    const inferredSlug = selectedRuntimeDevice ? wikiSlugFromHardwareModel(selectedRuntimeDevice.hardwareModel) : "";
     const nextDevice = deviceEntries.find((entry) => entry.slug === inferredSlug)?.slug ?? deviceEntries[0]?.slug ?? "";
     if (nextDevice && !selectedDevice) {
       setSelectedDevice(nextDevice);

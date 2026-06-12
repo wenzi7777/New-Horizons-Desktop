@@ -61,11 +61,13 @@ export type VisualizationEntry = {
   received_at_ms?: number;
   device_udp_fps?: number;
   target_fps?: number;
+  mag?: number[] | null;
   acc?: number[] | null;
   gyro?: number[] | null;
   imu?: {
     acc?: number[];
     gyro?: number[];
+    mag?: number[];
     temperature_c?: number;
   } | null;
 };

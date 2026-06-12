@@ -359,7 +359,18 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("matrixLayout", source)
         self.assertIn("analogPinsFromStatus", source)
         self.assertIn("selectPinsFromStatus", source)
+        self.assertIn("boardProfileForHardwareModel", source)
         self.assertIn("setPinDraftDirty(true)", source)
+
+    def test_update_manifest_and_io_modal_use_board_profile_defaults(self):
+        source = SETTINGS_PAGE.read_text()
+        helper = (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8")
+
+        self.assertIn("defaultManifestUrlForHardwareModel", source)
+        self.assertIn("defaultManifestUrl", helper)
+        self.assertIn("arduino-gcu-lts-latest.json", helper)
+        self.assertIn("defaultAnalogPins={boardProfile.defaultAnalogPins}", source)
+        self.assertIn("supportsPinVisualizer={boardProfile.supportsIoVisualizer}", source)
 
     def test_recovery_release_ui_is_removed_for_arduino(self):
         settings_source = SETTINGS_PAGE.read_text()
@@ -448,6 +459,8 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         source = (ROOT / "frontend" / "src" / "pages" / "TerminalPage.tsx").read_text(encoding="utf-8")
 
         self.assertIn("terminal-json-details", source)
+        self.assertIn("boardProfileForHardwareModel", source)
+        self.assertIn("commandParamDefaultValue", source)
 
     def test_device_files_page_uses_arduino_file_read_write_commands(self):
         source = (ROOT / "frontend" / "src" / "pages" / "DeviceFilesPage.tsx").read_text(encoding="utf-8")
