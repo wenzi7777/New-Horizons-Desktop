@@ -712,7 +712,7 @@ class NewHorizonsService:
         elif command == "set_charge_profile" and ok:
             battery_data = data.get("battery") if isinstance(data.get("battery"), dict) else {}
             payload["battery"] = battery_data or {
-                "charger": "bq25180",
+                "charger": "integrated",
                 "configured": True,
                 "profile": request.get("profile", "compatible"),
             }
@@ -1407,7 +1407,7 @@ class NewHorizonsService:
                 battery = dict(status.get("battery") or {})
                 if profile == "fast":
                     battery.update({
-                        "charger": "bq25180",
+                        "charger": "integrated",
                         "configured": True,
                         "profile": "fast",
                         "charge_current_ma": 300,
@@ -1419,7 +1419,7 @@ class NewHorizonsService:
                     })
                 else:
                     battery.update({
-                        "charger": "bq25180",
+                        "charger": "integrated",
                         "configured": True,
                         "profile": "compatible",
                         "charge_current_ma": 250,
@@ -2791,7 +2791,7 @@ class NewHorizonsService:
                 "heap_used_percent": 27,
             },
             "battery": {
-                "charger": "bq25180",
+                "charger": "integrated",
                 "state": "not_charging",
                 "detail": "not_charging",
                 "detected": True,

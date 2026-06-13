@@ -1504,36 +1504,45 @@ export function DeviceSettingsPage() {
             </div>
           </div>
           <div className="settings-card">
-            <div className="settings-detail-header">
-              <div>
-                <h4>{t("batteryStatus")}</h4>
-                <p>{t("chargeProfileCopy")}</p>
-              </div>
-              <button className="button primary" type="button" disabled={isCommandBusy("set_charge_profile") || !deviceUid} onClick={() => void applyChargeProfile()}>
-                {isCommandBusy("set_charge_profile") ? t("running") : t("saveChargeProfile")}
-              </button>
-            </div>
-            <div className="field-grid">
-              <div className="field">
-                <label>{t("chargeProfile")}</label>
-                <select value={chargeProfile} onChange={(event) => setChargeProfile(event.target.value)}>
-                  <option value="compatible">{t("compatibleChargingMode")}</option>
-                  <option value="fast">{t("fastChargingMode")}</option>
-                </select>
-              </div>
-            </div>
-            <div className="metric-row">
-              <Metric label={t("battery")} value={batteryStatus.state ?? "-"} />
-              <Metric label={t("chargeProfile")} value={batteryStatus.profile ?? "-"} />
-              <Metric label={t("chargeCurrentMa")} value={batteryStatus.charge_current_ma ?? "-"} />
-              <Metric label={t("inputLimitMa")} value={batteryStatus.input_limit_ma ?? "-"} />
-              <Metric label={t("vbatRegMv")} value={batteryStatus.vbat_reg_mv ?? "-"} />
-              <Metric label={t("terminationPercent")} value={batteryStatus.termination_percent ?? "-"} />
-              <Metric label={t("prechargePercent")} value={batteryStatus.precharge_percent ?? "-"} />
-              <Metric label={t("safetyTimerHours")} value={batteryStatus.safety_timer_hours ?? "-"} />
-              <Metric label={t("configured")} value={boolString(batteryStatus.configured)} />
-              <Metric label={t("chargerDetected")} value={boolString(batteryStatus.charger_detected ?? batteryStatus.detected)} />
-            </div>
+            <h4>{t("batteryStatus")}</h4>
+            {!boardProfile.supportsChargeControl ? (
+              <>
+                <p className="notice">{t("unsupportedOnThisBoard")}</p>
+                <p className="service-muted">{t("chargeControlUnsupportedCopy")}</p>
+              </>
+            ) : (
+              <>
+                <div className="settings-detail-header">
+                  <div>
+                    <p>{t("chargeProfileCopy")}</p>
+                  </div>
+                  <button className="button primary" type="button" disabled={isCommandBusy("set_charge_profile") || !deviceUid} onClick={() => void applyChargeProfile()}>
+                    {isCommandBusy("set_charge_profile") ? t("running") : t("saveChargeProfile")}
+                  </button>
+                </div>
+                <div className="field-grid">
+                  <div className="field">
+                    <label>{t("chargeProfile")}</label>
+                    <select value={chargeProfile} onChange={(event) => setChargeProfile(event.target.value)}>
+                      <option value="compatible">{t("compatibleChargingMode")}</option>
+                      <option value="fast">{t("fastChargingMode")}</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="metric-row">
+                  <Metric label={t("battery")} value={batteryStatus.state ?? "-"} />
+                  <Metric label={t("chargeProfile")} value={batteryStatus.profile ?? "-"} />
+                  <Metric label={t("chargeCurrentMa")} value={batteryStatus.charge_current_ma ?? "-"} />
+                  <Metric label={t("inputLimitMa")} value={batteryStatus.input_limit_ma ?? "-"} />
+                  <Metric label={t("vbatRegMv")} value={batteryStatus.vbat_reg_mv ?? "-"} />
+                  <Metric label={t("terminationPercent")} value={batteryStatus.termination_percent ?? "-"} />
+                  <Metric label={t("prechargePercent")} value={batteryStatus.precharge_percent ?? "-"} />
+                  <Metric label={t("safetyTimerHours")} value={batteryStatus.safety_timer_hours ?? "-"} />
+                  <Metric label={t("configured")} value={boolString(batteryStatus.configured)} />
+                  <Metric label={t("chargerDetected")} value={boolString(batteryStatus.charger_detected ?? batteryStatus.detected)} />
+                </div>
+              </>
+            )}
           </div>
           <div className="settings-card">
             <div className="settings-detail-header">

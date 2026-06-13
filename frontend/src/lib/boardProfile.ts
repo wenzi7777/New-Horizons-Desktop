@@ -19,6 +19,7 @@ export type BoardProfile = {
   supportsOled: boolean;
   supportsIoVisualizerArtwork: boolean;
   supportsLocalButtonWake: boolean;
+  supportsChargeControl: boolean;
   powerUx: "local_button" | "remote_only";
   overviewAsset: string;
   analogPinOrder: string[];
@@ -182,6 +183,7 @@ const V1_PROFILE: BoardProfile = {
   supportsOled: true,
   supportsIoVisualizerArtwork: true,
   supportsLocalButtonWake: true,
+  supportsChargeControl: true,
   powerUx: "local_button",
   overviewAsset: v1OverviewAsset,
   analogPinOrder: V1_ANALOG_PIN_SLOTS.map((pin) => pin.label),
@@ -203,6 +205,7 @@ const V21_GCU_PROFILE: BoardProfile = {
   supportsOled: false,
   supportsIoVisualizerArtwork: true,
   supportsLocalButtonWake: false,
+  supportsChargeControl: false,
   powerUx: "remote_only",
   overviewAsset: gcu21OverviewAsset,
   analogPinOrder: V21_GCU_ANALOG_PIN_SLOTS.map((pin) => pin.label),
@@ -224,6 +227,7 @@ const GCU_PROFILE: BoardProfile = {
   supportsOled: false,
   supportsIoVisualizerArtwork: true,
   supportsLocalButtonWake: false,
+  supportsChargeControl: true,
   powerUx: "remote_only",
   overviewAsset: gcuOverviewAsset,
   analogPinOrder: GCU_ANALOG_PIN_SLOTS.map((pin) => pin.label),

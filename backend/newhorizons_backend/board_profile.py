@@ -12,6 +12,7 @@ DEFAULT_BOARD_PROFILE = {
     "supports_external_led": True,
     "supports_oled": True,
     "supports_local_button_wake": True,
+    "supports_charge_control": True,
     "power_ux": "local_button",
 }
 
@@ -20,6 +21,7 @@ V21_GCU_BOARD_PROFILE = {
     "supports_external_led": False,
     "supports_oled": False,
     "supports_local_button_wake": False,
+    "supports_charge_control": False,
     "power_ux": "remote_only",
 }
 
@@ -28,6 +30,7 @@ GCU_BOARD_PROFILE = {
     "supports_external_led": False,
     "supports_oled": False,
     "supports_local_button_wake": False,
+    "supports_charge_control": True,
     "power_ux": "remote_only",
 }
 

@@ -177,7 +177,7 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "set-charge-profile",
-            "description": "Configure the BQ25180 charging profile.",
+            "description": "Configure the charging profile.",
             "example": "set-charge-profile --profile fast",
         },
         {
