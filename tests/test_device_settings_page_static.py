@@ -168,6 +168,18 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn("oled.enabled === true", source)
         self.assertIn("supportsExternalLed", profile_source)
         self.assertIn("supportsOled", profile_source)
+
+    def test_v21_gcu_lts_profile_uses_remote_only_gcu_pin_layout_copy(self):
+        source = SETTINGS_PAGE.read_text(encoding="utf-8")
+        helper = (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8")
+        i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
+
+        self.assertIn('const V21_GCU_HARDWARE_MODEL = "VD-CTL/R v2.1 GCU LTS";', helper)
+        self.assertIn("wikiSlug: \"vd-ctl-r-v2-1-gcu-lts\"", helper)
+        self.assertIn("arduino-gcu-v21-lts-latest.json", helper)
+        self.assertIn("defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]", helper)
+        self.assertIn("defaultSelectPins: [18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45]", helper)
+        self.assertIn('boardProfile.powerUx === "remote_only" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1")', source)
         self.assertIn("unsupportedOnThisBoard", i18n)
         self.assertIn("externalLedUnsupportedCopy", i18n)
         self.assertIn("oledUnsupportedCopy", i18n)

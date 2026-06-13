@@ -28,6 +28,9 @@ class WikiApiAndPageTest(unittest.TestCase):
         gcu_dir = wiki_root / "devices" / "vd-ctl-r-v2-3-d-gcu-lts"
         gcu_dir.mkdir(parents=True, exist_ok=True)
         (gcu_dir / "README.md").write_text("# VD-CTL/R GCU LTS\n\n- 15x15\n", encoding="utf-8")
+        v21_dir = wiki_root / "devices" / "vd-ctl-r-v2-1-gcu-lts"
+        v21_dir.mkdir(parents=True, exist_ok=True)
+        (v21_dir / "README.md").write_text("# VD-CTL/R v2.1 GCU LTS\n\n- 10x12\n", encoding="utf-8")
 
         env = {
             "NEWHORIZONS_AUTOSTART": "0",
@@ -55,7 +58,7 @@ class WikiApiAndPageTest(unittest.TestCase):
         self.assertEqual(devices.status_code, 200)
         self.assertEqual(
             [item["slug"] for item in devices.get_json()["items"]],
-            ["vd-ctl-r-v1.0f", "vd-ctl-r-v2-3-d-gcu-lts"],
+            ["vd-ctl-r-v1.0f", "vd-ctl-r-v2-1-gcu-lts", "vd-ctl-r-v2-3-d-gcu-lts"],
         )
         self.assertEqual(docs.status_code, 200)
         self.assertEqual([item["path"] for item in docs.get_json()["items"]], ["README.md", "indicators.md"])
@@ -71,6 +74,7 @@ class WikiApiAndPageTest(unittest.TestCase):
         self.assertIn("api.wikiDocument(", source)
         self.assertIn("renderMarkdown", source)
         self.assertIn("wikiSlugFromHardwareModel", source)
+        self.assertIn("vd-ctl-r-v2-1-gcu-lts", (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8"))
         self.assertIn("vd-ctl-r-v2-3-d-gcu-lts", (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8"))
         self.assertIn("wiki-workspace", source)
         self.assertIn("wiki-preview-panel", source)

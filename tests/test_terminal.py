@@ -99,6 +99,13 @@ class DeviceCommandValidationTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "invalid_charge_profile"):
                     compile_terminal_command(f"set-charge-profile --profile {legacy_profile}")
 
+    def test_board_profile_lists_v21_gcu_lts_manifest_track(self):
+        source = BOARD_PROFILE.read_text(encoding="utf-8")
+
+        self.assertIn('const V21_GCU_HARDWARE_MODEL = "VD-CTL/R v2.1 GCU LTS";', source)
+        self.assertIn('wikiSlug: "vd-ctl-r-v2-1-gcu-lts"', source)
+        self.assertIn('defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v21-lts-latest.json"', source)
+
     def test_recovery_update_commands_are_removed_from_terminal(self):
         removed_commands = (
             "check_os_release",

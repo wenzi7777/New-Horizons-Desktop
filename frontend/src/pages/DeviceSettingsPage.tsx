@@ -686,7 +686,7 @@ export function DeviceSettingsPage() {
   const [activeSection, setActiveSection] = useState<SettingsSection>("about");
   const boardProfile = useMemo(() => boardProfileForHardwareModel(normalized?.hardwareModel), [normalized?.hardwareModel]);
   const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : t("powerStatusCopy");
-  const pinLayoutCopy = boardProfile.hardwareModel === "VD-CTL/R v2.3.D GCU LTS" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1");
+  const pinLayoutCopy = boardProfile.powerUx === "remote_only" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1");
   const [manifestUrl, setManifestUrl] = useState(() => defaultManifestUrlForHardwareModel(normalized?.hardwareModel));
   const [autoOtaOnBoot, setAutoOtaOnBoot] = useState(otaConfig.auto_apply_on_boot === true);
   const [updateChangelogVisible, setUpdateChangelogVisible] = useState(false);
