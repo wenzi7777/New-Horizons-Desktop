@@ -5,6 +5,7 @@ import { useI18n } from "../i18n";
 import { type DeviceFileEntry } from "../lib/api";
 import { normalizeDevice, useDevicesPolling } from "../lib/device";
 import { useDeviceCommand } from "../lib/deviceCommand";
+import { storageSnapshotFromResult } from "../lib/storageStatus";
 
 const SCOPES = ["user", "logs", "calibration"] as const;
 type FileScope = typeof SCOPES[number];
@@ -25,10 +26,6 @@ function hexToBytes(hex: string) {
 function chunkDataText(result: Record<string, unknown> | null | undefined) {
   const chunkResult = result ?? {};
   return typeof chunkResult.data === "string" ? chunkResult.data : "";
-}
-
-function recordValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function normalizeItems(result: Record<string, unknown> | null | undefined, scope: FileScope): DeviceFileEntry[] {
@@ -82,17 +79,6 @@ function percent(used: unknown, total: unknown) {
   return Math.max(0, Math.min(100, (usedNumber / totalNumber) * 100));
 }
 
-function storageCategories(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
-    .map((item) => ({
-      scope: String(item.scope ?? "other"),
-      bytes: Number(item.bytes ?? 0),
-    }))
-    .filter((item) => Number.isFinite(item.bytes) && item.bytes > 0);
-}
-
 export function DeviceFilesPage() {
   const { t } = useI18n();
   const { deviceUid = "" } = useParams();
@@ -121,15 +107,18 @@ export function DeviceFilesPage() {
   const [storage, setStorage] = useState<Record<string, unknown>>({});
 
   const items = useMemo(() => itemsByScope[activeScope], [activeScope, itemsByScope]);
-  const storageTotal = Number(storage.total_bytes ?? 0);
-  const storageUsed = Number(storage.used_bytes ?? 0);
-  const storageUsage = storageCategories(storage.categories);
+  const storageSnapshot = useMemo(() => storageSnapshotFromResult(storage), [storage]);
+  const storageTotal = storageSnapshot.totalBytes;
+  const storageUsed = storageSnapshot.usedBytes;
+  const storageFree = storageSnapshot.freeBytes;
+  const storageUsage = storageSnapshot.categories;
+  const hasStoragePayload = storageSnapshot.hasPayload;
   const isUserScope = activeScope === "user";
   const maintenanceBadgeClass = maintenanceMode ? "maintenance" : "normal";
 
   async function refreshStorage() {
     const response = await queue({ command: "storage_status" });
-    setStorage(recordValue(response.result));
+    setStorage(storageSnapshotFromResult(response.result).payload);
   }
 
   async function refreshScope(scope: FileScope = activeScope) {
@@ -358,7 +347,7 @@ export function DeviceFilesPage() {
               <div className="storage-card-header">
                 <div className="storage-card-header-copy">
                   <span>{t("deviceStorage")}</span>
-                  <strong>{storageTotal ? `${formatFileSize(storageUsed)} / ${formatFileSize(storageTotal)}` : t("flashUnavailable")}</strong>
+                  <strong>{hasStoragePayload ? `${formatFileSize(storageUsed)} / ${formatFileSize(storageTotal)}` : t("flashUnavailable")}</strong>
                 </div>
                 <button className="button" type="button" disabled={running || !deviceUid} onClick={() => void refreshStorage()}>
                   {t("refreshFlashUsage")}
@@ -371,7 +360,12 @@ export function DeviceFilesPage() {
                     className={`storage-segment ${item.scope}`}
                     style={{ width: `${percent(item.bytes, storageTotal)}%` }}
                   />
-                )) : null}
+                )) : storageTotal > 0 ? (
+                  <span
+                    className="storage-segment other"
+                    style={{ width: `${percent(storageUsed, storageTotal)}%` }}
+                  />
+                ) : null}
               </div>
               <div className="storage-stat-grid">
                 <div>
@@ -380,15 +374,15 @@ export function DeviceFilesPage() {
                 </div>
                 <div>
                   <span>{t("free")}</span>
-                  <strong>{formatFileSize(Number(storage.free_bytes ?? 0))}</strong>
+                  <strong>{formatFileSize(storageFree)}</strong>
                 </div>
                 <div>
                   <span>{t("total")}</span>
-                  <strong>{storageTotal ? formatFileSize(storageTotal) : "-"}</strong>
+                  <strong>{hasStoragePayload ? formatFileSize(storageTotal) : "-"}</strong>
                 </div>
               </div>
               <div className="storage-legend">
-                {storageUsage.length === 0 ? <span>{t("flashUnavailable")}</span> : null}
+                {!hasStoragePayload ? <span>{t("flashUnavailable")}</span> : null}
                 {storageUsage.map((item) => (
                   <span key={item.scope}>
                     <i className={`storage-dot ${item.scope}`} />

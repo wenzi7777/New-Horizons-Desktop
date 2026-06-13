@@ -274,6 +274,16 @@ class ArduinoControlTcpTest(unittest.TestCase):
         self.assertEqual(device["last_status"]["storage"]["total_bytes"], 1000)
         self.assertEqual(device["last_status"]["storage"]["categories"][0]["scope"], "user")
 
+    def test_storage_status_pending_result_requires_storage_payload(self):
+        result = NewHorizonsService._result_from_pending_status(
+            "storage_status",
+            "req-storage",
+            {"mode": "normal", "runtime": {"protocol": "NHO/Arduino/1"}},
+            {},
+        )
+
+        self.assertIsNone(result)
+
     def test_arduino_enter_maintenance_response_updates_status_cache(self):
         service = NewHorizonsService(mock_mode=False)
         service._record_arduino_response(
@@ -405,6 +415,44 @@ class ArduinoControlTcpTest(unittest.TestCase):
         self.assertEqual(device["last_status"]["indicators"]["oled"]["mode"], "auto")
         self.assertEqual(device["last_status"]["indicators"]["oled"]["detected"], True)
         self.assertEqual(device["last_status"]["config"]["schema_version"], 1)
+
+    def test_arduino_indicator_response_does_not_fake_v1_led_hardware_for_gcu(self):
+        service = NewHorizonsService(mock_mode=False)
+        service._record_arduino_response(
+            "3CDC7545CCD0",
+            {"command": "status", "request_id": "req-status"},
+            {
+                "ok": True,
+                "cmd": "status",
+                "message": "status",
+                "data": {
+                    "protocol": "NHO/Arduino/1",
+                    "mode": "normal",
+                    "hardware_model": "VD-CTL/R v2.3.D GCU LTS",
+                    "indicators": {
+                        "external_led": {"mode": "off", "initialized": False},
+                        "oled": {"mode": "off", "detected": False},
+                    },
+                },
+                "error": "",
+            },
+        )
+        service._record_arduino_response(
+            "3CDC7545CCD0",
+            {
+                "command": "set_indicators",
+                "request_id": "req-indicators-gcu",
+                "external_led": {"mode": "enabled", "preset": "identify", "brightness": 0.35},
+                "oled": {"mode": "auto", "page": "live_status"},
+            },
+            {"ok": True, "cmd": "set_indicators", "message": "config_stored", "data": {}, "error": ""},
+        )
+
+        device = service.get_device("3CDC7545CCD0")
+        self.assertNotEqual(device["last_status"]["indicators"]["external_led"].get("pin"), 12)
+        self.assertNotEqual(device["last_status"]["indicators"]["external_led"].get("count"), 3)
+        self.assertNotEqual(device["last_status"]["indicators"]["external_led"].get("initialized"), True)
+        self.assertNotEqual(device["last_status"]["indicators"]["oled"].get("detected"), True)
 
     def test_arduino_power_state_response_updates_power_status_cache(self):
         service = NewHorizonsService(mock_mode=False)

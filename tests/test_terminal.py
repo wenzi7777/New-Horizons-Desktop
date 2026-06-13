@@ -12,6 +12,7 @@ from newhorizons_backend.terminal import compile_terminal_command, terminal_help
 
 
 TERMINAL_PAGE = ROOT / "frontend" / "src" / "pages" / "TerminalPage.tsx"
+BOARD_PROFILE = ROOT / "frontend" / "src" / "lib" / "boardProfile.ts"
 
 
 class DeviceCommandValidationTest(unittest.TestCase):
@@ -220,6 +221,19 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertIn("0.10", item["description"])
         self.assertIn("--brightness 0.35", item["example"])
         self.assertIn('placeholder: "0.10, 0.20, 0.35, 0.50, 1.00"', source)
+
+    def test_terminal_uses_board_capability_profile_for_gcu_overview_and_command_availability(self):
+        source = TERMINAL_PAGE.read_text(encoding="utf-8")
+        helper = BOARD_PROFILE.read_text(encoding="utf-8")
+
+        self.assertIn("commandUnavailableReason", source)
+        self.assertIn("selectedDeviceProfile.overviewAsset", source)
+        self.assertIn("selectedDeviceProfile.digitalPinOrder", source)
+        self.assertIn("selectedDeviceProfile.analogPinOrder", source)
+        self.assertIn("supportsExternalLed", helper)
+        self.assertIn("supportsOled", helper)
+        self.assertIn("supportsIoVisualizerArtwork", helper)
+        self.assertIn("VDCTLV23DGCULTSOVERVIEW.png", helper)
 
     def test_terminal_uses_arduino_file_read_write_commands(self):
         read_begin = compile_terminal_command("file-read-begin --scope logs --path device.log")

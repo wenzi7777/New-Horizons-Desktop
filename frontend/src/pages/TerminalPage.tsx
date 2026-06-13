@@ -2,10 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { api, type DeviceEntry, type TerminalHelpEntry } from "../lib/api";
-import { DEFAULT_BOARD_PROFILE, boardProfileForHardwareModel } from "../lib/boardProfile";
+import { DEFAULT_BOARD_PROFILE, boardProfileForHardwareModel, type BoardPinSlot, type BoardProfile } from "../lib/boardProfile";
 import { commandDescriptionKey, useI18n } from "../i18n";
 import { valueToCsv } from "../lib/valueFormat";
-import boardOverviewImage from "../assets/VDCTLRv10F20264OVERVIEW.png";
 
 type UpdateState = {
   phase?: string;
@@ -28,12 +27,6 @@ type TerminalLogEntry =
   | { type: "line"; text: string }
   | { type: "result"; result: Record<string, unknown> };
 
-type MatrixPin = {
-  label: string;
-  gpio?: number;
-  role?: "analog" | "select";
-};
-
 type CommandParam = {
   key: string;
   labelKey: string;
@@ -50,55 +43,9 @@ type CommandBlock = {
   params: CommandParam[];
 };
 
-const ANA_FPC_PINS: MatrixPin[] = [
-  { label: "A0", gpio: 1, role: "analog" },
-  { label: "A1", gpio: 2, role: "analog" },
-  { label: "A2", gpio: 3, role: "analog" },
-  { label: "A3", gpio: 4, role: "analog" },
-  { label: "A4", gpio: 5, role: "analog" },
-  { label: "A5", gpio: 6, role: "analog" },
-  { label: "A6", gpio: 7, role: "analog" },
-  { label: "A7", gpio: 8, role: "analog" },
-  { label: "A8", gpio: 9, role: "analog" },
-  { label: "A9", gpio: 10, role: "analog" },
-  { label: "D19", gpio: 40, role: "select" },
-  { label: "D20", gpio: 41, role: "select" },
-  { label: "NC" },
-  { label: "NC" },
-  { label: "LED" },
-  { label: "SDA" },
-  { label: "SCL" },
-  { label: "GND" },
-  { label: "3V3" },
-  { label: "5V" },
-];
-
-const DIG_FPC_PINS: MatrixPin[] = [
-  { label: "D0", gpio: 13, role: "select" },
-  { label: "D1", gpio: 14, role: "select" },
-  { label: "D2", gpio: 15, role: "select" },
-  { label: "D3", gpio: 16, role: "select" },
-  { label: "D4", gpio: 17, role: "select" },
-  { label: "D5", gpio: 18, role: "select" },
-  { label: "D6", gpio: 19, role: "select" },
-  { label: "D7", gpio: 20, role: "select" },
-  { label: "D8", gpio: 21, role: "select" },
-  { label: "D9", gpio: 26, role: "select" },
-  { label: "D10", gpio: 47, role: "select" },
-  { label: "D11", gpio: 33, role: "select" },
-  { label: "D12", gpio: 34, role: "select" },
-  { label: "D13", gpio: 48, role: "select" },
-  { label: "NC" },
-  { label: "D14", gpio: 35, role: "select" },
-  { label: "D15", gpio: 36, role: "select" },
-  { label: "D16", gpio: 37, role: "select" },
-  { label: "D17", gpio: 38, role: "select" },
-  { label: "D18", gpio: 39, role: "select" },
-];
-
 const LOCAL_HELP: TerminalHelpEntry = {
   command: "io-config",
-  description: "Open the board IO visualizer.",
+  description: "Open the board pin layout helper.",
   example: "io-config",
 };
 
@@ -834,6 +781,26 @@ async function copyText(text: string) {
   }
 }
 
+function commandUnavailableReason(command: string, profile: BoardProfile, t: (key: string) => string) {
+  if (command === "set-indicators" && (!profile.supportsExternalLed || !profile.supportsOled)) {
+    return t("terminalCommandUnavailableIndicators");
+  }
+  return "";
+}
+
+function boardAwareCommandDescription(command: string, profile: BoardProfile, t: (key: string) => string) {
+  if (command === "set-indicators" && (!profile.supportsExternalLed || !profile.supportsOled)) {
+    return t("terminalHelpSetIndicatorsUnsupported");
+  }
+  if (command === "power-set-state" && profile.powerUx === "remote_only") {
+    return t("terminalHelpPowerSetStateRemoteOnly");
+  }
+  if (command === "io-config" && profile.supportsIoVisualizerArtwork) {
+    return t("terminalHelpIoConfigBoardAware");
+  }
+  return t(commandDescriptionKey(command));
+}
+
 type BoardIoModalProps = {
   onClose: () => void;
   initialAnalogPins?: number[];
@@ -842,6 +809,13 @@ type BoardIoModalProps = {
   defaultSelectPins?: number[];
   boardName?: string;
   supportsPinVisualizer?: boolean;
+  overviewAsset?: string;
+  analogPinOrder?: string[];
+  digitalPinOrder?: string[];
+  analogPinSlots?: BoardPinSlot[];
+  digitalPinSlots?: BoardPinSlot[];
+  analogHeading?: string;
+  digitalHeading?: string;
   onApply?: (analogPins: number[], selectPins: number[]) => void | Promise<void>;
   applyDisabled?: boolean;
 };
@@ -854,6 +828,13 @@ export function BoardIoModal({
   defaultSelectPins = DEFAULT_BOARD_PROFILE.defaultSelectPins,
   boardName = DEFAULT_BOARD_PROFILE.hardwareModel,
   supportsPinVisualizer = true,
+  overviewAsset = DEFAULT_BOARD_PROFILE.overviewAsset,
+  analogPinOrder = DEFAULT_BOARD_PROFILE.analogPinOrder,
+  digitalPinOrder = DEFAULT_BOARD_PROFILE.digitalPinOrder,
+  analogPinSlots = DEFAULT_BOARD_PROFILE.analogPinSlots,
+  digitalPinSlots = DEFAULT_BOARD_PROFILE.digitalPinSlots,
+  analogHeading = DEFAULT_BOARD_PROFILE.analogPinHeading,
+  digitalHeading = DEFAULT_BOARD_PROFILE.digitalPinHeading,
   onApply,
   applyDisabled = false,
 }: BoardIoModalProps) {
@@ -863,14 +844,15 @@ export function BoardIoModal({
   const [copyStatus, setCopyStatus] = useState("");
   const [applyStatus, setApplyStatus] = useState("");
   const command = pinCommand(selectedAnalogPins, selectedSelectPins);
+  const orientationCopy = boardName === DEFAULT_BOARD_PROFILE.hardwareModel ? t("ioOrientation") : boardName;
 
-  function isSelected(pin: MatrixPin) {
+  function isSelected(pin: BoardPinSlot) {
     if (pin.role === "analog" && pin.gpio !== undefined) return selectedAnalogPins.includes(pin.gpio);
     if (pin.role === "select" && pin.gpio !== undefined) return selectedSelectPins.includes(pin.gpio);
     return false;
   }
 
-  function handleToggle(pin: MatrixPin) {
+  function handleToggle(pin: BoardPinSlot) {
     if (!pin.role || pin.gpio === undefined) return;
     setCopyStatus("");
     setApplyStatus("");
@@ -914,7 +896,7 @@ export function BoardIoModal({
     setApplyStatus("");
   }
 
-  function renderPinList(pins: MatrixPin[], keyPrefix: string, selectedPins: number[]) {
+  function renderPinList(pins: BoardPinSlot[], keyPrefix: string, selectedPins: number[]) {
     return (
       <ol>
         {pins.map((pin, index) => {
@@ -949,7 +931,7 @@ export function BoardIoModal({
         <div className="modal-header">
           <div>
             <h3 id="io-config-title">{t("ioConfigTitle")}</h3>
-            <p>{supportsPinVisualizer ? t("ioOrientation") : boardName}</p>
+            <p>{supportsPinVisualizer ? orientationCopy : boardName}</p>
           </div>
           <button className="button" type="button" onClick={onClose}>
             {t("ioConfigClose")}
@@ -958,7 +940,7 @@ export function BoardIoModal({
         <div className="board-diagram">
           <div className="board-outline board-image-outline">
             {supportsPinVisualizer ? (
-              <img className="board-overview-image" src={boardOverviewImage} alt={`${boardName} overview`} />
+              <img className="board-overview-image" src={overviewAsset} alt={`${boardName} overview`} />
             ) : (
               <div className="board-overview-image" aria-label={boardName}>
                 <strong>{boardName}</strong>
@@ -1006,12 +988,12 @@ export function BoardIoModal({
             {supportsPinVisualizer ? (
               <div className="pin-table">
                 <div>
-                  <h4>{t("ioAna")}</h4>
-                  {renderPinList(ANA_FPC_PINS, "ana", selectedAnalogPins)}
+                  <h4 title={analogPinOrder.join(", ")}>{analogHeading}</h4>
+                  {renderPinList(analogPinSlots, "ana", selectedAnalogPins)}
                 </div>
                 <div>
-                  <h4>{t("ioDig")}</h4>
-                  {renderPinList(DIG_FPC_PINS, "dig", selectedSelectPins)}
+                  <h4 title={digitalPinOrder.join(", ")}>{digitalHeading}</h4>
+                  {renderPinList(digitalPinSlots, "dig", selectedSelectPins)}
                 </div>
               </div>
             ) : null}
@@ -1086,6 +1068,14 @@ export function TerminalPage() {
     () => boardProfileForHardwareModel(selectedDeviceEntry()?.hardware_model),
     [devices, selectedDevice],
   );
+  const selectedDeviceOverviewAsset = selectedDeviceProfile.overviewAsset;
+  const selectedDeviceAnalogPinOrder = selectedDeviceProfile.analogPinOrder;
+  const selectedDeviceDigitalPinOrder = selectedDeviceProfile.digitalPinOrder;
+  const boardProfile = selectedDeviceProfile;
+  const selectedCommandUnavailableReason = useMemo(
+    () => commandUnavailableReason(selectedCommand, selectedDeviceProfile, t),
+    [selectedCommand, selectedDeviceProfile, t],
+  );
 
   useEffect(() => {
     setParamValues(commandParamDefaults(selectedCommand, selectedDeviceProfile));
@@ -1148,6 +1138,12 @@ export function TerminalPage() {
   async function runCommand(commandLine: string) {
     const command = commandLine.trim();
     if (!command || running) {
+      return;
+    }
+    const unavailableReason = commandUnavailableReason(selectedBlock.command, selectedDeviceProfile, t);
+    if (unavailableReason) {
+      setErrorMessage(unavailableReason);
+      appendLog([`ERROR: ${unavailableReason}`]);
       return;
     }
     setErrorMessage("");
@@ -1227,7 +1223,7 @@ export function TerminalPage() {
                   <span>{t("commandBuilder")}</span>
                   <h3>{selectedBlock.command}</h3>
                 </div>
-                <button className="button primary" onClick={() => void handleRun()} disabled={!generatedCommand || missingParams.length > 0 || running}>
+                <button className="button primary" onClick={() => void handleRun()} disabled={!generatedCommand || missingParams.length > 0 || running || Boolean(selectedCommandUnavailableReason)}>
                   {running ? t("running") : t("run")}
                 </button>
               </div>
@@ -1235,8 +1231,9 @@ export function TerminalPage() {
                 <div className="command-root-card">
                   <span>{t("selectedCommand")}</span>
                   <strong>{selectedBlock.command}</strong>
-                  <p>{t(commandDescriptionKey(selectedBlock.command))}</p>
+                  <p>{boardAwareCommandDescription(selectedBlock.command, selectedDeviceProfile, t)}</p>
                 </div>
+                {selectedCommandUnavailableReason ? <p className="notice">{selectedCommandUnavailableReason}</p> : null}
                 {selectedBlock.params.length ? (
                   <div className="command-param-chain">
                     {selectedBlock.params.map((param, index) => (
@@ -1313,15 +1310,18 @@ export function TerminalPage() {
                 <div className="command-block-grid">
                   {group.items.map((block) => {
                     const help = helpByCommand.get(block.command);
+                    const unavailableReason = commandUnavailableReason(block.command, selectedDeviceProfile, t);
                     return (
                       <button
                         key={block.command}
                         className={`command-block-option${selectedCommand === block.command ? " active" : ""}`}
                         onClick={() => selectCommand(block.command)}
                         type="button"
+                        disabled={Boolean(unavailableReason)}
+                        title={unavailableReason || undefined}
                       >
                         <span>{block.command}</span>
-                        <small>{t(commandDescriptionKey(block.command))}</small>
+                        <small>{boardAwareCommandDescription(block.command, selectedDeviceProfile, t)}</small>
                         <code>{help?.example ?? block.command}</code>
                       </button>
                     );
@@ -1335,10 +1335,17 @@ export function TerminalPage() {
       {showIoModal ? (
         <BoardIoModal
           onClose={() => setShowIoModal(false)}
-          defaultAnalogPins={selectedDeviceProfile.defaultAnalogPins}
-          defaultSelectPins={selectedDeviceProfile.defaultSelectPins}
-          boardName={selectedDeviceProfile.hardwareModel}
-          supportsPinVisualizer={selectedDeviceProfile.supportsIoVisualizer}
+          defaultAnalogPins={boardProfile.defaultAnalogPins}
+          defaultSelectPins={boardProfile.defaultSelectPins}
+          boardName={boardProfile.hardwareModel}
+          supportsPinVisualizer={boardProfile.supportsIoVisualizer}
+          overviewAsset={boardProfile.overviewAsset}
+          analogPinOrder={boardProfile.analogPinOrder}
+          digitalPinOrder={boardProfile.digitalPinOrder}
+          analogPinSlots={boardProfile.analogPinSlots}
+          digitalPinSlots={boardProfile.digitalPinSlots}
+          analogHeading={boardProfile.analogPinHeading}
+          digitalHeading={boardProfile.digitalPinHeading}
         />
       ) : null}
     </>

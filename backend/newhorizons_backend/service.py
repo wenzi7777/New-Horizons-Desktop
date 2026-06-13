@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .arduino_protocol import CONTROL_PORT, is_arduino_heartbeat_packet, is_arduino_stream_packet, packet_device_uid, send_control_command
+from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_for_hardware_model
 from .packet_parser import PacketParseError, parse_binary_packet
 from .discovery import DiscoveryResponder
 from .udp_ingest import UDPIngestServer
@@ -1455,6 +1456,9 @@ class NewHorizonsService:
                 runtime["logging"] = logging_cfg
                 status["logging"] = logging_cfg
             elif command == "set_indicators":
+                profile = board_profile_for_hardware_model(
+                    status.get("hardware_model") or runtime.get("hardware_model") or self._devices.get(device_uid, {}).get("hardware_model")
+                )
                 indicators = dict(runtime.get("indicators") or {})
                 external = dict(indicators.get("external_led") or {})
                 oled = dict(indicators.get("oled") or {})
@@ -1465,27 +1469,38 @@ class NewHorizonsService:
                 external.setdefault("mode", "off")
                 external.setdefault("preset", "stream_health")
                 external.setdefault("brightness", 0.35)
-                external["count"] = 3
-                external["pin"] = 12
-                external["initialized"] = True
                 external.setdefault("last_show_ms", 0)
                 external.setdefault("last_error", "")
                 oled.setdefault("mode", "off")
                 oled.setdefault("page", "live_status")
                 oled.setdefault("update_hz", 1)
                 oled.setdefault("contrast", 128)
+                if profile.get("supports_external_led"):
+                    external["count"] = 3
+                    external["pin"] = 12
+                    external["initialized"] = True
+                else:
+                    external["initialized"] = False
+                    external["supported"] = False
+                    external.pop("count", None)
+                    external.pop("pin", None)
+                if not profile.get("supports_oled"):
+                    oled["detected"] = False
+                    oled["enabled"] = False
+                    oled["supported"] = False
+                    oled["addr"] = ""
                 indicators["external_led"] = external
                 indicators["oled"] = oled
                 runtime["indicators"] = indicators
                 status["indicators"] = {
                     "external_led": {
                         **external,
-                        "active_preset": external.get("preset", "stream_health") if external.get("mode") == "enabled" else "off",
+                        "active_preset": external.get("preset", "stream_health") if external.get("mode") == "enabled" and profile.get("supports_external_led") else "off",
                     },
                     "oled": {
                         **oled,
-                        "detected": bool(oled.get("detected", False)),
-                        "enabled": bool(oled.get("mode") in {"auto", "enabled"} and oled.get("detected", False)),
+                        "detected": bool(oled.get("detected", False) and profile.get("supports_oled")),
+                        "enabled": bool(oled.get("mode") in {"auto", "enabled"} and oled.get("detected", False) and profile.get("supports_oled")),
                         "addr": oled.get("addr", ""),
                         "last_error": oled.get("last_error", ""),
                     },
@@ -2308,7 +2323,19 @@ class NewHorizonsService:
         payload: dict[str, Any],
         state: dict[str, Any],
     ) -> dict[str, Any] | None:
-        if command in ("status", "query", "memory_status", "scan_health", "storage_status"):
+        if command in ("status", "query", "memory_status", "scan_health"):
+            result = dict(payload)
+            result["command"] = command
+            result["request_id"] = request_id
+            result.setdefault("status", "ok")
+            result.setdefault("message", command)
+            return result
+        if command == "storage_status":
+            has_storage_payload = any(
+                key in payload for key in ("total_bytes", "used_bytes", "free_bytes", "categories")
+            ) or isinstance(payload.get("storage"), dict)
+            if not has_storage_payload:
+                return None
             result = dict(payload)
             result["command"] = command
             result["request_id"] = request_id
@@ -2585,6 +2612,16 @@ class NewHorizonsService:
                 "timestamp_ms": 1716026911000,
                 "sn": 16,
             },
+            "NH-MOCK-GCU": {
+                "mode": "normal",
+                "hardware_model": GCU_HARDWARE_MODEL,
+                "matrix_shape": {"rows": 15, "cols": 15},
+                "p": [2.2] * 225,
+                "gyro": [0.02, 0.01, -0.02],
+                "acc": [0.01, 0.99, 0.04],
+                "timestamp_ms": 1716026922000,
+                "sn": 225,
+            },
         }
 
         for device_uid, sample in samples.items():
@@ -2594,6 +2631,7 @@ class NewHorizonsService:
                     device_uid,
                     mode=sample["mode"],
                     matrix_shape=sample["matrix_shape"],
+                    hardware_model=sample.get("hardware_model", V1_HARDWARE_MODEL),
                 ),
             )
             self._record_parsed(
@@ -2682,18 +2720,53 @@ class NewHorizonsService:
         device_uid: str,
         mode: str = "normal",
         matrix_shape: dict[str, int] | None = None,
+        hardware_model: str = V1_HARDWARE_MODEL,
     ) -> dict[str, Any]:
         shape = matrix_shape or {"rows": 4, "cols": 4}
+        profile = board_profile_for_hardware_model(hardware_model)
+        indicators = {
+            "external_led": {
+                "mode": "off",
+                "preset": "stream_health",
+                "brightness": 0.35,
+                "last_show_ms": 0,
+                "last_error": "",
+                "supported": bool(profile.get("supports_external_led")),
+            },
+            "oled": {
+                "mode": "off",
+                "page": "live_status",
+                "update_hz": 1,
+                "contrast": 128,
+                "rotation": 0,
+                "detected": bool(profile.get("supports_oled")),
+                "enabled": False,
+                "addr": "0x3C" if profile.get("supports_oled") else "",
+                "last_error": "",
+                "supported": bool(profile.get("supports_oled")),
+            },
+        }
+        if profile.get("supports_external_led"):
+            indicators["external_led"].update({"count": 3, "pin": 12, "initialized": True, "active_preset": "off"})
+        else:
+            indicators["external_led"]["initialized"] = False
+        power = {
+            "state": "normal",
+            "wake_source": "command" if profile.get("power_ux") == "remote_only" else "timer",
+            "soft_off_reason": "",
+            "charger_present": False,
+            "charge_state": "not_charging",
+        }
         return {
             "device_uid": device_uid,
             "device_name": device_uid,
             "mode": mode,
             "protocol": "NHO/Arduino/1",
             "firmware_version": "v0.5.0",
-            "hardware_model": "VD-CTL/R v1.0.F 2026.4",
+            "hardware_model": str(profile["hardware_model"]),
             "system": {
                 "name": device_uid,
-                "hardware_model": "VD-CTL/R v1.0.F 2026.4",
+                "hardware_model": str(profile["hardware_model"]),
                 "mode": mode,
                 "firmware_version": "v0.5.0",
                 "protocol": "NHO/Arduino/1",
@@ -2776,6 +2849,7 @@ class NewHorizonsService:
                     "heap_before": 0,
                     "heap_after": 0,
                 },
+                "indicators": indicators,
             },
             "imu": {
                 "enabled": True,
@@ -2814,6 +2888,8 @@ class NewHorizonsService:
                 "reboot_required": False,
             },
             "stream_buffer": {"enabled": True, "mode": "standard", "depth_frames": 3},
+            "power": power,
+            "indicators": indicators,
             "scan_health": {
                 "requested_target_fps": 60,
                 "settle_us": 20,

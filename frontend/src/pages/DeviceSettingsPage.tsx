@@ -6,6 +6,7 @@ import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from
 import { normalizeDevice, useDevicesPolling } from "../lib/device";
 import { useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
+import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { BoardIoModal } from "./TerminalPage";
 
 const STANDARD_LOG_BYTES = 12 * 1024;
@@ -93,17 +94,6 @@ function bytesLabel(value: unknown) {
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${bytes} B`;
-}
-
-function storageCategories(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
-    .map((item) => ({
-      scope: stringValue(item.scope, "other"),
-      bytes: numberValue(item.bytes, 0),
-    }))
-    .filter((item) => item.bytes > 0);
 }
 
 function shouldAutoRefreshStatusForSection(section: SettingsSection) {
@@ -660,10 +650,12 @@ export function DeviceSettingsPage() {
   const memory = recordValue(status.memory ?? (lastResultCommand === "memory_status" ? recordValue(lastResult.data) : undefined) ?? status);
   const logging = recordValue(status.logging ?? runtime.logging ?? (lastResultCommand === "set_log" ? lastResult.log_status ?? lastResult.logging : undefined));
   const otaConfig = recordValue(status.ota ?? status.update_config ?? (lastResultCommand === "set_ota_config" ? lastResult.ota : undefined));
-  const storage = recordValue(status.storage ?? (lastResultCommand === "storage_status" ? lastResult : undefined));
-  const storageUsage = storageCategories(storage.categories);
-  const storageTotal = numberValue(storage.total_bytes, 0);
-  const storageUsed = numberValue(storage.used_bytes, 0);
+  const storageSnapshot = storageSnapshotFromDevice(device);
+  const storageUsage = storageSnapshot.categories;
+  const storageTotal = storageSnapshot.totalBytes;
+  const storageUsed = storageSnapshot.usedBytes;
+  const storageFree = storageSnapshot.freeBytes;
+  const hasStoragePayload = storageSnapshot.hasPayload;
   const ramTotal = numberValue(memory.heap_total, 0);
   const ramFree = numberValue(memory.heap_free, 0);
   const ramUsed = numberValue(memory.heap_used, ramTotal > ramFree ? ramTotal - ramFree : 0);
@@ -693,6 +685,8 @@ export function DeviceSettingsPage() {
 
   const [activeSection, setActiveSection] = useState<SettingsSection>("about");
   const boardProfile = useMemo(() => boardProfileForHardwareModel(normalized?.hardwareModel), [normalized?.hardwareModel]);
+  const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : t("powerStatusCopy");
+  const pinLayoutCopy = boardProfile.hardwareModel === "VD-CTL/R v2.3.D GCU LTS" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1");
   const [manifestUrl, setManifestUrl] = useState(() => defaultManifestUrlForHardwareModel(normalized?.hardwareModel));
   const [autoOtaOnBoot, setAutoOtaOnBoot] = useState(otaConfig.auto_apply_on_boot === true);
   const [updateChangelogVisible, setUpdateChangelogVisible] = useState(false);
@@ -1219,7 +1213,7 @@ export function DeviceSettingsPage() {
           <div className="settings-detail-header">
             <div>
               <h3>{t("settingsSection_pins")}</h3>
-              <p>{t("matrixShape")}: {normalized?.matrixShape ?? "-"}</p>
+              <p>{pinLayoutCopy} {t("matrixShape")}: {normalized?.matrixShape ?? "-"}</p>
             </div>
             <button className="button" type="button" onClick={() => setShowIoModal(true)}>
               {t("ioConfigOpen")}
@@ -1311,101 +1305,119 @@ export function DeviceSettingsPage() {
         <div className="settings-stack">
           <div className="settings-card">
             <h4>{t("externalLedIndicators")}</h4>
-            <p>{t("externalLedIndicatorsCopy")}</p>
-            <div className="field-grid">
-              <div className="field">
-                <label>{t("externalLedMode")}</label>
-                <select value={externalLedMode} onChange={(event) => setExternalLedMode(event.target.value)}>
-                  <option value="off">{t("indicatorMode_off")}</option>
-                  <option value="enabled">{t("indicatorMode_enabled")}</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>{t("externalLedPreset")}</label>
-                <select value={externalPreset} onChange={(event) => setExternalPreset(event.target.value)}>
-                  <option value="stream_health">{t("indicatorPreset_stream_health")}</option>
-                  <option value="pressure_activity">{t("indicatorPreset_pressure_activity")}</option>
-                  <option value="recording_focus">{t("indicatorPreset_recording_focus")}</option>
-                  <option value="calibration_focus">{t("indicatorPreset_calibration_focus")}</option>
-                  <option value="identify">{t("indicatorPreset_identify")}</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>{t("paramBrightness")}</label>
-                <select value={String(brightness)} onChange={(event) => setBrightness(Number(event.target.value) || DEFAULT_EXTERNAL_LED_BRIGHTNESS)}>
-                  {EXTERNAL_LED_BRIGHTNESS_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {t(option.labelKey)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="metric-row">
-              <Metric label={t("externalLedPin")} value={externalLed.pin ?? "-"} />
-              <Metric label={t("externalLedCount")} value={externalLed.count ?? "-"} />
-              <Metric label={t("externalLedInitialized")} value={boolString(externalLed.initialized)} />
-              <Metric label={t("activePreset")} value={externalLed.active_preset ?? "-"} />
-              <Metric label={t("externalLedLastShow")} value={externalLed.last_show_ms ?? "-"} />
-              <Metric label={t("externalLedLastError")} value={externalLed.last_error ?? "-"} />
-            </div>
-            <div className="actions">
-              <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveExternalLed"), { command: "set_indicators", external_led: { mode: externalLedMode, preset: externalPreset, brightness } })}>
-                {isCommandBusy("set_indicators") ? t("running") : t("saveExternalLed")}
-              </button>
-              <button className="button" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("testExternalLed"), { command: "set_indicators", external_led: { mode: "enabled", preset: "identify", brightness } })}>
-                {isCommandBusy("set_indicators") ? t("running") : t("testExternalLed")}
-              </button>
-            </div>
+            {!boardProfile.supportsExternalLed ? (
+              <>
+                <p className="notice">{t("unsupportedOnThisBoard")}</p>
+                <p className="service-muted">{t("externalLedUnsupportedCopy")}</p>
+              </>
+            ) : (
+              <>
+                <p>{t("externalLedIndicatorsCopy")}</p>
+                <div className="field-grid">
+                  <div className="field">
+                    <label>{t("externalLedMode")}</label>
+                    <select value={externalLedMode} onChange={(event) => setExternalLedMode(event.target.value)}>
+                      <option value="off">{t("indicatorMode_off")}</option>
+                      <option value="enabled">{t("indicatorMode_enabled")}</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>{t("externalLedPreset")}</label>
+                    <select value={externalPreset} onChange={(event) => setExternalPreset(event.target.value)}>
+                      <option value="stream_health">{t("indicatorPreset_stream_health")}</option>
+                      <option value="pressure_activity">{t("indicatorPreset_pressure_activity")}</option>
+                      <option value="recording_focus">{t("indicatorPreset_recording_focus")}</option>
+                      <option value="calibration_focus">{t("indicatorPreset_calibration_focus")}</option>
+                      <option value="identify">{t("indicatorPreset_identify")}</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>{t("paramBrightness")}</label>
+                    <select value={String(brightness)} onChange={(event) => setBrightness(Number(event.target.value) || DEFAULT_EXTERNAL_LED_BRIGHTNESS)}>
+                      {EXTERNAL_LED_BRIGHTNESS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {t(option.labelKey)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="metric-row">
+                  <Metric label={t("externalLedPin")} value={externalLed.pin ?? "-"} />
+                  <Metric label={t("externalLedCount")} value={externalLed.count ?? "-"} />
+                  <Metric label={t("externalLedInitialized")} value={boolString(externalLed.initialized)} />
+                  <Metric label={t("activePreset")} value={externalLed.active_preset ?? "-"} />
+                  <Metric label={t("externalLedLastShow")} value={externalLed.last_show_ms ?? "-"} />
+                  <Metric label={t("externalLedLastError")} value={externalLed.last_error ?? "-"} />
+                </div>
+                <div className="actions">
+                  <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveExternalLed"), { command: "set_indicators", external_led: { mode: externalLedMode, preset: externalPreset, brightness } })}>
+                    {isCommandBusy("set_indicators") ? t("running") : t("saveExternalLed")}
+                  </button>
+                  <button className="button" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("testExternalLed"), { command: "set_indicators", external_led: { mode: "enabled", preset: "identify", brightness } })}>
+                    {isCommandBusy("set_indicators") ? t("running") : t("testExternalLed")}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
           <div className="settings-card">
             <h4>{t("ssd1306Display")}</h4>
-            <p>{oled.detected ? t("screenDetected") : t("noSsd1306Detected")}</p>
-            <div className="metric-row">
-              <Metric label={t("detected")} value={boolString(oled.detected)} />
-              <Metric label={t("oledAddress")} value={oled.addr ?? "-"} />
-              <Metric label={t("oledLastError")} value={oled.last_error ?? "-"} />
-            </div>
-            <div className="field-grid">
-              <div className="field">
-                <label>{t("paramOledMode")}</label>
-                <select value={oledMode} onChange={(event) => setOledMode(event.target.value)}>
-                  <option value="off">{t("indicatorMode_off")}</option>
-                  <option value="auto">{t("indicatorMode_auto")}</option>
-                  <option value="enabled">{t("indicatorMode_enabled")}</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>{t("oledPage")}</label>
-                <select value={oledPage} onChange={(event) => setOledPage(event.target.value)}>
-                  <option value="live_status">{t("oledPage_live_status")}</option>
-                  <option value="sensor_snapshot">{t("oledPage_sensor_snapshot")}</option>
-                  <option value="recording_status">{t("oledPage_recording_status")}</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>{t("oledUpdateHz")}</label>
-                <input type="number" value={oledUpdateHz} onChange={(event) => setOledUpdateHz(Number(event.target.value) || 1)} />
-              </div>
-              <div className="field">
-                <label>{t("oledContrast")}</label>
-                <input type="number" value={oledContrast} onChange={(event) => setOledContrast(Number(event.target.value) || 128)} />
-              </div>
-              <div className="field">
-                <label>{t("oledRotation")}</label>
-                <select value={oledRotation} onChange={(event) => setOledRotation(Number(event.target.value))}>
-                  <option value={0}>{t("oledRotation_0")}</option>
-                  <option value={1}>{t("oledRotation_90")}</option>
-                  <option value={2}>{t("oledRotation_180")}</option>
-                  <option value={3}>{t("oledRotation_270")}</option>
-                </select>
-              </div>
-            </div>
-            <div className="actions">
-              <button className="button" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveScreen"), { command: "set_indicators", oled: { mode: oledMode, page: oledPage, update_hz: oledUpdateHz, contrast: oledContrast, rotation: oledRotation } })}>
-                {isCommandBusy("set_indicators") ? t("running") : t("saveScreen")}
-              </button>
-            </div>
+            {!boardProfile.supportsOled ? (
+              <>
+                <p className="notice">{t("unsupportedOnThisBoard")}</p>
+                <p className="service-muted">{t("oledUnsupportedCopy")}</p>
+              </>
+            ) : (
+              <>
+                <p>{oled.detected ? t("screenDetected") : t("noSsd1306Detected")}</p>
+                <div className="metric-row">
+                  <Metric label={t("detected")} value={boolString(oled.detected)} />
+                  <Metric label={t("oledAddress")} value={oled.addr ?? "-"} />
+                  <Metric label={t("oledLastError")} value={oled.last_error ?? "-"} />
+                </div>
+                <div className="field-grid">
+                  <div className="field">
+                    <label>{t("paramOledMode")}</label>
+                    <select value={oledMode} onChange={(event) => setOledMode(event.target.value)}>
+                      <option value="off">{t("indicatorMode_off")}</option>
+                      <option value="auto">{t("indicatorMode_auto")}</option>
+                      <option value="enabled">{t("indicatorMode_enabled")}</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>{t("oledPage")}</label>
+                    <select value={oledPage} onChange={(event) => setOledPage(event.target.value)}>
+                      <option value="live_status">{t("oledPage_live_status")}</option>
+                      <option value="sensor_snapshot">{t("oledPage_sensor_snapshot")}</option>
+                      <option value="recording_status">{t("oledPage_recording_status")}</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>{t("oledUpdateHz")}</label>
+                    <input type="number" value={oledUpdateHz} onChange={(event) => setOledUpdateHz(Number(event.target.value) || 1)} />
+                  </div>
+                  <div className="field">
+                    <label>{t("oledContrast")}</label>
+                    <input type="number" value={oledContrast} onChange={(event) => setOledContrast(Number(event.target.value) || 128)} />
+                  </div>
+                  <div className="field">
+                    <label>{t("oledRotation")}</label>
+                    <select value={oledRotation} onChange={(event) => setOledRotation(Number(event.target.value))}>
+                      <option value={0}>{t("oledRotation_0")}</option>
+                      <option value={1}>{t("oledRotation_90")}</option>
+                      <option value={2}>{t("oledRotation_180")}</option>
+                      <option value={3}>{t("oledRotation_270")}</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="actions">
+                  <button className="button" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveScreen"), { command: "set_indicators", oled: { mode: oledMode, page: oledPage, update_hz: oledUpdateHz, contrast: oledContrast, rotation: oledRotation } })}>
+                    {isCommandBusy("set_indicators") ? t("running") : t("saveScreen")}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       );
@@ -1527,7 +1539,7 @@ export function DeviceSettingsPage() {
             <div className="settings-detail-header">
               <div>
                 <h4>{t("powerStatus")}</h4>
-                <p>{t("powerStatusCopy")}</p>
+                <p>{powerStatusCopy}</p>
               </div>
               <div className="actions compact">
                 <button className="button" type="button" disabled={isCommandBusy("power_set_state") || !deviceUid} onClick={() => void applyPowerState("normal")}>
@@ -1614,7 +1626,7 @@ export function DeviceSettingsPage() {
           <div className="storage-card">
             <div className="storage-card-header">
               <span>{t("deviceStorage")}</span>
-              <strong>{storageTotal ? `${bytesLabel(storageUsed)} / ${bytesLabel(storageTotal)}` : t("flashUnavailable")}</strong>
+              <strong>{hasStoragePayload ? `${bytesLabel(storageUsed)} / ${bytesLabel(storageTotal)}` : t("flashUnavailable")}</strong>
             </div>
             <div className="storage-bar-track" aria-label={t("deviceStorage")}>
               {storageUsage.length > 0 ? storageUsage.map((item) => (
@@ -1623,15 +1635,20 @@ export function DeviceSettingsPage() {
                   className={`storage-segment ${item.scope}`}
                   style={{ width: `${percent(item.bytes, storageTotal)}%` }}
                 />
-              )) : null}
+              )) : storageTotal > 0 ? (
+                <span
+                  className="storage-segment other"
+                  style={{ width: `${percent(storageUsed, storageTotal)}%` }}
+                />
+              ) : null}
             </div>
             <div className="storage-summary">
               <span>{t("used")}: {bytesLabel(storageUsed)}</span>
-              <span>{t("free")}: {bytesLabel(storage.free_bytes)}</span>
-              <span>{t("total")}: {storageTotal ? bytesLabel(storageTotal) : "-"}</span>
+              <span>{t("free")}: {bytesLabel(storageFree)}</span>
+              <span>{t("total")}: {hasStoragePayload ? bytesLabel(storageTotal) : "-"}</span>
             </div>
             <div className="storage-legend">
-              {storageUsage.length === 0 ? <span>{t("flashUnavailable")}</span> : null}
+              {!hasStoragePayload ? <span>{t("flashUnavailable")}</span> : null}
               {storageUsage.map((item) => (
                 <span key={item.scope}>
                   <i className={`storage-dot ${item.scope}`} />
@@ -1752,6 +1769,13 @@ export function DeviceSettingsPage() {
           defaultSelectPins={boardProfile.defaultSelectPins}
           boardName={boardProfile.hardwareModel}
           supportsPinVisualizer={boardProfile.supportsIoVisualizer}
+          overviewAsset={boardProfile.overviewAsset}
+          analogPinOrder={boardProfile.analogPinOrder}
+          digitalPinOrder={boardProfile.digitalPinOrder}
+          analogPinSlots={boardProfile.analogPinSlots}
+          digitalPinSlots={boardProfile.digitalPinSlots}
+          analogHeading={boardProfile.analogPinHeading}
+          digitalHeading={boardProfile.digitalPinHeading}
           onApply={applyIoPins}
           applyDisabled={isCommandBusy("set_matrix_layout") || !deviceUid}
         />

@@ -138,6 +138,8 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
     def test_indicators_use_external_ws2812b_and_ssd1306_modes_from_status(self):
         source = SETTINGS_PAGE.read_text()
+        profile_source = (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8")
+        i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
 
         self.assertIn("externalLedMode", source)
         self.assertIn("oledMode", source)
@@ -164,6 +166,11 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn("manual_preset", source)
         self.assertNotIn("externalLedMode, \"auto\"", source)
         self.assertNotIn("oled.enabled === true", source)
+        self.assertIn("supportsExternalLed", profile_source)
+        self.assertIn("supportsOled", profile_source)
+        self.assertIn("unsupportedOnThisBoard", i18n)
+        self.assertIn("externalLedUnsupportedCopy", i18n)
+        self.assertIn("oledUnsupportedCopy", i18n)
 
     def test_indicators_limit_brightness_to_fixed_safe_presets(self):
         source = SETTINGS_PAGE.read_text()
@@ -365,12 +372,35 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
     def test_update_manifest_and_io_modal_use_board_profile_defaults(self):
         source = SETTINGS_PAGE.read_text()
         helper = (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8")
+        terminal = (ROOT / "frontend" / "src" / "pages" / "TerminalPage.tsx").read_text(encoding="utf-8")
 
         self.assertIn("defaultManifestUrlForHardwareModel", source)
         self.assertIn("defaultManifestUrl", helper)
         self.assertIn("arduino-gcu-lts-latest.json", helper)
+        self.assertIn("overviewAsset", helper)
+        self.assertIn("digitalPinOrder", helper)
+        self.assertIn("analogPinOrder", helper)
+        self.assertIn("VDCTLV23DGCULTSOVERVIEW.png", helper)
         self.assertIn("defaultAnalogPins={boardProfile.defaultAnalogPins}", source)
         self.assertIn("supportsPinVisualizer={boardProfile.supportsIoVisualizer}", source)
+        self.assertIn("boardProfile.overviewAsset", terminal)
+        self.assertIn("boardProfile.digitalPinOrder", terminal)
+        self.assertIn("boardProfile.analogPinOrder", terminal)
+
+    def test_power_and_indicator_copy_are_board_aware(self):
+        source = SETTINGS_PAGE.read_text()
+        i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("boardProfile.powerUx", source)
+        self.assertIn("powerStatusCopyRemoteOnly", i18n)
+        self.assertIn("supportsLocalButtonWake", (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8"))
+
+    def test_device_flash_uses_shared_storage_snapshot_helper(self):
+        settings_source = SETTINGS_PAGE.read_text(encoding="utf-8")
+        files_source = (ROOT / "frontend" / "src" / "pages" / "DeviceFilesPage.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("storageSnapshotFromDevice", settings_source)
+        self.assertIn("storageSnapshotFromResult", files_source)
 
     def test_recovery_release_ui_is_removed_for_arduino(self):
         settings_source = SETTINGS_PAGE.read_text()

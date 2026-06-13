@@ -182,7 +182,7 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "power-set-state",
-            "description": "Switch the device between normal mode and soft-off power states.",
+            "description": "Switch the device between normal mode and soft-off power states. Some boards use a remote-only soft-off UX.",
             "example": "power-set-state --state soft_off_auto",
         },
         {
@@ -197,7 +197,7 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "set-indicators",
-            "description": "Configure the external WS2812B indicators and optional SSD1306 display. Brightness expects decimal values such as 0.10, 0.35, 0.50, or 1.00.",
+            "description": "Configure supported indicator hardware. Brightness expects decimal values such as 0.10, 0.35, 0.50, or 1.00.",
             "example": "set-indicators --external-led-mode enabled --preset stream_health --brightness 0.35 --oled-mode auto --oled-page live_status",
         },
         {
@@ -207,7 +207,7 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "io-config",
-            "description": "Open the board IO visualizer in the terminal UI.",
+            "description": "Open the board-aware pin layout and overview helper in the terminal UI.",
             "example": "io-config",
         },
         {
