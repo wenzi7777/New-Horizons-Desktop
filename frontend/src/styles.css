@@ -1130,8 +1130,15 @@ button:disabled {
   gap: 16px;
 }
 
+.calibration-right-stack {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
 .calibration-capture-card,
-.calibration-browser-card {
+.calibration-browser-card,
+.calibration-preview-card {
   display: grid;
   gap: 14px;
 }
@@ -1208,9 +1215,54 @@ button:disabled {
   background: transparent;
   display: grid;
   justify-items: start;
-  gap: 2px;
+  gap: 4px;
   padding: 0;
   color: inherit;
+  width: 100%;
+}
+
+.calibration-level-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.level-source-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  text-transform: lowercase;
+  margin-left: auto;
+}
+
+.level-source-badge.draft {
+  background: #eef5dc;
+  border-color: #97aa58;
+  color: #5a6e20;
+}
+
+.level-progress-bar {
+  height: 4px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.level-progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.2s ease;
+}
+
+.level-progress-text {
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .button.tiny {
@@ -1225,6 +1277,10 @@ button:disabled {
 
 @media (max-width: 1080px) {
   .calibration-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .calibration-right-stack {
     grid-template-columns: 1fr;
   }
 

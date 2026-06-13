@@ -360,15 +360,27 @@ function CalibrationWorkbench({
     return Array.from(seen.values()).sort((a, b) => a.level - b.level);
   }, [calibrationState.draft_levels, calibrationState.levels]);
 
+  function findNextUncalibrated(current: number): number | null {
+    for (let i = 1; i < totalSensors; i++) {
+      const idx = (current + i) % totalSensors;
+      const cell = draftLookup.get(idx) ?? savedLookup.get(idx);
+      if (!cell?.calibrated) return idx;
+    }
+    return null;
+  }
+
   async function captureSelectedSensor() {
+    const capturedIndex = selectedCalibrationSensor;
     await run(t("captureSelectedSensor"), {
       command: "calibration_capture_cell",
-      sensor_index: selectedCalibrationSensor,
+      sensor_index: capturedIndex,
       level: calibrationLevel,
       duration_ms: calibrationDuration,
     }, 40000);
     await syncCalibrationStatus();
     await loadLevelPreview(calibrationLevel);
+    const next = findNextUncalibrated(capturedIndex);
+    if (next !== null) setSelectedCalibrationSensor(next);
   }
 
   async function captureAllSensors() {
@@ -485,6 +497,12 @@ function CalibrationWorkbench({
           <button className="button danger" type="button" disabled={busyCommand === "calibration_clear_profile" || !maintenanceMode || !deviceUid} onClick={() => void clearCalibrationProfile()}>
             {busyCommand === "calibration_clear_profile" ? t("running") : t("clearCalibrationProfile")}
           </button>
+          <button className="button" type="button" disabled={busyCommand === "storage_status" || !deviceUid || isDeviceOffline} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
+            {busyCommand === "storage_status" ? t("running") : t("refreshFlashUsage")}
+          </button>
+          <a className="button" href={appHref(`device/${encodeURIComponent(deviceUid)}/files`)} target="_blank" rel="noreferrer">
+            {t("maintenanceFiles")}
+          </a>
         </div>
       </div>
 
@@ -543,32 +561,43 @@ function CalibrationWorkbench({
           </div>
         </section>
 
-        <section className="settings-card calibration-browser-card">
-          <div className="settings-detail-header">
-            <div>
-              <h4>{t("calibrationLevelBrowser")}</h4>
-              <p>{t("calibrationLevelBrowserCopy")}</p>
-            </div>
-          </div>
-          <div className="calibration-level-list">
-            {mergedLevels.length > 0 ? mergedLevels.map((item) => (
-              <div className={`calibration-level-item${selectedLevel === item.level ? " active" : ""}`} key={`${item.source}-${item.level}`}>
-                <button type="button" onClick={() => void loadLevelPreview(item.level)}>
-                  <strong>{t("paramLevel")} {item.level}</strong>
-                  <span>{item.captured_points}/{item.total_points}</span>
-                </button>
-                <button className="button danger tiny" type="button" disabled={busyCommand === "calibration_delete_level" || !maintenanceMode} onClick={() => void deleteCalibrationLevel(item.level)}>
-                  {t("delete")}
-                </button>
+        <div className="calibration-right-stack">
+          <section className="settings-card calibration-browser-card">
+            <div className="settings-detail-header">
+              <div>
+                <h4>{t("calibrationLevelBrowser")}</h4>
+                <p>{t("calibrationLevelBrowserCopy")}</p>
               </div>
-            )) : <p className="service-muted">{t("noCalibrationLevels")}</p>}
-          </div>
+            </div>
+            <div className="calibration-level-list">
+              {mergedLevels.length > 0 ? mergedLevels.map((item) => {
+                const pct = item.total_points > 0 ? Math.round(item.captured_points / item.total_points * 100) : 0;
+                return (
+                  <div className={`calibration-level-item${selectedLevel === item.level ? " active" : ""}`} key={`${item.source}-${item.level}`}>
+                    <button type="button" onClick={() => void loadLevelPreview(item.level)}>
+                      <div className="calibration-level-item-header">
+                        <strong>{t("paramLevel")} {item.level}</strong>
+                        <span className={`level-source-badge${item.source === "draft" ? " draft" : ""}`}>{item.source}</span>
+                      </div>
+                      <div className="level-progress-bar">
+                        <div className="level-progress-bar-fill" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="level-progress-text">{item.captured_points}/{item.total_points} ({pct}%)</span>
+                    </button>
+                    <button className="button danger tiny" type="button" disabled={busyCommand === "calibration_delete_level" || !maintenanceMode} onClick={() => void deleteCalibrationLevel(item.level)}>
+                      {t("delete")}
+                    </button>
+                  </div>
+                );
+              }) : <p className="service-muted">{t("noCalibrationLevels")}</p>}
+            </div>
+          </section>
 
-          <div className="calibration-preview-panel">
+          <section className="settings-card calibration-preview-card">
             <div className="settings-detail-header">
               <div>
                 <h4>{t("calibrationLevelPreview")}</h4>
-                <p>{selectedLevel === null ? t("noPreviewSelected") : `${t("paramLevel")} ${selectedLevel}`}</p>
+                <p>{selectedLevel === null ? t("noCalibrationPreviewSelected") : `${t("paramLevel")} ${selectedLevel}`}</p>
               </div>
               {selectedLevel !== null ? (
                 <button className="button" type="button" disabled={busyCommand === "calibration_dump_level" || isDeviceOffline} onClick={() => void loadLevelPreview(selectedLevel)}>
@@ -602,19 +631,10 @@ function CalibrationWorkbench({
                 </div>
               </>
             ) : (
-              <p className="service-muted">{t("noPreviewSelected")}</p>
+              <p className="service-muted">{t("noCalibrationPreviewSelected")}</p>
             )}
-          </div>
-
-          <div className="actions compact">
-            <button className="button" type="button" disabled={busyCommand === "storage_status" || !deviceUid || isDeviceOffline} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
-              {busyCommand === "storage_status" ? t("running") : t("refreshFlashUsage")}
-            </button>
-            <a className="button" href={appHref(`device/${encodeURIComponent(deviceUid)}/files`)} target="_blank" rel="noreferrer">
-              {t("maintenanceFiles")}
-            </a>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
     </div>
   );
