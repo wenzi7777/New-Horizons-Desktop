@@ -380,6 +380,33 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('t("manualConfirmCapture")', source)
         self.assertIn('Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, IMADA ${stability.imadaValue.toFixed(3)} N', source)
 
+    def test_pressure_calibration_commit_holds_low_pressure_with_compensation(self):
+        source = SETTINGS_PAGE.read_text(encoding="utf-8")
+
+        self.assertIn("const PRESSURE_POST_CAL_HOLD_KPA = 3;", source)
+        self.assertIn("const PRESSURE_POST_CAL_HOLD_SETTLE_MS = 3000;", source)
+        self.assertIn('addLog("Returning pressure system to low-pressure hold…");', source)
+        self.assertIn("await api.pressureCalSetTarget(PRESSURE_POST_CAL_HOLD_KPA);", source)
+        self.assertIn("await new Promise<void>((res) => setTimeout(res, PRESSURE_POST_CAL_HOLD_SETTLE_MS));", source)
+        self.assertIn('addLog("Calibration complete! Pressure system holding at low pressure with compensation enabled.");', source)
+        self.assertNotIn('await api.pressureCalSetTarget(0);', source)
+        self.assertNotIn('addLog("Calibration complete! Pressure system fully stopped.");', source)
+
+    def test_pressure_calibration_enables_control_and_safe_modes_runaway_pressure(self):
+        source = SETTINGS_PAGE.read_text(encoding="utf-8")
+        api_source = (ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
+
+        self.assertIn("const PRESSURE_OVERSHOOT_ABORT_KPA = 2.0;", source)
+        self.assertIn("const PRESSURE_OVERSHOOT_ABORT_SAMPLES = 3;", source)
+        self.assertIn("await api.pressureCalSetControlEnabled(true);", source)
+        self.assertIn("await api.pressureCalSafeMode();", source)
+        self.assertIn("r.uno.control_enabled", source)
+        self.assertIn("r.uno.valve_open", source)
+        self.assertIn("r.uno.pressure_kpa > targetKpa + PRESSURE_OVERSHOOT_ABORT_KPA", source)
+        self.assertIn("overshootCountRef.current >= PRESSURE_OVERSHOOT_ABORT_SAMPLES", source)
+        self.assertIn("pressureCalSetControlEnabled", api_source)
+        self.assertIn("pressureCalSafeMode", api_source)
+
     def test_unused_filter_ui_is_removed_from_settings(self):
         source = SETTINGS_PAGE.read_text()
 

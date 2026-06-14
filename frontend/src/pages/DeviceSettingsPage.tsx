@@ -208,6 +208,10 @@ const PRESSURE_STABLE_ADAPTIVE_RANGE_KPA = 0.25;
 const PRESSURE_STABLE_ADAPTIVE_TARGET_SLACK_KPA = 1.0;
 const PRESSURE_STABLE_MAX_WAIT_MS = 20000;
 const PRESSURE_STABLE_TIMEOUT_RANGE_KPA = 0.4;
+const PRESSURE_OVERSHOOT_ABORT_KPA = 2.0;
+const PRESSURE_OVERSHOOT_ABORT_SAMPLES = 3;
+const PRESSURE_POST_CAL_HOLD_KPA = 3;
+const PRESSURE_POST_CAL_HOLD_SETTLE_MS = 3000;
 
 type PressureCalPhase =
   | "idle" | "starting_session" | "setting_pressure" | "stabilizing"
@@ -261,6 +265,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const [activeTargetKpa, setActiveTargetKpa] = useState<number | null>(null);
   const abortRef = useRef(false);
   const stableCountRef = useRef(0);
+  const overshootCountRef = useRef(0);
   const manualConfirmRef = useRef<PressureStableResult | null>(null);
 
   const isRunning = phase !== "idle" && phase !== "done" && phase !== "error";
@@ -356,6 +361,14 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
     };
   }
 
+  async function enterPressureSafeMode() {
+    try {
+      await api.pressureCalSafeMode();
+    } catch {
+      await api.pressureCalStop();
+    }
+  }
+
   async function waitForStable(targetKpa: number): Promise<PressureStableResult> {
     let lastImada = 0;
     let lastKpa: number | null = null;
@@ -389,6 +402,19 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           pressureSamples.shift();
         }
         const elapsedMs = Date.now() - startedAt;
+        if (
+          r.uno.control_enabled
+          && r.uno.valve_open
+          && r.uno.pressure_kpa > targetKpa + PRESSURE_OVERSHOOT_ABORT_KPA
+        ) {
+          overshootCountRef.current++;
+          if (overshootCountRef.current >= PRESSURE_OVERSHOOT_ABORT_SAMPLES) {
+            try { await api.pressureCalSafeMode(); } catch { /* ignore */ }
+            throw new Error(`pressure_runaway_detected target=${targetKpa.toFixed(2)} current=${r.uno.pressure_kpa.toFixed(2)}`);
+          }
+        } else {
+          overshootCountRef.current = 0;
+        }
         if (Math.abs(r.uno.pressure_kpa - targetKpa) < PRESSURE_STABLE_TOLERANCE_KPA) {
           stableCountRef.current++;
           if (stableCountRef.current >= PRESSURE_STABLE_CONFIRMATION_SAMPLES) {
@@ -453,6 +479,9 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       addLog("Starting calibration session...");
       await api.queueDeviceCommand(deviceUid, { command: "calibration_session_begin" });
       await new Promise<void>((res) => setTimeout(res, 1000));
+      addLog("Enabling pressure control…");
+      await api.pressureCalSetControlEnabled(true);
+      await new Promise<void>((res) => setTimeout(res, 500));
 
       for (let i = 0; i < sortedPoints.length; i++) {
         if (abortRef.current) break;
@@ -460,6 +489,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         setPointIndex(i);
         setActiveTargetKpa(targetKpa);
         manualConfirmRef.current = null;
+        overshootCountRef.current = 0;
 
         setPhase("setting_pressure");
         addLog(`Setting pressure → ${targetKpa} kPa`);
@@ -494,28 +524,25 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         setPhase("aborting");
         setActiveTargetKpa(null);
         addLog("Aborting…");
-        try { await api.pressureCalStop(); } catch { /* ignore */ }
+        try { await enterPressureSafeMode(); } catch { /* ignore */ }
         try { await api.queueDeviceCommand(deviceUid, { command: "calibration_session_abort" }); } catch { /* ignore */ }
         addLog(t("pressureCalSessionAborted"));
         setPhase("idle");
         return;
       }
 
-      setPhase("stopping_pressure");
-      setActiveTargetKpa(null);
-      addLog("Stopping pressure…");
-      await api.pressureCalStop();
-
       setPhase("committing");
       addLog("Committing session…");
       await api.queueDeviceCommand(deviceUid, { command: "calibration_session_commit", auto_enable: true });
       await new Promise<void>((res) => setTimeout(res, 1000));
 
-      // Safety: reset UNO target to 0 and disable control so no further pressurization occurs
-      try { await api.pressureCalSetTarget(0); } catch { /* ignore */ }
-      try { await api.pressureCalStop(); } catch { /* ignore */ }
+      addLog("Returning pressure system to low-pressure hold…");
+      setActiveTargetKpa(PRESSURE_POST_CAL_HOLD_KPA);
+      await api.pressureCalSetControlEnabled(true);
+      await api.pressureCalSetTarget(PRESSURE_POST_CAL_HOLD_KPA);
+      await new Promise<void>((res) => setTimeout(res, PRESSURE_POST_CAL_HOLD_SETTLE_MS));
 
-      addLog("Calibration complete! Pressure system fully stopped.");
+      addLog("Calibration complete! Pressure system holding at low pressure with compensation enabled.");
       setPhase("done");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -523,7 +550,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       setActiveTargetKpa(null);
       setPhase("error");
       addLog(`Error: ${msg}`);
-      try { await api.pressureCalStop(); } catch { /* ignore */ }
+      try { await enterPressureSafeMode(); } catch { /* ignore */ }
     }
   }
 
