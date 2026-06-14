@@ -76,6 +76,16 @@ class VisualizationPageStaticTest(unittest.TestCase):
         self.assertIn("backgroundTexture", source)
         self.assertIn("current.backgroundMesh.visible = Boolean", source)
 
+    def test_visualization_can_switch_each_card_to_calibrated_levels(self):
+        source = VISUALIZATION_PAGE.read_text()
+
+        self.assertIn("useCalibratedLevels?: boolean;", source)
+        self.assertIn("function buildCalibrationLookup(", source)
+        self.assertIn('command: "calibration_dump_level"', source)
+        self.assertIn('const useCalibratedLevels = view.useCalibratedLevels ?? hasCalibrationLevels;', source)
+        self.assertIn('const activeRange = useCalibratedLevels ? calibrationRange ?? cardRange : cardRange;', source)
+        self.assertIn('{t("useCalibratedLevels")}', source)
+
 
 if __name__ == "__main__":
     unittest.main()
