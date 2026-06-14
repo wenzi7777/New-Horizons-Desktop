@@ -8,6 +8,7 @@ const GLOBAL_APPS = [
   { to: "/gateways", icon: "GW", titleKey: "navGateways" },
   { to: "/profiles", icon: "PF", titleKey: "profileEditor" },
   { to: "/csv", icon: "CSV", titleKey: "csvExport" },
+  { to: "/pressure-calibration", icon: "PC", titleKey: "pressureCalibration" },
 ];
 
 function modeClass(device: NormalizedDevice) {

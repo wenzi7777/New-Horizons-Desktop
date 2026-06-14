@@ -14,6 +14,8 @@ from flask import Blueprint, Response, current_app, g, request, send_file
 
 from .auth import AuthManager, DEFAULT_TOKEN_EXPIRY_SEC, user_payload
 from .gateway_auth import gateway_expected_token
+from .pressure_cal_client import PressureCalError, PressureCalNotConfigured, get_client
+from .pressure_cal_settings import load_settings, save_settings
 from .service import DEVICE_BOOTING, DEVICE_CONTROL_UNAVAILABLE, NewHorizonsService, command_error_message, get_service
 from .terminal import compile_terminal_command, terminal_help_items, validate_device_command_payload
 
@@ -677,6 +679,94 @@ def create_blueprint(
         if target.is_dir():
             return json_response({"error": "download_requires_file"}), 400
         return send_file(target, as_attachment=True, download_name=target.name)
+
+    @bp.get("/api/pressure-cal/settings")
+    @auth
+    @_require_roles("admin")
+    def pressure_cal_settings_get() -> Response:
+        url, token = load_settings()
+        token_hint = (token[:8] + "...") if token else ""
+        configured = bool(url and token)
+        return json_response({"url": url, "token_hint": token_hint, "configured": configured})
+
+    @bp.post("/api/pressure-cal/settings")
+    @auth
+    @_require_roles("admin")
+    def pressure_cal_settings_save() -> tuple[Response, int] | Response:
+        try:
+            data = _request_json_data({})
+        except ValueError:
+            return json_response({"error": "invalid_json"}), 400
+        url = str(data.get("url") or "").strip()
+        token = str(data.get("token") or "").strip()
+        if not url or not token:
+            return json_response({"error": "url_and_token_required"}), 400
+        save_settings(url, token)
+        return json_response({"status": "saved"})
+
+    @bp.get("/api/pressure-cal/health")
+    @auth
+    @_require_roles("admin")
+    def pressure_cal_health() -> tuple[Response, int] | Response:
+        try:
+            client = get_client()
+            result = client.health()
+        except PressureCalNotConfigured:
+            return json_response({"error": "pressure_cal_not_configured"}), 503
+        except PressureCalError as exc:
+            return json_response({"error": str(exc), "status": exc.status}), 503
+        return json_response(result)
+
+    @bp.get("/api/pressure-cal/readings")
+    @auth
+    @_require_roles("admin")
+    def pressure_cal_readings() -> tuple[Response, int] | Response:
+        try:
+            client = get_client()
+            result = client.readings_all()
+        except PressureCalNotConfigured:
+            return json_response({"error": "pressure_cal_not_configured"}), 503
+        except PressureCalError as exc:
+            return json_response({"error": str(exc), "status": exc.status}), 503
+        return json_response(result)
+
+    @bp.post("/api/pressure-cal/target")
+    @auth
+    @_require_roles("admin")
+    def pressure_cal_target() -> tuple[Response, int] | Response:
+        try:
+            data = _request_json_data({})
+        except ValueError:
+            return json_response({"error": "invalid_json"}), 400
+        target_kpa = data.get("target_kpa")
+        if target_kpa is None or not isinstance(target_kpa, (int, float)):
+            return json_response({"error": "target_kpa_required"}), 422
+        target_kpa = float(target_kpa)
+        if target_kpa > 45.0:
+            return json_response({"error": "target_kpa_exceeds_safety_limit", "limit": 45.0}), 422
+        if target_kpa < 0:
+            return json_response({"error": "target_kpa_must_be_non_negative"}), 422
+        try:
+            client = get_client()
+            result = client.pressure_target(target_kpa)
+        except PressureCalNotConfigured:
+            return json_response({"error": "pressure_cal_not_configured"}), 503
+        except PressureCalError as exc:
+            return json_response({"error": str(exc), "status": exc.status}), 503
+        return json_response(result)
+
+    @bp.post("/api/pressure-cal/stop")
+    @auth
+    @_require_roles("admin")
+    def pressure_cal_stop() -> tuple[Response, int] | Response:
+        try:
+            client = get_client()
+            result = client.pressure_stop()
+        except PressureCalNotConfigured:
+            return json_response({"error": "pressure_cal_not_configured"}), 503
+        except PressureCalError as exc:
+            return json_response({"error": str(exc), "status": exc.status}), 503
+        return json_response(result)
 
     return bp
 

@@ -225,6 +225,51 @@ export type AuthSession = {
   role?: "admin" | "user" | string;
 };
 
+export type PressureCalSettings = {
+  url: string;
+  token_hint: string;
+  configured: boolean;
+};
+
+export type PressureCalHealth = {
+  uno: {
+    configured_port: string;
+    connected: boolean;
+    last_error: string | null;
+    last_observed_at: string | null;
+  };
+  imada: {
+    configured_port: string;
+    connected: boolean;
+    last_error: string | null;
+    last_observed_at: string | null;
+  };
+};
+
+export type PressureCalUnoReading = {
+  pressure_kpa: number;
+  target_kpa: number;
+  adc: number;
+  voltage: number;
+  control_enabled: boolean;
+  hold_mode: boolean;
+  valve_open: boolean;
+  observed_at: string;
+};
+
+export type PressureCalImadaReading = {
+  value: number;
+  unit: string;
+  raw_status: string;
+  raw_line: string;
+  observed_at: string;
+};
+
+export type PressureCalReadings = {
+  uno: PressureCalUnoReading;
+  imada: PressureCalImadaReading;
+};
+
 export class RequestError extends Error {
   status: number;
 
@@ -365,4 +410,21 @@ export const api = {
       { method: "DELETE" },
     ),
   downloadCsvUrl: (path: string) => `${API_BASE}/files/download?path=${encodeURIComponent(path)}`,
+  pressureCalSettings: () => request<PressureCalSettings>("/pressure-cal/settings"),
+  savePressureCalSettings: (url: string, token: string) =>
+    request<{ status: string }>("/pressure-cal/settings", {
+      method: "POST",
+      body: { url, token },
+    }),
+  pressureCalHealth: () => request<PressureCalHealth>("/pressure-cal/health"),
+  pressureCalReadings: () => request<PressureCalReadings>("/pressure-cal/readings"),
+  pressureCalSetTarget: (kpa: number) =>
+    request<{ accepted: boolean; target_kpa: number; command: string; observed_at: string }>(
+      "/pressure-cal/target",
+      { method: "POST", body: { target_kpa: kpa } },
+    ),
+  pressureCalStop: () =>
+    request<{ accepted: boolean; command: string; observed_at: string }>("/pressure-cal/stop", {
+      method: "POST",
+    }),
 };
