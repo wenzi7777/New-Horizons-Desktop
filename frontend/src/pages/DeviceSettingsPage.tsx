@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
-import { api, type PressureCalReadings } from "../lib/api";
+import { api, type PressureCalReadings, type PressureCalServerPreset } from "../lib/api";
 
 import { useI18n } from "../i18n";
 import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
@@ -192,7 +192,6 @@ type CalibrationLevelPreview = {
 // Pressure Calibration Panel
 // ---------------------------------------------------------------------------
 
-const PRESSURE_CAL_DEFAULT_URL = "https://pressure-cal.1205.moe";
 const PRESSURE_CAL_PRESETS: Record<string, number[]> = {
   quick:    [0, 20, 45],
   standard: [0, 10, 20, 35, 45],
@@ -214,8 +213,10 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const [calLog, setCalLog] = useState<string[]>([]);
   const [calError, setCalError] = useState("");
   const [configured, setConfigured] = useState(false);
-  const [settingsUrl, setSettingsUrl] = useState(PRESSURE_CAL_DEFAULT_URL);
-  const [settingsToken, setSettingsToken] = useState("");
+  const [serverPresets, setServerPresets] = useState<PressureCalServerPreset[]>([]);
+  const [selectedPreset, setSelectedPreset] = useState("lab_pi");
+  const [customUrl, setCustomUrl] = useState("");
+  const [customToken, setCustomToken] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const [presetKey, setPresetKey] = useState("standard");
@@ -244,7 +245,9 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   useEffect(() => {
     api.pressureCalSettings().then((s) => {
       setConfigured(s.configured);
-      if (s.url) setSettingsUrl(s.url);
+      setServerPresets(s.presets ?? []);
+      setSelectedPreset(s.preset ?? "lab_pi");
+      if (s.url) setCustomUrl(s.url);
     }).catch(() => {});
   }, []);
 
@@ -266,11 +269,17 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
     setSettingsSaving(true);
     setSettingsError("");
     try {
-      await api.savePressureCalSettings(settingsUrl, settingsToken);
+      if (selectedPreset === "custom") {
+        await api.savePressureCalSettings("custom", customUrl, customToken || undefined);
+      } else {
+        await api.savePressureCalSettings(selectedPreset);
+      }
       const s = await api.pressureCalSettings();
       setConfigured(s.configured);
-      if (s.url) setSettingsUrl(s.url);
-      setSettingsToken("");
+      setServerPresets(s.presets ?? []);
+      setSelectedPreset(s.preset ?? "lab_pi");
+      if (s.url) setCustomUrl(s.url);
+      setCustomToken("");
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -405,14 +414,33 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         </div>
         <div className="field-grid">
           <div className="field">
-            <label>{t("pressureCalApiUrl")}</label>
-            <input type="url" value={settingsUrl} onChange={(e) => setSettingsUrl(e.target.value)} />
+            <label>{t("pressureCalServer")}</label>
+            <select value={selectedPreset} onChange={(e) => setSelectedPreset(e.target.value)} disabled={isRunning}>
+              {serverPresets.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+              <option value="custom">{t("pressureCalServerCustom")}</option>
+            </select>
           </div>
-          <div className="field">
-            <label>{t("pressureCalApiToken")}</label>
-            <input type="password" value={settingsToken} onChange={(e) => setSettingsToken(e.target.value)} placeholder={configured ? "••••••••" : ""} />
-          </div>
+          {selectedPreset !== "custom" && serverPresets.find((p) => p.id === selectedPreset) && (
+            <div className="field">
+              <label>{t("pressureCalApiUrl")}</label>
+              <input type="url" value={serverPresets.find((p) => p.id === selectedPreset)!.url} readOnly />
+            </div>
+          )}
         </div>
+        {selectedPreset === "custom" && (
+          <div className="field-grid">
+            <div className="field">
+              <label>{t("pressureCalApiUrl")}</label>
+              <input type="url" value={customUrl} onChange={(e) => setCustomUrl(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>{t("pressureCalApiToken")}</label>
+              <input type="password" value={customToken} onChange={(e) => setCustomToken(e.target.value)} placeholder={configured ? "••••••••" : ""} />
+            </div>
+          </div>
+        )}
         {settingsError && <p className="notice error">{settingsError}</p>}
         {!configured && !settingsError && <p className="notice">{t("pressureCalApiNotConfigured")}</p>}
       </div>

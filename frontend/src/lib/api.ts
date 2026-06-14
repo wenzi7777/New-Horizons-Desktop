@@ -225,10 +225,13 @@ export type AuthSession = {
   role?: "admin" | "user" | string;
 };
 
+export type PressureCalServerPreset = { id: string; label: string; url: string };
 export type PressureCalSettings = {
+  preset: string;
   url: string;
   token_hint: string;
   configured: boolean;
+  presets: PressureCalServerPreset[];
 };
 
 export type PressureCalHealth = {
@@ -411,10 +414,10 @@ export const api = {
     ),
   downloadCsvUrl: (path: string) => `${API_BASE}/files/download?path=${encodeURIComponent(path)}`,
   pressureCalSettings: () => request<PressureCalSettings>("/pressure-cal/settings"),
-  savePressureCalSettings: (url: string, token: string) =>
+  savePressureCalSettings: (preset: string, url?: string, token?: string) =>
     request<{ status: string }>("/pressure-cal/settings", {
       method: "POST",
-      body: { url, token },
+      body: { preset, ...(url !== undefined ? { url } : {}), ...(token !== undefined ? { token } : {}) },
     }),
   pressureCalHealth: () => request<PressureCalHealth>("/pressure-cal/health"),
   pressureCalReadings: () => request<PressureCalReadings>("/pressure-cal/readings"),

@@ -623,6 +623,8 @@ const dictionaries: Record<Locale, Dictionary> = {
     pressureCalNoDevice: "No device selected",
     pressureCalSessionAborted: "Calibration session aborted.",
     pressureCalPointUnit: "kPa",
+    pressureCalServer: "Server",
+    pressureCalServerCustom: "Custom",
   },
   ja: {
     appSubtitle: "New Horizons OS",
@@ -1242,6 +1244,8 @@ const dictionaries: Record<Locale, Dictionary> = {
     pressureCalNoDevice: "デバイスが選択されていません",
     pressureCalSessionAborted: "校正セッションを中止しました。",
     pressureCalPointUnit: "kPa",
+    pressureCalServer: "サーバー",
+    pressureCalServerCustom: "カスタム",
   },
 };
 

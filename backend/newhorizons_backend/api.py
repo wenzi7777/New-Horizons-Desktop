@@ -15,7 +15,7 @@ from flask import Blueprint, Response, current_app, g, request, send_file
 from .auth import AuthManager, DEFAULT_TOKEN_EXPIRY_SEC, user_payload
 from .gateway_auth import gateway_expected_token
 from .pressure_cal_client import PressureCalError, PressureCalNotConfigured, get_client
-from .pressure_cal_settings import load_settings, save_settings
+from .pressure_cal_settings import BUILTIN_PRESETS, load_settings, save_settings
 from .service import DEVICE_BOOTING, DEVICE_CONTROL_UNAVAILABLE, NewHorizonsService, command_error_message, get_service
 from .terminal import compile_terminal_command, terminal_help_items, validate_device_command_payload
 
@@ -684,10 +684,23 @@ def create_blueprint(
     @auth
     @_require_roles("admin")
     def pressure_cal_settings_get() -> Response:
-        url, token = load_settings()
+        settings = load_settings()
+        preset = settings.get("preset", "lab_pi")
+        url = settings.get("url", "")
+        token = settings.get("token", "")
+        configured = preset in BUILTIN_PRESETS or bool(url and token)
         token_hint = (token[:8] + "...") if token else ""
-        configured = bool(url and token)
-        return json_response({"url": url, "token_hint": token_hint, "configured": configured})
+        preset_list = [
+            {"id": k, "label": v["label"], "url": v["url"]}
+            for k, v in BUILTIN_PRESETS.items()
+        ]
+        return json_response({
+            "preset": preset,
+            "url": url,
+            "token_hint": token_hint,
+            "configured": configured,
+            "presets": preset_list,
+        })
 
     @bp.post("/api/pressure-cal/settings")
     @auth
@@ -697,11 +710,12 @@ def create_blueprint(
             data = _request_json_data({})
         except ValueError:
             return json_response({"error": "invalid_json"}), 400
+        preset = str(data.get("preset") or "custom").strip()
         url = str(data.get("url") or "").strip()
         token = str(data.get("token") or "").strip()
-        if not url or not token:
-            return json_response({"error": "url_and_token_required"}), 400
-        save_settings(url, token)
+        if preset not in BUILTIN_PRESETS and (not url or not token):
+            return json_response({"error": "url_and_token_required_for_custom"}), 400
+        save_settings(preset, url, token)
         return json_response({"status": "saved"})
 
     @bp.get("/api/pressure-cal/health")

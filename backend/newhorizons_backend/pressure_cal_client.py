@@ -6,7 +6,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from .pressure_cal_settings import load_settings
+from .pressure_cal_settings import resolve_credentials
 
 
 class PressureCalNotConfigured(Exception):
@@ -119,18 +119,18 @@ class PressureCalClient:
 
 
 def get_client() -> PressureCalClient:
-    """Create a :class:`PressureCalClient` from the stored settings.
+    """Create a :class:`PressureCalClient` from the active preset or custom settings.
 
     Raises:
-        PressureCalNotConfigured: If the URL or token has not been configured.
+        PressureCalNotConfigured: If credentials cannot be resolved.
     """
-    settings = load_settings()
-    url = settings.get("url", "").strip()
-    token = settings.get("token", "").strip()
+    url, token = resolve_credentials()
+    url = url.strip()
+    token = token.strip()
     if not url or not token:
         raise PressureCalNotConfigured(
-            "Pressure Calibration API URL and token are not configured. "
-            "Please set them in the Settings page."
+            "Pressure Calibration API is not configured. "
+            "Select a server preset or enter custom credentials."
         )
     if urllib.parse.urlparse(url).scheme not in ("http", "https"):
         raise PressureCalNotConfigured("Pressure Calibration API URL must use http or https scheme.")
