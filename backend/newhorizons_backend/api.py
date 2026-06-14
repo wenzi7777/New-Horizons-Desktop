@@ -762,7 +762,7 @@ def create_blueprint(
             return json_response({"error": "target_kpa_must_be_non_negative"}), 422
         try:
             client = get_client()
-            result = client.pressure_target(target_kpa)
+            result = client.set_target(target_kpa)
         except PressureCalNotConfigured:
             return json_response({"error": "pressure_cal_not_configured"}), 503
         except PressureCalError as exc:
@@ -775,7 +775,7 @@ def create_blueprint(
     def pressure_cal_stop() -> tuple[Response, int] | Response:
         try:
             client = get_client()
-            result = client.pressure_stop()
+            result = client.stop()
         except PressureCalNotConfigured:
             return json_response({"error": "pressure_cal_not_configured"}), 503
         except PressureCalError as exc:
