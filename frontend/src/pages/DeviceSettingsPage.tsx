@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
+import { api, type PressureCalReadings } from "../lib/api";
+
 import { useI18n } from "../i18n";
 import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
 import { normalizeDevice, useDevicesPolling } from "../lib/device";
@@ -185,6 +187,339 @@ type CalibrationLevelPreview = {
   draft: CalibrationLevelLayer;
   session_active: boolean;
 };
+
+// ---------------------------------------------------------------------------
+// Pressure Calibration Panel
+// ---------------------------------------------------------------------------
+
+const PRESSURE_CAL_DEFAULT_URL = "https://pressure-cal.1205.moe";
+const PRESSURE_CAL_PRESETS: Record<string, number[]> = {
+  quick:    [0, 20, 45],
+  standard: [0, 10, 20, 35, 45],
+  detailed: [0, 5, 10, 20, 30, 40, 45],
+  fine:     [0, 5, 10, 15, 20, 25, 30, 38, 45],
+};
+const PRESSURE_MAX_KPA = 45;
+
+type PressureCalPhase =
+  | "idle" | "starting_session" | "setting_pressure" | "stabilizing"
+  | "capturing" | "stopping_pressure" | "committing" | "done" | "error" | "aborting";
+
+function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string; deviceUid: string }) {
+  const [phase, setPhase] = useState<PressureCalPhase>("idle");
+  const [pointIndex, setPointIndex] = useState(0);
+  const [points, setPoints] = useState<number[]>(PRESSURE_CAL_PRESETS.standard);
+  const [currentKpa, setCurrentKpa] = useState<number | null>(null);
+  const [currentImada, setCurrentImada] = useState<number | null>(null);
+  const [calLog, setCalLog] = useState<string[]>([]);
+  const [calError, setCalError] = useState("");
+  const [configured, setConfigured] = useState(false);
+  const [settingsUrl, setSettingsUrl] = useState(PRESSURE_CAL_DEFAULT_URL);
+  const [settingsToken, setSettingsToken] = useState("");
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
+  const [presetKey, setPresetKey] = useState("standard");
+  const [newPointInput, setNewPointInput] = useState("");
+  const abortRef = useRef(false);
+  const stableCountRef = useRef(0);
+
+  const isRunning = phase !== "idle" && phase !== "done" && phase !== "error";
+
+  const phaseLabel = (() => {
+    switch (phase) {
+      case "idle":              return t("pressureCalStateIdle");
+      case "starting_session":  return t("pressureCalStateStartingSession");
+      case "setting_pressure":  return t("pressureCalStateSettingPressure");
+      case "stabilizing":       return t("pressureCalStateStabilizing");
+      case "capturing":         return t("pressureCalStateCapturing");
+      case "stopping_pressure": return t("pressureCalStateStoppingPressure");
+      case "committing":        return t("pressureCalStateCommitting");
+      case "done":              return t("pressureCalStateDone");
+      case "aborting":          return t("pressureCalStateAborting");
+      case "error":             return t("pressureCalStateError");
+      default:                  return phase;
+    }
+  })();
+
+  useEffect(() => {
+    api.pressureCalSettings().then((s) => {
+      setConfigured(s.configured);
+      if (s.url) setSettingsUrl(s.url);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => () => { abortRef.current = true; }, []);
+
+  useEffect(() => {
+    if (phase !== "idle" || !configured) return;
+    const id = setInterval(async () => {
+      try {
+        const r = await api.pressureCalReadings();
+        setCurrentKpa(r.uno.pressure_kpa);
+        setCurrentImada(r.imada.value);
+      } catch { /* ignore */ }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [phase, configured]);
+
+  async function handleSaveSettings() {
+    setSettingsSaving(true);
+    setSettingsError("");
+    try {
+      await api.savePressureCalSettings(settingsUrl, settingsToken);
+      const s = await api.pressureCalSettings();
+      setConfigured(s.configured);
+      if (s.url) setSettingsUrl(s.url);
+      setSettingsToken("");
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
+
+  function handlePresetChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const key = e.target.value;
+    setPresetKey(key);
+    if (key in PRESSURE_CAL_PRESETS) setPoints(PRESSURE_CAL_PRESETS[key]);
+  }
+
+  function handleAddPoint() {
+    const val = parseFloat(newPointInput);
+    if (Number.isNaN(val) || val < 0 || val > PRESSURE_MAX_KPA) return;
+    setPoints((prev) => prev.includes(val) ? prev : [...prev, val].sort((a, b) => a - b));
+    setPresetKey("custom");
+    setNewPointInput("");
+  }
+
+  function removePoint(idx: number) {
+    setPoints((prev) => prev.filter((_, i) => i !== idx));
+    setPresetKey("custom");
+  }
+
+  async function waitForStable(targetKpa: number): Promise<number> {
+    let lastImada = 0;
+    while (true) {
+      if (abortRef.current) return lastImada;
+      try {
+        const r: PressureCalReadings = await api.pressureCalReadings();
+        setCurrentKpa(r.uno.pressure_kpa);
+        setCurrentImada(r.imada.value);
+        lastImada = r.imada.value;
+        if (Math.abs(r.uno.pressure_kpa - targetKpa) < 0.5) {
+          stableCountRef.current++;
+          if (stableCountRef.current >= 5) return lastImada;
+        } else {
+          stableCountRef.current = 0;
+        }
+      } catch { /* ignore */ }
+      await new Promise<void>((res) => setTimeout(res, 500));
+    }
+  }
+
+  async function runCalibration() {
+    abortRef.current = false;
+    setCalLog([]);
+    setCalError("");
+    setPointIndex(0);
+    const addLog = (line: string) => setCalLog((prev) => [...prev, line]);
+    const sortedPoints = [...points].sort((a, b) => a - b);
+
+    try {
+      setPhase("starting_session");
+      addLog("Starting calibration session...");
+      await api.queueDeviceCommand(deviceUid, { command: "calibration_session_begin" });
+      await new Promise<void>((res) => setTimeout(res, 1000));
+
+      for (let i = 0; i < sortedPoints.length; i++) {
+        if (abortRef.current) break;
+        const targetKpa = sortedPoints[i];
+        setPointIndex(i);
+
+        setPhase("setting_pressure");
+        addLog(`Setting pressure → ${targetKpa} kPa`);
+        await api.pressureCalSetTarget(targetKpa);
+        stableCountRef.current = 0;
+
+        setPhase("stabilizing");
+        addLog(`Stabilizing at ${targetKpa} kPa…`);
+        const imadaValue = await waitForStable(targetKpa);
+        if (abortRef.current) break;
+
+        setPhase("capturing");
+        addLog(`Capturing at IMADA ${imadaValue.toFixed(3)} N`);
+        await api.queueDeviceCommand(deviceUid, {
+          command: "calibration_capture_all",
+          level: imadaValue,
+          duration_ms: 3000,
+        });
+        await new Promise<void>((res) => setTimeout(res, 4000));
+        if (abortRef.current) break;
+        addLog(`Point ${i + 1}/${sortedPoints.length} done.`);
+      }
+
+      if (abortRef.current) {
+        setPhase("aborting");
+        addLog("Aborting…");
+        try { await api.pressureCalStop(); } catch { /* ignore */ }
+        try { await api.queueDeviceCommand(deviceUid, { command: "calibration_session_abort" }); } catch { /* ignore */ }
+        addLog(t("pressureCalSessionAborted"));
+        setPhase("idle");
+        return;
+      }
+
+      setPhase("stopping_pressure");
+      addLog("Stopping pressure…");
+      await api.pressureCalStop();
+
+      setPhase("committing");
+      addLog("Committing session…");
+      await api.queueDeviceCommand(deviceUid, { command: "calibration_session_commit", auto_enable: true });
+      await new Promise<void>((res) => setTimeout(res, 1000));
+      addLog("Calibration complete!");
+      setPhase("done");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setCalError(msg);
+      setPhase("error");
+      addLog(`Error: ${msg}`);
+      try { await api.pressureCalStop(); } catch { /* ignore */ }
+    }
+  }
+
+  return (
+    <div className="settings-stack">
+      <div className="settings-detail-header">
+        <h3>{t("pressureCalibration")}</h3>
+      </div>
+
+      {/* API Settings */}
+      <div className="settings-card">
+        <div className="settings-detail-header">
+          <div>
+            <h4>{t("pressureCalApiSettings")}</h4>
+          </div>
+          <button className="button primary" type="button" disabled={settingsSaving} onClick={() => void handleSaveSettings()}>
+            {settingsSaving ? t("running") : t("pressureCalApiSave")}
+          </button>
+        </div>
+        <div className="field-grid">
+          <div className="field">
+            <label>{t("pressureCalApiUrl")}</label>
+            <input type="url" value={settingsUrl} onChange={(e) => setSettingsUrl(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t("pressureCalApiToken")}</label>
+            <input type="password" value={settingsToken} onChange={(e) => setSettingsToken(e.target.value)} placeholder={configured ? "••••••••" : ""} />
+          </div>
+        </div>
+        {settingsError && <p className="notice error">{settingsError}</p>}
+        {!configured && !settingsError && <p className="notice">{t("pressureCalApiNotConfigured")}</p>}
+      </div>
+
+      {/* Live readings */}
+      {configured && (
+        <div className="settings-card">
+          <h4>{t("pressureCalCurrentReadings")}</h4>
+          <div className="metric-row">
+            <Metric label={t("pressureCalUnoKpa")} value={currentKpa !== null ? `${currentKpa.toFixed(3)} kPa` : "-"} />
+            <Metric label={t("pressureCalImadaN")} value={currentImada !== null ? `${currentImada.toFixed(3)} N` : "-"} />
+          </div>
+        </div>
+      )}
+
+      {/* Calibration Points */}
+      <div className="settings-card">
+        <div className="settings-detail-header">
+          <div>
+            <h4>{t("pressureCalPoints")}</h4>
+            <p>{t("pressureCalSafetyLimit")}</p>
+          </div>
+          <div className="field">
+            <label>{t("pressureCalPointsPreset")}</label>
+            <select value={presetKey} onChange={handlePresetChange} disabled={isRunning}>
+              {Object.keys(PRESSURE_CAL_PRESETS).map((key) => (
+                <option key={key} value={key}>
+                  {t(`pressureCalPreset${key.charAt(0).toUpperCase()}${key.slice(1)}`)}
+                </option>
+              ))}
+              <option value="custom">{t("pressureCalPresetCustom")}</option>
+            </select>
+          </div>
+        </div>
+        <div className="calibration-level-list">
+          {points.map((p, i) => (
+            <div key={i} className="calibration-level-item">
+              <button type="button">
+                <strong>{p} {t("pressureCalPointUnit")}</strong>
+              </button>
+              {!isRunning && (
+                <button className="button danger tiny" type="button" onClick={() => removePoint(i)}>
+                  {t("pressureCalRemovePoint")}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        {!isRunning && (
+          <div className="field-grid">
+            <div className="field">
+              <label>kPa (0–{PRESSURE_MAX_KPA})</label>
+              <input type="number" min={0} max={PRESSURE_MAX_KPA} value={newPointInput} onChange={(e) => setNewPointInput(e.target.value)} />
+            </div>
+            <div className="field settings-field-action">
+              <button className="button" type="button" onClick={handleAddPoint}>
+                {t("pressureCalAddPoint")}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Progress */}
+      {phase !== "idle" && (
+        <div className="settings-card">
+          <div className="settings-detail-header">
+            <div>
+              <h4>{t("pressureCalProgress")}</h4>
+              <p>{phaseLabel}{phase !== "done" && phase !== "error" ? ` — ${pointIndex + 1}/${points.length}` : ""}</p>
+            </div>
+          </div>
+          {phase !== "done" && phase !== "error" && (
+            <div className="level-progress-bar">
+              <div className="level-progress-bar-fill" style={{ width: `${Math.round((pointIndex / Math.max(points.length, 1)) * 100)}%` }} />
+            </div>
+          )}
+          {calLog.length > 0 && (
+            <div className="changelog-panel">
+              <pre>{calLog.slice(-10).join("\n")}</pre>
+            </div>
+          )}
+          {phase === "error" && <p className="notice error">{calError}</p>}
+        </div>
+      )}
+
+      {/* Controls */}
+      <div className="actions compact">
+        <button
+          className="button primary"
+          type="button"
+          disabled={isRunning || !configured || !deviceUid || points.length === 0}
+          onClick={() => void runCalibration()}
+        >
+          {t("pressureCalStart")}
+        </button>
+        {isRunning && (
+          <button className="button danger" type="button" onClick={() => { abortRef.current = true; }}>
+            {t("pressureCalEmergencyStop")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 type CalibrationWorkbenchProps = {
   t: (key: string) => string;
@@ -1307,16 +1642,19 @@ export function DeviceSettingsPage() {
 
     if (activeSection === "maintenance") {
       return (
-        <CalibrationWorkbench
-          t={t}
-          deviceUid={deviceUid}
-          isDeviceOffline={isDeviceOffline}
-          matrixShape={recordValue(status.matrix_shape)}
-          calibrationStatus={calibrationStatus}
-          busyCommand={busyCommand}
-          maintenanceMode={normalized?.mode === "maintenance" || normalized?.mode === "safe_maintenance"}
-          run={run}
-        />
+        <div className="settings-stack">
+          <CalibrationWorkbench
+            t={t}
+            deviceUid={deviceUid}
+            isDeviceOffline={isDeviceOffline}
+            matrixShape={recordValue(status.matrix_shape)}
+            calibrationStatus={calibrationStatus}
+            busyCommand={busyCommand}
+            maintenanceMode={normalized?.mode === "maintenance" || normalized?.mode === "safe_maintenance"}
+            run={run}
+          />
+          <PressureCalibrationPanel t={t} deviceUid={deviceUid} />
+        </div>
       );
     }
 

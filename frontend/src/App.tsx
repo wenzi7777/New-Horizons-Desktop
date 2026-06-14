@@ -8,7 +8,6 @@ import { FilesPage } from "./pages/FilesPage";
 import { GatewaysPage } from "./pages/GatewaysPage";
 import { LaunchpadPage } from "./pages/LaunchpadPage";
 import { LoginPage } from "./pages/LoginPage";
-import { PressureCalibrationPage } from "./pages/PressureCalibrationPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { TerminalPage } from "./pages/TerminalPage";
 import { VisualizationPage } from "./pages/VisualizationPage";
@@ -188,14 +187,6 @@ function AuthenticatedApp() {
             element={
               <RequireRole roles={["admin"]}>
                 <GatewaysPage />
-              </RequireRole>
-            }
-          />
-          <Route
-            path="/pressure-calibration"
-            element={
-              <RequireRole roles={["admin"]}>
-                <PressureCalibrationPage />
               </RequireRole>
             }
           />
