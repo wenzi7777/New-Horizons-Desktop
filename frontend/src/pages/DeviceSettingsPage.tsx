@@ -193,10 +193,10 @@ type CalibrationLevelPreview = {
 // ---------------------------------------------------------------------------
 
 const PRESSURE_CAL_PRESETS: Record<string, number[]> = {
-  quick:    [0, 20, 45],
-  standard: [0, 10, 20, 35, 45],
-  detailed: [0, 5, 10, 20, 30, 40, 45],
-  fine:     [0, 5, 10, 15, 20, 25, 30, 38, 45],
+  quick:    [3, 20, 45],
+  standard: [3, 10, 20, 35, 45],
+  detailed: [3, 5, 10, 20, 30, 40, 45],
+  fine:     [3, 5, 10, 15, 20, 25, 30, 38, 45],
 };
 const PRESSURE_MAX_KPA = 45;
 
@@ -385,7 +385,12 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       addLog("Committing session…");
       await api.queueDeviceCommand(deviceUid, { command: "calibration_session_commit", auto_enable: true });
       await new Promise<void>((res) => setTimeout(res, 1000));
-      addLog("Calibration complete!");
+
+      // Safety: reset UNO target to 0 and disable control so no further pressurization occurs
+      try { await api.pressureCalSetTarget(0); } catch { /* ignore */ }
+      try { await api.pressureCalStop(); } catch { /* ignore */ }
+
+      addLog("Calibration complete! Pressure system fully stopped.");
       setPhase("done");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
