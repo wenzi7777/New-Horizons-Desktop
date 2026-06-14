@@ -199,10 +199,47 @@ const PRESSURE_CAL_PRESETS: Record<string, number[]> = {
   fine:     [3, 5, 10, 15, 20, 25, 30, 38, 45],
 };
 const PRESSURE_MAX_KPA = 45;
+const PRESSURE_STABLE_TOLERANCE_KPA = 0.5;
+const PRESSURE_STABLE_CONFIRMATION_SAMPLES = 5;
+const PRESSURE_STABLE_SAMPLE_INTERVAL_MS = 500;
+const PRESSURE_STABLE_ADAPTIVE_DELAY_MS = 8000;
+const PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES = 8;
+const PRESSURE_STABLE_ADAPTIVE_RANGE_KPA = 0.25;
+const PRESSURE_STABLE_ADAPTIVE_TARGET_SLACK_KPA = 1.0;
+const PRESSURE_STABLE_MAX_WAIT_MS = 20000;
+const PRESSURE_STABLE_TIMEOUT_RANGE_KPA = 0.4;
 
 type PressureCalPhase =
   | "idle" | "starting_session" | "setting_pressure" | "stabilizing"
   | "capturing" | "stopping_pressure" | "committing" | "done" | "error" | "aborting";
+
+type PressureStableResult = {
+  imadaValue: number;
+  reason: "strict" | "adaptive_window" | "timeout_window" | "manual_confirm";
+  settledKpa: number | null;
+  elapsedMs: number;
+};
+
+function recentPressureWindow(values: number[]) {
+  return values.slice(-PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES);
+}
+
+function pressureWindowRangeKpa(values: number[]) {
+  if (values.length === 0) return Number.POSITIVE_INFINITY;
+  return Math.max(...values) - Math.min(...values);
+}
+
+function pressureWindowAverageKpa(values: number[]) {
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function hasStablePressureWindow(targetKpa: number, values: number[], rangeLimitKpa: number, targetSlackKpa: number) {
+  const recent = recentPressureWindow(values);
+  if (recent.length < PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES) return false;
+  return pressureWindowRangeKpa(recent) <= rangeLimitKpa
+    && Math.abs(pressureWindowAverageKpa(recent) - targetKpa) <= targetSlackKpa;
+}
 
 function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string; deviceUid: string }) {
   const [phase, setPhase] = useState<PressureCalPhase>("idle");
@@ -221,10 +258,13 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const [settingsError, setSettingsError] = useState("");
   const [presetKey, setPresetKey] = useState("standard");
   const [newPointInput, setNewPointInput] = useState("");
+  const [activeTargetKpa, setActiveTargetKpa] = useState<number | null>(null);
   const abortRef = useRef(false);
   const stableCountRef = useRef(0);
+  const manualConfirmRef = useRef<PressureStableResult | null>(null);
 
   const isRunning = phase !== "idle" && phase !== "done" && phase !== "error";
+  const pressureFillPercent = Math.max(0, Math.min(100, ((currentKpa ?? 0) / PRESSURE_MAX_KPA) * 100));
 
   const phaseLabel = (() => {
     switch (phase) {
@@ -306,23 +346,96 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
     setPresetKey("custom");
   }
 
-  async function waitForStable(targetKpa: number): Promise<number> {
+  function confirmCurrentPressureValue() {
+    if (phase !== "stabilizing" || currentImada === null) return;
+    manualConfirmRef.current = {
+      imadaValue: currentImada,
+      reason: "manual_confirm",
+      settledKpa: currentKpa,
+      elapsedMs: 0,
+    };
+  }
+
+  async function waitForStable(targetKpa: number): Promise<PressureStableResult> {
     let lastImada = 0;
+    let lastKpa: number | null = null;
+    const pressureSamples: number[] = [];
+    const startedAt = Date.now();
     while (true) {
-      if (abortRef.current) return lastImada;
+      if (abortRef.current) {
+        return {
+          imadaValue: lastImada,
+          reason: "timeout_window",
+          settledKpa: lastKpa,
+          elapsedMs: Date.now() - startedAt,
+        };
+      }
+      if (manualConfirmRef.current) {
+        const manual = manualConfirmRef.current;
+        manualConfirmRef.current = null;
+        return {
+          ...manual,
+          elapsedMs: Date.now() - startedAt,
+        };
+      }
       try {
         const r: PressureCalReadings = await api.pressureCalReadings();
         setCurrentKpa(r.uno.pressure_kpa);
         setCurrentImada(r.imada.value);
         lastImada = r.imada.value;
-        if (Math.abs(r.uno.pressure_kpa - targetKpa) < 0.5) {
+        lastKpa = r.uno.pressure_kpa;
+        pressureSamples.push(r.uno.pressure_kpa);
+        if (pressureSamples.length > PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES * 2) {
+          pressureSamples.shift();
+        }
+        const elapsedMs = Date.now() - startedAt;
+        if (Math.abs(r.uno.pressure_kpa - targetKpa) < PRESSURE_STABLE_TOLERANCE_KPA) {
           stableCountRef.current++;
-          if (stableCountRef.current >= 5) return lastImada;
+          if (stableCountRef.current >= PRESSURE_STABLE_CONFIRMATION_SAMPLES) {
+            return {
+              imadaValue: lastImada,
+              reason: "strict",
+              settledKpa: r.uno.pressure_kpa,
+              elapsedMs,
+            };
+          }
         } else {
           stableCountRef.current = 0;
         }
+        if (
+          elapsedMs >= PRESSURE_STABLE_ADAPTIVE_DELAY_MS
+          && hasStablePressureWindow(
+            targetKpa,
+            pressureSamples,
+            PRESSURE_STABLE_ADAPTIVE_RANGE_KPA,
+            PRESSURE_STABLE_ADAPTIVE_TARGET_SLACK_KPA,
+          )
+        ) {
+          return {
+            imadaValue: lastImada,
+            reason: "adaptive_window",
+            settledKpa: pressureWindowAverageKpa(recentPressureWindow(pressureSamples)),
+            elapsedMs,
+          };
+        }
+        if (
+          elapsedMs >= PRESSURE_STABLE_MAX_WAIT_MS
+          && hasStablePressureWindow(
+            targetKpa,
+            pressureSamples,
+            PRESSURE_STABLE_TIMEOUT_RANGE_KPA,
+            Number.POSITIVE_INFINITY,
+          )
+        ) {
+          return {
+            imadaValue: lastImada,
+            reason: "timeout_window",
+            settledKpa: pressureWindowAverageKpa(recentPressureWindow(pressureSamples)),
+            elapsedMs,
+          };
+        }
       } catch { /* ignore */ }
-      await new Promise<void>((res) => setTimeout(res, 500));
+      await new Promise<void>((res) => setTimeout(res, PRESSURE_STABLE_SAMPLE_INTERVAL_MS));
     }
   }
 
@@ -336,6 +449,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
 
     try {
       setPhase("starting_session");
+      setActiveTargetKpa(null);
       addLog("Starting calibration session...");
       await api.queueDeviceCommand(deviceUid, { command: "calibration_session_begin" });
       await new Promise<void>((res) => setTimeout(res, 1000));
@@ -344,6 +458,8 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         if (abortRef.current) break;
         const targetKpa = sortedPoints[i];
         setPointIndex(i);
+        setActiveTargetKpa(targetKpa);
+        manualConfirmRef.current = null;
 
         setPhase("setting_pressure");
         addLog(`Setting pressure → ${targetKpa} kPa`);
@@ -352,14 +468,21 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
 
         setPhase("stabilizing");
         addLog(`Stabilizing at ${targetKpa} kPa…`);
-        const imadaValue = await waitForStable(targetKpa);
+        const stability = await waitForStable(targetKpa);
         if (abortRef.current) break;
+        if (stability.reason === "adaptive_window") {
+          addLog(`Pressure settled at ${stability.settledKpa?.toFixed(3) ?? "-"} kPa after ${Math.round(stability.elapsedMs / 1000)}s; continuing with adaptive window.`);
+        } else if (stability.reason === "manual_confirm") {
+          addLog(`Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, IMADA ${stability.imadaValue.toFixed(3)} N`);
+        } else if (stability.reason === "timeout_window") {
+          addLog(`Pressure held within ${PRESSURE_STABLE_TIMEOUT_RANGE_KPA.toFixed(2)} kPa window at ${stability.settledKpa?.toFixed(3) ?? "-"} kPa after ${Math.round(stability.elapsedMs / 1000)}s; continuing without waiting longer.`);
+        }
 
         setPhase("capturing");
-        addLog(`Capturing at IMADA ${imadaValue.toFixed(3)} N`);
+        addLog(`Capturing at IMADA ${stability.imadaValue.toFixed(3)} N`);
         await api.queueDeviceCommand(deviceUid, {
           command: "calibration_capture_all",
-          level: imadaValue,
+          level: stability.imadaValue,
           duration_ms: 3000,
         });
         await new Promise<void>((res) => setTimeout(res, 4000));
@@ -369,6 +492,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
 
       if (abortRef.current) {
         setPhase("aborting");
+        setActiveTargetKpa(null);
         addLog("Aborting…");
         try { await api.pressureCalStop(); } catch { /* ignore */ }
         try { await api.queueDeviceCommand(deviceUid, { command: "calibration_session_abort" }); } catch { /* ignore */ }
@@ -378,6 +502,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       }
 
       setPhase("stopping_pressure");
+      setActiveTargetKpa(null);
       addLog("Stopping pressure…");
       await api.pressureCalStop();
 
@@ -395,6 +520,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setCalError(msg);
+      setActiveTargetKpa(null);
       setPhase("error");
       addLog(`Error: ${msg}`);
       try { await api.pressureCalStop(); } catch { /* ignore */ }
@@ -453,11 +579,30 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       {/* Live readings */}
       {configured && (
         <div className="settings-card">
-          <h4>{t("pressureCalCurrentReadings")}</h4>
+          <h4>{t("pressureCalLiveStatusCard")}</h4>
+          <div className="metric-row">
+            <Metric label={t("pressureCalTargetKpa")} value={activeTargetKpa !== null ? `${activeTargetKpa.toFixed(3)} kPa` : "-"} />
+            <Metric label={t("pressureCalMaxKpa")} value={`${PRESSURE_MAX_KPA.toFixed(0)} kPa`} />
+          </div>
+          <div className="pressure-live-bar-track" aria-label={t("pressureCalMaxKpa")}>
+            <div className="pressure-live-bar-fill" style={{ width: `${pressureFillPercent}%` }} />
+          </div>
           <div className="metric-row">
             <Metric label={t("pressureCalUnoKpa")} value={currentKpa !== null ? `${currentKpa.toFixed(3)} kPa` : "-"} />
             <Metric label={t("pressureCalImadaN")} value={currentImada !== null ? `${currentImada.toFixed(3)} N` : "-"} />
           </div>
+          {phase === "stabilizing" && (
+            <div className="actions compact">
+              <button
+                className="button primary"
+                type="button"
+                disabled={currentImada === null}
+                onClick={confirmCurrentPressureValue}
+              >
+                {t("manualConfirmCapture")}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

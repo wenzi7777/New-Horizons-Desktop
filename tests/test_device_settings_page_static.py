@@ -338,6 +338,48 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn("calibrationSelectPin", source)
         self.assertIn("appHref(`device/${encodeURIComponent(deviceUid)}/files`)", source)
 
+    def test_pressure_calibration_low_end_stability_uses_effective_floor_target(self):
+        source = SETTINGS_PAGE.read_text(encoding="utf-8")
+
+        self.assertIn("const PRESSURE_STABLE_TOLERANCE_KPA = 0.5;", source)
+        self.assertIn("const PRESSURE_STABLE_CONFIRMATION_SAMPLES = 5;", source)
+        self.assertIn("const PRESSURE_STABLE_ADAPTIVE_DELAY_MS = 8000;", source)
+        self.assertIn("const PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES = 8;", source)
+        self.assertIn("const PRESSURE_STABLE_ADAPTIVE_RANGE_KPA = 0.25;", source)
+        self.assertIn("const PRESSURE_STABLE_ADAPTIVE_TARGET_SLACK_KPA = 1.0;", source)
+        self.assertIn("const PRESSURE_STABLE_MAX_WAIT_MS = 20000;", source)
+        self.assertIn("function hasStablePressureWindow(", source)
+        self.assertIn("Math.abs(r.uno.pressure_kpa - targetKpa) < PRESSURE_STABLE_TOLERANCE_KPA", source)
+        self.assertIn("elapsedMs >= PRESSURE_STABLE_ADAPTIVE_DELAY_MS", source)
+        self.assertIn("elapsedMs >= PRESSURE_STABLE_MAX_WAIT_MS", source)
+        self.assertIn('reason: "adaptive_window"', source)
+        self.assertIn('reason: "timeout_window"', source)
+        self.assertIn("Pressure settled at ${stability.settledKpa?.toFixed(3) ?? \"-\"} kPa after", source)
+        self.assertIn("Pressure held within ${PRESSURE_STABLE_TIMEOUT_RANGE_KPA.toFixed(2)} kPa window", source)
+        self.assertNotIn("Math.abs(r.uno.pressure_kpa - targetKpa) < 0.5", source)
+
+    def test_pressure_calibration_stabilizing_ui_and_manual_confirm_exist(self):
+        source = SETTINGS_PAGE.read_text(encoding="utf-8")
+        i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
+
+        self.assertIn('pressureCalLiveStatusCard', i18n)
+        self.assertIn('pressureCalTargetKpa', i18n)
+        self.assertIn('pressureCalMaxKpa', i18n)
+        self.assertIn('manualConfirmCapture', i18n)
+        self.assertIn("const [activeTargetKpa, setActiveTargetKpa] = useState<number | null>(null);", source)
+        self.assertIn("const manualConfirmRef = useRef<PressureStableResult | null>(null);", source)
+        self.assertIn('manualConfirmRef.current = {', source)
+        self.assertIn('reason: "manual_confirm"', source)
+        self.assertIn('phase === "stabilizing"', source)
+        self.assertIn('t("pressureCalLiveStatusCard")', source)
+        self.assertIn('t("pressureCalTargetKpa")', source)
+        self.assertIn('t("pressureCalMaxKpa")', source)
+        self.assertIn('className="pressure-live-bar-track"', source)
+        self.assertIn('className="pressure-live-bar-fill"', source)
+        self.assertIn('Math.max(0, Math.min(100, ((currentKpa ?? 0) / PRESSURE_MAX_KPA) * 100))', source)
+        self.assertIn('t("manualConfirmCapture")', source)
+        self.assertIn('Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, IMADA ${stability.imadaValue.toFixed(3)} N', source)
+
     def test_unused_filter_ui_is_removed_from_settings(self):
         source = SETTINGS_PAGE.read_text()
 
