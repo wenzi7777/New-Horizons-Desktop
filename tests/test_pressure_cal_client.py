@@ -32,7 +32,6 @@ MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 PressureCalClient = MODULE.PressureCalClient
-PressureCalError = MODULE.PressureCalError
 
 
 class PressureCalClientCompatibilityTest(unittest.TestCase):
@@ -45,39 +44,20 @@ class PressureCalClientCompatibilityTest(unittest.TestCase):
         self.assertEqual(payload, {"ok": True})
         request.assert_called_once_with("GET", "/api/v1/readings/all")
 
-    def test_set_control_enabled_falls_back_to_calibration_source_endpoint(self):
+    def test_stop_uses_supported_pressure_stop_endpoint(self):
         client = PressureCalClient(url="http://pressure-cal.local", token="secret")
 
-        with patch.object(
-            client,
-            "_request",
-            side_effect=[
-                PressureCalError("missing", status=404),
-                {"ok": True},
-            ],
-        ) as request:
-            payload = client.set_control_enabled(True)
+        with patch.object(client, "_request", return_value={"accepted": True}) as request:
+            payload = client.stop()
 
-        self.assertEqual(payload, {"ok": True})
-        self.assertEqual(request.call_args_list[0].args, ("POST", "/api/v1/pressure/control", {"enabled": True}))
-        self.assertEqual(request.call_args_list[1].args, ("POST", "/api/calibration/source/uno/control", {"enabled": True}))
+        self.assertEqual(payload, {"accepted": True})
+        request.assert_called_once_with("POST", "/api/v1/pressure/stop")
 
-    def test_enter_safe_mode_falls_back_to_calibration_source_endpoint(self):
+    def test_unsupported_control_and_safe_helpers_are_absent(self):
         client = PressureCalClient(url="http://pressure-cal.local", token="secret")
 
-        with patch.object(
-            client,
-            "_request",
-            side_effect=[
-                PressureCalError("missing", status=404),
-                {"ok": True},
-            ],
-        ) as request:
-            payload = client.enter_safe_mode()
-
-        self.assertEqual(payload, {"ok": True})
-        self.assertEqual(request.call_args_list[0].args, ("POST", "/api/v1/pressure/safe", {}))
-        self.assertEqual(request.call_args_list[1].args, ("POST", "/api/calibration/source/uno/safe", {}))
+        self.assertFalse(hasattr(client, "set_control_enabled"))
+        self.assertFalse(hasattr(client, "enter_safe_mode"))
 
 
 if __name__ == "__main__":

@@ -426,15 +426,6 @@ export const api = {
       "/pressure-cal/target",
       { method: "POST", body: { target_kpa: kpa } },
     ),
-  pressureCalSetControlEnabled: (enabled: boolean) =>
-    request<{ accepted?: boolean; enabled?: boolean; command?: string; observed_at?: string; status?: string }>(
-      "/pressure-cal/control",
-      { method: "POST", body: { enabled } },
-    ),
-  pressureCalSafeMode: () =>
-    request<{ accepted?: boolean; command?: string; observed_at?: string; status?: string }>("/pressure-cal/safe", {
-      method: "POST",
-    }),
   pressureCalStop: () =>
     request<{ accepted: boolean; command: string; observed_at: string }>("/pressure-cal/stop", {
       method: "POST",

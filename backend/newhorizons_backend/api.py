@@ -769,45 +769,6 @@ def create_blueprint(
             return json_response({"error": str(exc), "status": exc.status}), 503
         return json_response(result)
 
-    @bp.post("/api/pressure-cal/control")
-    @auth
-    @_require_roles("admin")
-    def pressure_cal_control() -> tuple[Response, int] | Response:
-        try:
-            data = _request_json_data({})
-        except ValueError:
-            return json_response({"error": "invalid_json"}), 400
-        raw_enabled = data.get("enabled")
-        if isinstance(raw_enabled, bool):
-            enabled = raw_enabled
-        elif isinstance(raw_enabled, (int, float)) and raw_enabled in {0, 1}:
-            enabled = bool(raw_enabled)
-        elif isinstance(raw_enabled, str) and raw_enabled.strip().lower() in {"0", "1", "true", "false"}:
-            enabled = raw_enabled.strip().lower() in {"1", "true"}
-        else:
-            return json_response({"error": "enabled_required"}), 422
-        try:
-            client = get_client()
-            result = client.set_control_enabled(enabled)
-        except PressureCalNotConfigured:
-            return json_response({"error": "pressure_cal_not_configured"}), 503
-        except PressureCalError as exc:
-            return json_response({"error": str(exc), "status": exc.status}), 503
-        return json_response(result)
-
-    @bp.post("/api/pressure-cal/safe")
-    @auth
-    @_require_roles("admin")
-    def pressure_cal_safe() -> tuple[Response, int] | Response:
-        try:
-            client = get_client()
-            result = client.enter_safe_mode()
-        except PressureCalNotConfigured:
-            return json_response({"error": "pressure_cal_not_configured"}), 503
-        except PressureCalError as exc:
-            return json_response({"error": str(exc), "status": exc.status}), 503
-        return json_response(result)
-
     @bp.post("/api/pressure-cal/stop")
     @auth
     @_require_roles("admin")

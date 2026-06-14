@@ -361,12 +361,8 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
     };
   }
 
-  async function enterPressureSafeMode() {
-    try {
-      await api.pressureCalSafeMode();
-    } catch {
-      await api.pressureCalStop();
-    }
+  async function stopPressureControl() {
+    await api.pressureCalStop();
   }
 
   async function waitForStable(targetKpa: number): Promise<PressureStableResult> {
@@ -403,13 +399,12 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         }
         const elapsedMs = Date.now() - startedAt;
         if (
-          r.uno.control_enabled
-          && r.uno.valve_open
+          r.uno.valve_open
           && r.uno.pressure_kpa > targetKpa + PRESSURE_OVERSHOOT_ABORT_KPA
         ) {
           overshootCountRef.current++;
           if (overshootCountRef.current >= PRESSURE_OVERSHOOT_ABORT_SAMPLES) {
-            try { await api.pressureCalSafeMode(); } catch { /* ignore */ }
+            try { await stopPressureControl(); } catch { /* ignore */ }
             throw new Error(`pressure_runaway_detected target=${targetKpa.toFixed(2)} current=${r.uno.pressure_kpa.toFixed(2)}`);
           }
         } else {
@@ -479,9 +474,6 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       addLog("Starting calibration session...");
       await api.queueDeviceCommand(deviceUid, { command: "calibration_session_begin" });
       await new Promise<void>((res) => setTimeout(res, 1000));
-      addLog("Enabling pressure control…");
-      await api.pressureCalSetControlEnabled(true);
-      await new Promise<void>((res) => setTimeout(res, 500));
 
       for (let i = 0; i < sortedPoints.length; i++) {
         if (abortRef.current) break;
@@ -524,7 +516,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         setPhase("aborting");
         setActiveTargetKpa(null);
         addLog("Aborting…");
-        try { await enterPressureSafeMode(); } catch { /* ignore */ }
+        try { await stopPressureControl(); } catch { /* ignore */ }
         try { await api.queueDeviceCommand(deviceUid, { command: "calibration_session_abort" }); } catch { /* ignore */ }
         addLog(t("pressureCalSessionAborted"));
         setPhase("idle");
@@ -538,7 +530,6 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
 
       addLog("Returning pressure system to low-pressure hold…");
       setActiveTargetKpa(PRESSURE_POST_CAL_HOLD_KPA);
-      await api.pressureCalSetControlEnabled(true);
       await api.pressureCalSetTarget(PRESSURE_POST_CAL_HOLD_KPA);
       await new Promise<void>((res) => setTimeout(res, PRESSURE_POST_CAL_HOLD_SETTLE_MS));
 
@@ -550,7 +541,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       setActiveTargetKpa(null);
       setPhase("error");
       addLog(`Error: ${msg}`);
-      try { await enterPressureSafeMode(); } catch { /* ignore */ }
+      try { await stopPressureControl(); } catch { /* ignore */ }
     }
   }
 

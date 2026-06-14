@@ -392,20 +392,19 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn('await api.pressureCalSetTarget(0);', source)
         self.assertNotIn('addLog("Calibration complete! Pressure system fully stopped.");', source)
 
-    def test_pressure_calibration_enables_control_and_safe_modes_runaway_pressure(self):
+    def test_pressure_calibration_uses_supported_pi_contract_for_runaway_pressure(self):
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
         api_source = (ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
 
         self.assertIn("const PRESSURE_OVERSHOOT_ABORT_KPA = 2.0;", source)
         self.assertIn("const PRESSURE_OVERSHOOT_ABORT_SAMPLES = 3;", source)
-        self.assertIn("await api.pressureCalSetControlEnabled(true);", source)
-        self.assertIn("await api.pressureCalSafeMode();", source)
-        self.assertIn("r.uno.control_enabled", source)
+        self.assertIn("await api.pressureCalSetTarget(targetKpa);", source)
+        self.assertIn("await api.pressureCalStop();", source)
         self.assertIn("r.uno.valve_open", source)
         self.assertIn("r.uno.pressure_kpa > targetKpa + PRESSURE_OVERSHOOT_ABORT_KPA", source)
         self.assertIn("overshootCountRef.current >= PRESSURE_OVERSHOOT_ABORT_SAMPLES", source)
-        self.assertIn("pressureCalSetControlEnabled", api_source)
-        self.assertIn("pressureCalSafeMode", api_source)
+        self.assertNotIn("pressureCalSetControlEnabled", api_source)
+        self.assertNotIn("pressureCalSafeMode", api_source)
 
     def test_unused_filter_ui_is_removed_from_settings(self):
         source = SETTINGS_PAGE.read_text()

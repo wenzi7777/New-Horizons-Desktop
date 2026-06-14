@@ -98,19 +98,6 @@ class PressureCalClient:
                 status=0,
             ) from exc
 
-    def _post_with_fallback(
-        self,
-        primary_path: str,
-        fallback_path: str,
-        body: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        try:
-            return self._request("POST", primary_path, body)
-        except PressureCalError as exc:
-            if exc.status != 404:
-                raise
-        return self._request("POST", fallback_path, body)
-
     # ------------------------------------------------------------------
     # Public API methods
     # ------------------------------------------------------------------
@@ -130,22 +117,6 @@ class PressureCalClient:
     def set_target(self, kpa: float) -> dict[str, Any]:
         """POST /api/v1/pressure/target — set target pressure in kPa."""
         return self._request("POST", "/api/v1/pressure/target", {"target_kpa": kpa})
-
-    def set_control_enabled(self, enabled: bool) -> dict[str, Any]:
-        """Enable or disable pressure control, with fallback for older calibration backends."""
-        return self._post_with_fallback(
-            "/api/v1/pressure/control",
-            "/api/calibration/source/uno/control",
-            {"enabled": bool(enabled)},
-        )
-
-    def enter_safe_mode(self) -> dict[str, Any]:
-        """Enter safe mode / leak-down, with fallback for older calibration backends."""
-        return self._post_with_fallback(
-            "/api/v1/pressure/safe",
-            "/api/calibration/source/uno/safe",
-            {},
-        )
 
     def stop(self) -> dict[str, Any]:
         """POST /api/v1/pressure/stop — stop pressure control."""
