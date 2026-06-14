@@ -65,6 +65,7 @@ class PressureCalClient:
         headers: dict[str, str] = {
             "Authorization": f"Bearer {self._token}",
             "Accept": "application/json",
+            "User-Agent": "NewHorizons-Desktop/1.0",
         }
 
         if body is not None:
