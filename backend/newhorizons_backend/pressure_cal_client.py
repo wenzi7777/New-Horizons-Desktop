@@ -110,6 +110,10 @@ class PressureCalClient:
         """GET /api/v1/readings/all — return UNO pressure + IMADA readings."""
         return self._request("GET", "/api/v1/readings/all")
 
+    def readings_all(self) -> dict[str, Any]:
+        """Backward-compatible alias for older callers expecting ``readings_all``."""
+        return self.readings()
+
     def set_target(self, kpa: float) -> dict[str, Any]:
         """POST /api/v1/pressure/target — set target pressure in kPa."""
         return self._request("POST", "/api/v1/pressure/target", {"target_kpa": kpa})

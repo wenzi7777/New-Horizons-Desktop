@@ -737,7 +737,7 @@ def create_blueprint(
     def pressure_cal_readings() -> tuple[Response, int] | Response:
         try:
             client = get_client()
-            result = client.readings_all()
+            result = client.readings()
         except PressureCalNotConfigured:
             return json_response({"error": "pressure_cal_not_configured"}), 503
         except PressureCalError as exc:
