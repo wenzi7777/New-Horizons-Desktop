@@ -75,6 +75,7 @@ class NewHorizonsService:
         "calibration_status",
         "calibration_enable",
         "calibration_disable",
+        "calibration_dump_tare",
         "calibration_dump_level",
     }
     MAINTENANCE_COMMANDS = NORMAL_COMMANDS | {
@@ -84,6 +85,7 @@ class NewHorizonsService:
         "calibration_session_begin",
         "calibration_session_abort",
         "calibration_session_commit",
+        "calibration_capture_tare",
         "calibration_capture_cell",
         "calibration_capture_all",
         "file_write_begin",
@@ -1403,32 +1405,29 @@ class NewHorizonsService:
                 })
                 status["scan_health"] = scan_health
             elif command == "set_charge_profile":
-                profile = str(payload.get("profile") or "compatible")
+                _profile_current_ma = {
+                    "ultra_slow": 100,
+                    "slow": 200,
+                    "balanced": 250,
+                    "fast": 300,
+                    "extreme": 350,
+                }
+                profile = str(payload.get("profile") or "balanced")
+                charge_current_ma = _profile_current_ma.get(profile, 250)
+                if profile not in _profile_current_ma:
+                    profile = "balanced"
                 battery = dict(status.get("battery") or {})
-                if profile == "fast":
-                    battery.update({
-                        "charger": "integrated",
-                        "configured": True,
-                        "profile": "fast",
-                        "charge_current_ma": 300,
-                        "input_limit_ma": 500,
-                        "vbat_reg_mv": 4200,
-                        "termination_percent": 10,
-                        "precharge_percent": 20,
-                        "safety_timer_hours": 6,
-                    })
-                else:
-                    battery.update({
-                        "charger": "integrated",
-                        "configured": True,
-                        "profile": "compatible",
-                        "charge_current_ma": 250,
-                        "input_limit_ma": 500,
-                        "vbat_reg_mv": 4200,
-                        "termination_percent": 10,
-                        "precharge_percent": 20,
-                        "safety_timer_hours": 6,
-                    })
+                battery.update({
+                    "charger": "integrated",
+                    "configured": True,
+                    "profile": profile,
+                    "charge_current_ma": charge_current_ma,
+                    "input_limit_ma": 500,
+                    "vbat_reg_mv": 4200,
+                    "termination_percent": 10,
+                    "precharge_percent": 20,
+                    "safety_timer_hours": 6,
+                })
                 status["battery"] = battery
             elif command == "set_imu":
                 enabled = bool(payload.get("enabled", True))
@@ -2796,7 +2795,7 @@ class NewHorizonsService:
                 "detail": "not_charging",
                 "detected": True,
                 "configured": True,
-                "profile": "compatible",
+                "profile": "balanced",
                 "charge_current_ma": 250,
                 "input_limit_ma": 500,
                 "vbat_reg_mv": 4200,

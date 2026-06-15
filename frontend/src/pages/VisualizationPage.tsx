@@ -3,11 +3,10 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { api, type DeviceEntry, type ProfileListEntry, type VisualizationEntry } from "../lib/api";
-import { normalizeCommandResult } from "../lib/commandResult";
 import { normalizeDevice } from "../lib/device";
 import { fitProfileRect, profilePointToScreen, profilePointToWorld, type FittedProfileRect } from "../lib/profileLayout";
 import { useI18n } from "../i18n";
-import { sendDeviceCommand, useWsState } from "../lib/wsClient";
+import { useWsState } from "../lib/wsClient";
 
 const COP_OFFSET = 250;
 const VIEW_STORAGE_KEY = "newhorizons.visualization.views.v1";
@@ -23,7 +22,6 @@ type VisualizationView = {
   deviceUid: string;
   rendererMode: VisualizationRendererMode;
   profileName: string | null;
-  useCalibratedLevels?: boolean;
   selected: boolean;
   rowMirror: boolean;
   colMirror: boolean;
@@ -78,50 +76,27 @@ type CalibrationSummary = {
   level: number;
   complete: boolean;
   source: string;
+  captured_points: number;
+  total_points: number;
 };
 
 type CalibrationStateSummary = {
   enabled: boolean;
   complete: boolean;
+  tare_complete: boolean;
+  levels_complete: boolean;
+  legacy_missing_tare: boolean;
+  max_level: number;
   levels: CalibrationSummary[];
-};
-
-type CalibrationCell = {
-  sensor_index: number;
-  calibrated: boolean;
-  value: number | null;
-};
-
-type CalibrationLevelLayer = {
-  level: number;
-  cells: CalibrationCell[];
-} | null;
-
-type CalibrationLevelPreview = {
-  level: number;
-  saved: CalibrationLevelLayer;
-  draft: CalibrationLevelLayer;
-} | null;
-
-type CalibrationLookupPoint = {
-  raw: number;
-  level: number;
-};
-
-type CalibrationLookup = {
-  range: { min: number; max: number };
-  sensorPoints: Record<number, CalibrationLookupPoint[]>;
-};
-
-type CalibrationLookupState = {
-  status: "loading" | "ready" | "error";
-  levelsKey: string;
-  lookup: CalibrationLookup | null;
 };
 
 const EMPTY_CALIBRATION_STATE: CalibrationStateSummary = {
   enabled: false,
   complete: false,
+  tare_complete: false,
+  levels_complete: false,
+  legacy_missing_tare: false,
+  max_level: 0,
   levels: [],
 };
 
@@ -149,10 +124,6 @@ function recordValue(value: unknown) {
 
 function stringValue(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function safeDisplayName(device: DeviceEntry | undefined, fallbackUid: string) {
@@ -230,50 +201,24 @@ function parseCalibrationSummaryList(value: unknown): CalibrationSummary[] {
       level: asFiniteNumber(item.level, 0),
       complete: item.complete === true,
       source: stringValue(item.source, "saved"),
+      captured_points: Math.floor(asFiniteNumber(item.captured_points, 0)),
+      total_points: Math.floor(asFiniteNumber(item.total_points, 0)),
     }));
 }
 
 function parseCalibrationState(value: unknown): CalibrationStateSummary {
   const source = calibrationSource(value);
+  const metadata = recordValue(source.metadata);
+  const levels = parseCalibrationSummaryList(source.levels);
+  const maxLevelFromLevels = levels.reduce((current, item) => Math.max(current, item.level), 0);
   return {
     enabled: source.enabled === true,
     complete: source.complete === true,
-    levels: parseCalibrationSummaryList(source.levels),
-  };
-}
-
-function parseCalibrationCells(value: unknown): CalibrationCell[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => recordValue(item))
-    .filter((item) => Object.keys(item).length > 0)
-    .map((item) => ({
-      sensor_index: Math.floor(asFiniteNumber(item.sensor_index, -1)),
-      calibrated: item.calibrated === true,
-      value: item.value === null || item.value === undefined ? null : asFiniteNumber(item.value, 0),
-    }))
-    .filter((item) => item.sensor_index >= 0);
-}
-
-function parseCalibrationLayer(value: unknown): CalibrationLevelLayer {
-  if (value === null || value === undefined) return null;
-  const source = recordValue(value);
-  if (Object.keys(source).length === 0) return null;
-  return {
-    level: asFiniteNumber(source.level, 0),
-    cells: parseCalibrationCells(source.cells),
-  };
-}
-
-function parseCalibrationLevelPreview(value: unknown): CalibrationLevelPreview {
-  const source = recordValue(value);
-  if (!("level" in source) && !("saved" in source) && !("draft" in source)) {
-    return null;
-  }
-  return {
-    level: asFiniteNumber(source.level, 0),
-    saved: parseCalibrationLayer(source.saved),
-    draft: parseCalibrationLayer(source.draft),
+    tare_complete: source.tare_complete === true,
+    levels_complete: source.levels_complete === true,
+    legacy_missing_tare: source.legacy_missing_tare === true,
+    max_level: Math.max(asFiniteNumber(metadata.max_level, 0), maxLevelFromLevels),
+    levels,
   };
 }
 
@@ -298,57 +243,12 @@ function calibrationLevelsForDevice(device: DeviceEntry | undefined) {
     .sort((left, right) => left - right);
 }
 
-function buildCalibrationLookup(previews: CalibrationLevelPreview[]) {
-  const sensorPoints: Record<number, CalibrationLookupPoint[]> = {};
-  const levels: number[] = [];
-  previews.forEach((preview) => {
-    if (!preview) return;
-    const layer = preview.saved ?? preview.draft;
-    if (!layer) return;
-    levels.push(layer.level);
-    layer.cells.forEach((cell) => {
-      if (!cell.calibrated || cell.value === null) return;
-      const next = sensorPoints[cell.sensor_index] ?? [];
-      next.push({ raw: cell.value, level: layer.level });
-      sensorPoints[cell.sensor_index] = next;
-    });
-  });
-  Object.values(sensorPoints).forEach((points) => points.sort((left, right) => left.raw - right.raw));
-  if (!levels.length || Object.keys(sensorPoints).length === 0) {
-    return null;
+function calibrationDisplayRange(calibrationState: CalibrationStateSummary, fallback: { min: number; max: number }) {
+  const maxLevel = Math.max(1, calibrationState.max_level);
+  if (!Number.isFinite(maxLevel) || maxLevel <= 0) {
+    return fallback;
   }
-  const min = Math.min(...levels);
-  const max = Math.max(...levels);
-  return {
-    range: { min, max: Math.max(max, min + 1) },
-    sensorPoints,
-  };
-}
-
-function applyCalibrationValue(rawValue: number, sensorIndex: number, lookup: CalibrationLookup | null) {
-  if (!lookup || !Number.isFinite(rawValue)) return rawValue;
-  const points = lookup.sensorPoints[sensorIndex];
-  if (!points || points.length === 0) return rawValue;
-  if (points.length === 1 || rawValue <= points[0].raw) {
-    return points[0].level;
-  }
-  const lastPoint = points[points.length - 1];
-  if (rawValue >= lastPoint.raw) {
-    return lastPoint.level;
-  }
-  for (let index = 1; index < points.length; index += 1) {
-    if (rawValue > points[index].raw) continue;
-    const x0 = points[index - 1].raw;
-    const x1 = points[index].raw;
-    const y0 = points[index - 1].level;
-    const y1 = points[index].level;
-    if (Math.abs(x1 - x0) < 0.0001) {
-      return y1;
-    }
-    const ratio = (rawValue - x0) / (x1 - x0);
-    return y0 + (y1 - y0) * ratio;
-  }
-  return rawValue;
+  return { min: 0, max: Math.max(maxLevel, 1) };
 }
 
 function cssColorForValue(value: number, range: { min: number; max: number }) {
@@ -541,7 +441,6 @@ function buildMatrixView(
   profile: ProfileData | null | undefined,
   rowMirror: boolean,
   colMirror: boolean,
-  calibrationLookup: CalibrationLookup | null,
 ): MatrixView {
   const source = item?.p ?? [];
   const deviceRows = asFiniteNumber(device?.matrix_shape?.rows, 0);
@@ -568,7 +467,7 @@ function buildMatrixView(
       const y = clamp(asFiniteNumber(sensor.y, Math.floor(index / cols) / Math.max(rows - 1, 1)), 0, 1);
       return {
         index,
-        value: applyCalibrationValue(asFiniteNumber(source[index], 0), index, calibrationLookup),
+        value: asFiniteNumber(source[index], 0),
         xRatio: colMirror ? 1 - x : x,
         yRatio: rowMirror ? 1 - y : y,
         label: String(sensor.label ?? `P${index}`),
@@ -591,7 +490,7 @@ function buildMatrixView(
       const sourceRow = rowMirror ? rows - 1 - row : row;
       const sourceCol = colMirror ? cols - 1 - col : col;
       const sourceIndex = sourceRow * cols + sourceCol;
-      return applyCalibrationValue(asFiniteNumber(source[sourceIndex], 0), sourceIndex, calibrationLookup);
+      return asFiniteNumber(source[sourceIndex], 0);
     }),
   );
 
@@ -659,7 +558,6 @@ function loadStoredViews(): VisualizationView[] {
           deviceUid,
           rendererMode: item.rendererMode === "2d" ? "2d" : "3d",
           profileName: item.profileName ? String(item.profileName) : null,
-          useCalibratedLevels: typeof item.useCalibratedLevels === "boolean" ? item.useCalibratedLevels : undefined,
           selected: Boolean(item.selected),
           rowMirror: Boolean(item.rowMirror),
           colMirror: Boolean(item.colMirror),
@@ -670,46 +568,6 @@ function loadStoredViews(): VisualizationView[] {
   } catch {
     return [];
   }
-}
-
-function resultRequestId(value: Record<string, unknown> | null | undefined) {
-  return String(value?.request_id ?? "");
-}
-
-async function waitForCalibrationLevelPreview(deviceUid: string, requestId: string, timeoutMs: number) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await sleep(500);
-    const response = await api.devices();
-    const device = response.items.find((item) => normalizeUid(item.device_uid) === deviceUid);
-    const normalized = normalizeCommandResult(recordValue(device?.last_result));
-    if (resultRequestId(normalized) !== requestId) continue;
-    const preview = parseCalibrationLevelPreview(normalized);
-    if (preview) {
-      return preview;
-    }
-  }
-  return null;
-}
-
-async function fetchCalibrationLevelPreview(deviceUid: string, level: number, timeoutMs = 15000) {
-  const payload = { command: "calibration_dump_level", level };
-  try {
-    const response = await sendDeviceCommand(deviceUid, payload, timeoutMs);
-    const directPreview = parseCalibrationLevelPreview(normalizeCommandResult(response.result));
-    if (directPreview) {
-      return directPreview;
-    }
-    const requestId = response.queued?.request_id ?? String(response.queued?.items[0]?.payload?.request_id ?? "");
-    if (requestId) {
-      return waitForCalibrationLevelPreview(deviceUid, requestId, timeoutMs);
-    }
-  } catch {
-    // Fall back to the HTTP queue endpoint below.
-  }
-  const queued = await api.queueDeviceCommand(deviceUid, payload);
-  const requestId = queued.request_id ?? String(queued.items[0]?.payload?.request_id ?? "");
-  return requestId ? waitForCalibrationLevelPreview(deviceUid, requestId, timeoutMs) : null;
 }
 
 function PressureHeatmap2D({
@@ -1097,13 +955,11 @@ export function VisualizationPage() {
   const [range, setRange] = useState(DEFAULT_RANGE);
   const [deviceFpsByDevice, setDeviceFpsByDevice] = useState<Record<string, number>>({});
   const [renderFpsByDevice, setRenderFpsByDevice] = useState<Record<string, number>>({});
-  const [calibrationLookups, setCalibrationLookups] = useState<Record<string, CalibrationLookupState>>({});
   const [uiError, setUiError] = useState("");
   const [clockTick, setClockTick] = useState(0);
   const latestRef = useRef<VisualizationEntry[]>([]);
   const frameRef = useRef(0);
   const renderLoopFrameRef = useRef(0);
-  const calibrationFetchKeyRef = useRef<Record<string, string>>({});
   const deviceFrameStatsRef = useRef<Record<string, { lastTick: number; fps: number }>>({});
   const renderFrameStatsRef = useRef<Record<string, { lastTick: number; fps: number }>>({});
   const activeRenderDeviceKeys = useMemo(
@@ -1134,73 +990,6 @@ export function VisualizationPage() {
     });
     return next;
   }, [items]);
-
-  useEffect(() => {
-    const required = new Map<string, { deviceUid: string; levels: number[] }>();
-    views.forEach((view) => {
-      const deviceUid = normalizeUid(view.deviceUid);
-      const device = devicesByUid.get(deviceUid);
-      const normalized = device ? normalizeDevice(device) : null;
-      const levels = calibrationLevelsForDevice(device);
-      const hasCalibrationLevels = levels.length > 0;
-      const useCalibratedLevels = view.useCalibratedLevels ?? hasCalibrationLevels;
-      if (!device || normalized?.isOffline || !useCalibratedLevels || !hasCalibrationLevels) return;
-      required.set(deviceUid, { deviceUid, levels });
-    });
-
-    required.forEach(({ deviceUid, levels }) => {
-      const levelsKey = levels.map((value) => value.toFixed(3)).join("|");
-      const current = calibrationLookups[deviceUid];
-      if (current?.status === "ready" && current.levelsKey === levelsKey) {
-        return;
-      }
-      if (calibrationFetchKeyRef.current[deviceUid] === levelsKey) {
-        return;
-      }
-      calibrationFetchKeyRef.current[deviceUid] = levelsKey;
-      setCalibrationLookups((currentMap) => ({
-        ...currentMap,
-        [deviceUid]: {
-          status: "loading",
-          levelsKey,
-          lookup: currentMap[deviceUid]?.levelsKey === levelsKey ? currentMap[deviceUid]?.lookup ?? null : null,
-        },
-      }));
-      void (async () => {
-        try {
-          const previews: CalibrationLevelPreview[] = [];
-          for (const level of levels) {
-            const preview = await fetchCalibrationLevelPreview(deviceUid, level);
-            if (preview) {
-              previews.push(preview);
-            }
-          }
-          const lookup = buildCalibrationLookup(previews);
-          setCalibrationLookups((currentMap) => ({
-            ...currentMap,
-            [deviceUid]: {
-              status: lookup ? "ready" : "error",
-              levelsKey,
-              lookup,
-            },
-          }));
-        } catch {
-          setCalibrationLookups((currentMap) => ({
-            ...currentMap,
-            [deviceUid]: {
-              status: "error",
-              levelsKey,
-              lookup: null,
-            },
-          }));
-        } finally {
-          if (calibrationFetchKeyRef.current[deviceUid] === levelsKey) {
-            delete calibrationFetchKeyRef.current[deviceUid];
-          }
-        }
-      })();
-    });
-  }, [calibrationLookups, devicesByUid, views]);
 
   const viewDeviceKey = useMemo(() => {
     return Array.from(new Set(views.map((view) => normalizeUid(view.deviceUid)).filter(Boolean))).sort().join("|");
@@ -1494,14 +1283,11 @@ export function VisualizationPage() {
           const item = itemsByUid.get(deviceUid);
           const profile = view.profileName ? profileCache[view.profileName] : null;
           const cardRange = rangeForProfile(profile, range);
-          const calibrationLevels = calibrationLevelsForDevice(device);
-          const hasCalibrationLevels = calibrationLevels.length > 0;
-          const useCalibratedLevels = view.useCalibratedLevels ?? hasCalibrationLevels;
-          const calibrationLookupState = calibrationLookups[deviceUid];
-          const calibrationLookup = useCalibratedLevels ? calibrationLookupState?.lookup ?? null : null;
-          const calibrationRange = calibrationLookup?.range ?? null;
-          const activeRange = useCalibratedLevels ? calibrationRange ?? cardRange : cardRange;
-          const matrix = buildMatrixView(item, device, profile, view.rowMirror, view.colMirror, calibrationLookup);
+          const calibrationState = calibrationStateForDevice(device);
+          const hasEnabledCalibration = calibrationState.enabled;
+          const hasCalibrationLevels = calibrationLevelsForDevice(device).length > 0;
+          const activeRange = hasEnabledCalibration ? calibrationDisplayRange(calibrationState, cardRange) : cardRange;
+          const matrix = buildMatrixView(item, device, profile, view.rowMirror, view.colMirror);
           const dotSize = clamp(asFiniteNumber(view.dotSize, 1), 0.5, 4);
           const cop = computeCop(matrix.points, matrix.rows, matrix.cols);
           const values = matrix.points.map((point) => point.value);
@@ -1608,20 +1394,9 @@ export function VisualizationPage() {
                     />
                     <span>{t("colMirror")}</span>
                   </label>
-                  {hasCalibrationLevels ? (
-                    <label className="switch-row">
-                      <input
-                        type="checkbox"
-                        checked={useCalibratedLevels}
-                        onChange={(event) => updateView(view.id, { useCalibratedLevels: event.target.checked })}
-                      />
-                      <span>
-                        {t("useCalibratedLevels")}
-                        {useCalibratedLevels && calibrationLookupState?.status === "loading" ? ` (${t("loading")})` : ""}
-                      </span>
-                    </label>
-                  ) : null}
                 </div>
+                {hasEnabledCalibration ? <p className="service-muted">{t("calibratedRangeHint")}</p> : null}
+                {!hasEnabledCalibration && hasCalibrationLevels ? <p className="service-muted">{t("calibrationAvailableOnDevice")}</p> : null}
               </div>
 
               <div className="visualization-overview-grid compact-visualization-metrics">
@@ -1638,7 +1413,7 @@ export function VisualizationPage() {
                   <div className="metric-value">{(renderFpsByDevice[deviceUid] ?? 0).toFixed(1)}</div>
                 </div>
                 <div className="metric visualization-metric">
-                  <div className="metric-label">{useCalibratedLevels ? t("maxCalibratedLevel") : "Max P"}</div>
+                  <div className="metric-label">{hasEnabledCalibration ? t("maxCalibratedLevel") : "Max P"}</div>
                   <div className="metric-value">{maxPressure.toFixed(2)}</div>
                 </div>
                 <div className="metric visualization-metric visualization-vector-metric">

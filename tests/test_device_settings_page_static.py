@@ -115,12 +115,16 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("batteryStatus", source)
         self.assertIn("chargeProfile", source)
         self.assertIn('command: "set_charge_profile"', source)
-        self.assertIn('"compatible"', source)
+        self.assertIn('"balanced"', source)
+        self.assertIn('"ultra_slow"', source)
+        self.assertIn('"extreme"', source)
         self.assertIn('"fast"', source)
         self.assertNotIn("safe_default", source)
         self.assertNotIn("fast_800mah_only", source)
-        self.assertIn('t("compatibleChargingMode")', source)
+        self.assertIn('t("balancedChargingMode")', source)
         self.assertIn('t("fastChargingMode")', source)
+        self.assertIn('t("ultraSlowChargingMode")', source)
+        self.assertIn('t("extremeChargingMode")', source)
         self.assertIn('isCommandBusy("set_charge_profile")', source)
 
     def test_diagnostics_exposes_power_state_controls_and_status_metrics(self):
@@ -321,8 +325,10 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
             'command: "calibration_session_begin"',
             'command: "calibration_session_abort"',
             'command: "calibration_session_commit"',
+            'command: "calibration_capture_tare"',
             'command: "calibration_capture_cell"',
             'command: "calibration_capture_all"',
+            'command: "calibration_dump_tare"',
             'command: "calibration_dump_level"',
             'command: "calibration_delete_level"',
             'command: "storage_status"',
@@ -332,7 +338,12 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("CalibrationWorkbench", source)
         self.assertIn("selectedCalibrationSensor", source)
         self.assertIn("calibrationLevelPreview", source)
+        self.assertIn("tarePreview", source)
         self.assertIn("captureAllSensors", source)
+        self.assertIn("captureTare", source)
+        self.assertIn("dumpTare", source)
+        self.assertIn("tare_complete", source)
+        self.assertIn("legacy_missing_tare", source)
         self.assertIn("captureSelectedSensor", source)
         self.assertNotIn("calibrationAnalogPin", source)
         self.assertNotIn("calibrationSelectPin", source)
@@ -365,6 +376,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('pressureCalLiveStatusCard', i18n)
         self.assertIn('pressureCalTargetKpa', i18n)
         self.assertIn('pressureCalMaxKpa', i18n)
+        self.assertIn('pressureCalReferencePressure', i18n)
         self.assertIn('manualConfirmCapture', i18n)
         self.assertIn("const [activeTargetKpa, setActiveTargetKpa] = useState<number | null>(null);", source)
         self.assertIn("const manualConfirmRef = useRef<PressureStableResult | null>(null);", source)
@@ -378,7 +390,9 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('className="pressure-live-bar-fill"', source)
         self.assertIn('Math.max(0, Math.min(100, ((currentKpa ?? 0) / PRESSURE_MAX_KPA) * 100))', source)
         self.assertIn('t("manualConfirmCapture")', source)
-        self.assertIn('Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, IMADA ${stability.imadaValue.toFixed(3)} N', source)
+        self.assertIn('Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, reference pressure sensor ${stability.referencePressureKpa?.toFixed(3) ?? "-"} kPa', source)
+        self.assertIn('Metric label={t("pressureCalReferencePressure")}', source)
+        self.assertNotIn('pressureCalImadaN', source)
 
     def test_pressure_calibration_commit_holds_low_pressure_with_compensation(self):
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
@@ -405,6 +419,26 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("overshootCountRef.current >= PRESSURE_OVERSHOOT_ABORT_SAMPLES", source)
         self.assertNotIn("pressureCalSetControlEnabled", api_source)
         self.assertNotIn("pressureCalSafeMode", api_source)
+
+    def test_pressure_calibration_captures_reference_pressure_sensor_value(self):
+        source = SETTINGS_PAGE.read_text(encoding="utf-8")
+
+        self.assertIn("referencePressureKpa: currentKpa,", source)
+        self.assertIn("let lastReferencePressureKpa: number | null = null;", source)
+        self.assertIn("lastReferencePressureKpa = r.uno.pressure_kpa;", source)
+        self.assertIn("referencePressureKpa: lastReferencePressureKpa,", source)
+        self.assertIn('addLog(`Capturing at reference pressure sensor ${stability.referencePressureKpa?.toFixed(3) ?? "-"} kPa`);', source)
+        self.assertIn("level: stability.referencePressureKpa ?? stability.settledKpa ?? targetKpa,", source)
+
+    def test_pressure_calibration_flow_captures_tare_before_pressure_levels(self):
+        source = SETTINGS_PAGE.read_text(encoding="utf-8")
+
+        self.assertIn('await api.queueDeviceCommand(deviceUid, { command: "calibration_session_begin" });', source)
+        self.assertIn('await api.queueDeviceCommand(deviceUid, { command: "calibration_capture_tare", duration_ms: 3000 });', source)
+        self.assertIn('await api.queueDeviceCommand(deviceUid, {', source)
+        self.assertIn('command: "calibration_capture_all",', source)
+        self.assertIn('await api.queueDeviceCommand(deviceUid, { command: "calibration_session_commit", auto_enable: true });', source)
+        self.assertNotIn("level: stability.imadaValue", source)
 
     def test_unused_filter_ui_is_removed_from_settings(self):
         source = SETTINGS_PAGE.read_text()

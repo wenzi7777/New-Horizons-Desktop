@@ -117,6 +117,11 @@ const COMMAND_BLOCKS: CommandBlock[] = [
     ],
   },
   {
+    command: "calibration-dump-tare",
+    groupKey: "commandGroupMaintenance",
+    params: [],
+  },
+  {
     command: "calibration-dump-level",
     groupKey: "commandGroupMaintenance",
     params: [{ key: "level", labelKey: "paramLevel", type: "number", required: true, defaultValue: "10" }],
@@ -125,6 +130,13 @@ const COMMAND_BLOCKS: CommandBlock[] = [
     command: "calibration-delete-level",
     groupKey: "commandGroupDanger",
     params: [{ key: "level", labelKey: "paramLevel", type: "number", required: true, defaultValue: "10" }],
+  },
+  {
+    command: "calibration-capture-tare",
+    groupKey: "commandGroupMaintenance",
+    params: [
+      { key: "duration-ms", labelKey: "paramDurationMs", type: "number", defaultValue: "2500" },
+    ],
   },
   {
     command: "calibration-capture-cell",

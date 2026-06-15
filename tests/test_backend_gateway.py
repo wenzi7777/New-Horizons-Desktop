@@ -495,14 +495,22 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         queued = service.publish_command(device_uid, {"command": "calibration_status", "request_id": "req-cal-status"})
         self.assertEqual(queued["transport"], "gateway_wss")
         self.assertEqual(sent[-1]["payload"]["command"], "calibration_status")
+        queued = service.publish_command(device_uid, {"command": "calibration_dump_tare", "request_id": "req-cal-dump-tare"})
+        self.assertEqual(queued["transport"], "gateway_wss")
+        self.assertEqual(sent[-1]["payload"]["command"], "calibration_dump_tare")
 
         with self.assertRaisesRegex(RuntimeError, "maintenance_required"):
             service.publish_command(device_uid, {"command": "calibration_session_begin", "request_id": "req-cal-begin"})
+        with self.assertRaisesRegex(RuntimeError, "maintenance_required"):
+            service.publish_command(device_uid, {"command": "calibration_capture_tare", "request_id": "req-cal-tare"})
 
         service.record_gateway_result(device_uid, {"device_uid": device_uid, "message": "status", "mode": "maintenance"})
         queued = service.publish_command(device_uid, {"command": "calibration_session_begin", "request_id": "req-cal-begin-2"})
         self.assertEqual(queued["transport"], "gateway_wss")
         self.assertEqual(sent[-1]["payload"]["command"], "calibration_session_begin")
+        queued = service.publish_command(device_uid, {"command": "calibration_capture_tare", "request_id": "req-cal-tare-2"})
+        self.assertEqual(queued["transport"], "gateway_wss")
+        self.assertEqual(sent[-1]["payload"]["command"], "calibration_capture_tare")
 
     def test_reboot_command_is_plain_arduino_command_without_boot_transition(self):
         service = NewHorizonsService(mock_mode=False)

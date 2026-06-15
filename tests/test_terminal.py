@@ -60,8 +60,10 @@ class DeviceCommandValidationTest(unittest.TestCase):
             "calibration_session_begin",
             "calibration_session_abort",
             "calibration_session_commit",
+            "calibration_dump_tare",
             "calibration_dump_level",
             "calibration_delete_level",
+            "calibration_capture_tare",
             "calibration_capture_cell",
             "calibration_capture_all",
         ):
@@ -69,15 +71,20 @@ class DeviceCommandValidationTest(unittest.TestCase):
                 payload = validate_device_command_payload({"command": command, "request_id": f"req-{command}"})
                 self.assertEqual(payload["command"], command)
 
+        dump_tare = compile_terminal_command("calibration-dump-tare")
         dump_level = compile_terminal_command("calibration-dump-level --level 10")
         delete_level = compile_terminal_command("calibration-delete-level --level 10")
+        capture_tare = compile_terminal_command("calibration-capture-tare --duration-ms 2500")
         capture_cell = compile_terminal_command("calibration-capture-cell --sensor-index 3 --level 10 --duration-ms 2500")
         capture_all = compile_terminal_command("calibration-capture-all --level 10 --duration-ms 2500")
         session_begin = compile_terminal_command("calibration-session-begin")
         session_commit = compile_terminal_command("calibration-session-commit --auto-enable true")
 
+        self.assertEqual(dump_tare["payload"]["command"], "calibration_dump_tare")
         self.assertEqual(dump_level["payload"]["command"], "calibration_dump_level")
         self.assertEqual(delete_level["payload"]["command"], "calibration_delete_level")
+        self.assertEqual(capture_tare["payload"]["command"], "calibration_capture_tare")
+        self.assertEqual(capture_tare["payload"]["duration_ms"], 2500)
         self.assertEqual(capture_cell["payload"]["command"], "calibration_capture_cell")
         self.assertEqual(capture_cell["payload"]["sensor_index"], 3)
         self.assertEqual(capture_all["payload"]["command"], "calibration_capture_all")
@@ -86,18 +93,18 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertEqual(session_commit["payload"]["auto_enable"], True)
 
     def test_charge_profile_is_allowed_and_compiles_from_terminal(self):
-        payload = validate_device_command_payload({"command": "set_charge_profile", "profile": "compatible", "request_id": "req-charge"})
+        payload = validate_device_command_payload({"command": "set_charge_profile", "profile": "balanced", "request_id": "req-charge"})
         compiled = compile_terminal_command("set-charge-profile --profile fast")
 
         self.assertEqual(payload["command"], "set_charge_profile")
-        self.assertEqual(payload["profile"], "compatible")
+        self.assertEqual(payload["profile"], "balanced")
         self.assertEqual(compiled["payload"]["command"], "set_charge_profile")
         self.assertEqual(compiled["payload"]["profile"], "fast")
 
-        for legacy_profile in ("safe_default", "fast_800mah_only"):
-            with self.subTest(profile=legacy_profile):
+        for invalid_profile in ("compatible", "tiny", "max", "safe_default", "fast_800mah_only"):
+            with self.subTest(profile=invalid_profile):
                 with self.assertRaisesRegex(ValueError, "invalid_charge_profile"):
-                    compile_terminal_command(f"set-charge-profile --profile {legacy_profile}")
+                    compile_terminal_command(f"set-charge-profile --profile {invalid_profile}")
 
     def test_board_profile_lists_v21_gcu_lts_manifest_track(self):
         source = BOARD_PROFILE.read_text(encoding="utf-8")

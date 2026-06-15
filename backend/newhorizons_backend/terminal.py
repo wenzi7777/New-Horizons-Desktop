@@ -22,8 +22,10 @@ DEVICE_COMMAND_ALLOWLIST = {
     "calibration_session_begin",
     "calibration_session_abort",
     "calibration_session_commit",
+    "calibration_dump_tare",
     "calibration_dump_level",
     "calibration_delete_level",
+    "calibration_capture_tare",
     "calibration_capture_cell",
     "calibration_capture_all",
     "findme_discover",
@@ -136,6 +138,11 @@ def terminal_help_items() -> list[dict[str, str]]:
             "example": "calibration-session-commit --auto-enable true",
         },
         {
+            "command": "calibration-dump-tare",
+            "description": "Dump the saved and draft tare baseline matrix cells.",
+            "example": "calibration-dump-tare",
+        },
+        {
             "command": "calibration-dump-level",
             "description": "Dump one calibration level with saved and draft matrix cells.",
             "example": "calibration-dump-level --level 10",
@@ -149,6 +156,11 @@ def terminal_help_items() -> list[dict[str, str]]:
             "command": "calibration-capture-cell",
             "description": "Capture one sensor into the current draft calibration session.",
             "example": "calibration-capture-cell --sensor-index 3 --level 10 --duration-ms 2500",
+        },
+        {
+            "command": "calibration-capture-tare",
+            "description": "Capture the no-load tare baseline into the current draft calibration session.",
+            "example": "calibration-capture-tare --duration-ms 2500",
         },
         {
             "command": "calibration-capture-all",
@@ -177,8 +189,8 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "set-charge-profile",
-            "description": "Configure the charging profile.",
-            "example": "set-charge-profile --profile fast",
+            "description": "Configure the charging profile. Profiles: ultra_slow (100mA), slow (200mA), balanced (250mA), fast (300mA), extreme (350mA).",
+            "example": "set-charge-profile --profile balanced",
         },
         {
             "command": "power-set-state",
@@ -283,6 +295,7 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "calibration-clear-profile": "calibration_clear_profile",
         "calibration-session-begin": "calibration_session_begin",
         "calibration-session-abort": "calibration_session_abort",
+        "calibration-dump-tare": "calibration_dump_tare",
         "findme-discover": "findme_discover",
         "log-clear": "log_clear",
         "reboot": "reboot",
@@ -313,6 +326,14 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
             "level": float(parsed["level"]),
         }
         return {"command": "calibration_dump_level", "payload": payload, "argv": argv}
+
+    if command == "calibration-capture-tare":
+        parsed = _parse_options(args)
+        payload = {
+            "command": "calibration_capture_tare",
+            "duration_ms": int(parsed.get("duration_ms", 3000)),
+        }
+        return {"command": "calibration_capture_tare", "payload": payload, "argv": argv}
 
     if command == "calibration-delete-level":
         parsed = _parse_options(args)
@@ -380,8 +401,8 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
 
     if command == "set-charge-profile":
         parsed = _parse_options(args)
-        profile = parsed.get("profile", "compatible")
-        if profile not in {"compatible", "fast"}:
+        profile = parsed.get("profile", "balanced")
+        if profile not in {"ultra_slow", "slow", "balanced", "fast", "extreme"}:
             raise ValueError("invalid_charge_profile")
         payload = {"command": "set_charge_profile", "profile": profile}
         return {"command": "set_charge_profile", "payload": payload, "argv": argv}

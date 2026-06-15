@@ -76,15 +76,18 @@ class VisualizationPageStaticTest(unittest.TestCase):
         self.assertIn("backgroundTexture", source)
         self.assertIn("current.backgroundMesh.visible = Boolean", source)
 
-    def test_visualization_can_switch_each_card_to_calibrated_levels(self):
+    def test_visualization_trusts_device_calibrated_stream_and_uses_calibrated_range_hint(self):
         source = VISUALIZATION_PAGE.read_text()
 
-        self.assertIn("useCalibratedLevels?: boolean;", source)
-        self.assertIn("function buildCalibrationLookup(", source)
-        self.assertIn('command: "calibration_dump_level"', source)
-        self.assertIn('const useCalibratedLevels = view.useCalibratedLevels ?? hasCalibrationLevels;', source)
-        self.assertIn('const activeRange = useCalibratedLevels ? calibrationRange ?? cardRange : cardRange;', source)
-        self.assertIn('{t("useCalibratedLevels")}', source)
+        self.assertNotIn("useCalibratedLevels?: boolean;", source)
+        self.assertNotIn("function buildCalibrationLookup(", source)
+        self.assertNotIn("function applyCalibrationValue(", source)
+        self.assertNotIn('command: "calibration_dump_level"', source)
+        self.assertNotIn('{t("useCalibratedLevels")}', source)
+        self.assertIn("function calibrationDisplayRange(", source)
+        self.assertIn("const hasEnabledCalibration = calibrationState.enabled;", source)
+        self.assertIn("const activeRange = hasEnabledCalibration ? calibrationDisplayRange(calibrationState, cardRange) : cardRange;", source)
+        self.assertIn('{t("calibratedRangeHint")}', source)
 
 
 if __name__ == "__main__":

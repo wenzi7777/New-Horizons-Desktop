@@ -117,6 +117,7 @@ function isLiveQueryCommand(command: string) {
     "storage_status",
     "log_tail",
     "calibration_status",
+    "calibration_dump_tare",
     "calibration_dump_level",
     "findme_discover",
   ].includes(command);
@@ -145,8 +146,7 @@ type DeviceCommandResult = {
   result?: Record<string, unknown> | null;
 };
 
-type CalibrationSummary = {
-  level: number;
+type CalibrationCaptureSummary = {
   captured_points: number;
   total_points: number;
   missing_points: number;
@@ -154,11 +154,20 @@ type CalibrationSummary = {
   source: string;
 };
 
+type CalibrationSummary = CalibrationCaptureSummary & {
+  level: number;
+};
+
 type CalibrationState = {
   enabled: boolean;
   mode_active: boolean;
   session_active: boolean;
   complete: boolean;
+  tare_complete: boolean;
+  levels_complete: boolean;
+  legacy_missing_tare: boolean;
+  tare: CalibrationCaptureSummary | null;
+  draft_tare: CalibrationCaptureSummary | null;
   levels: CalibrationSummary[];
   draft_levels: CalibrationSummary[];
   metadata: Record<string, unknown>;
@@ -187,6 +196,20 @@ type CalibrationLevelPreview = {
   draft: CalibrationLevelLayer;
   session_active: boolean;
 };
+
+type CalibrationTareLayer = {
+  captured_points: number;
+  total_points: number;
+  complete: boolean;
+  cells: CalibrationCell[];
+} | null;
+
+type CalibrationTarePreview = {
+  total_points: number;
+  saved: CalibrationTareLayer;
+  draft: CalibrationTareLayer;
+  session_active: boolean;
+} | null;
 
 // ---------------------------------------------------------------------------
 // Pressure Calibration Panel
@@ -218,7 +241,7 @@ type PressureCalPhase =
   | "capturing" | "stopping_pressure" | "committing" | "done" | "error" | "aborting";
 
 type PressureStableResult = {
-  imadaValue: number;
+  referencePressureKpa: number | null;
   reason: "strict" | "adaptive_window" | "timeout_window" | "manual_confirm";
   settledKpa: number | null;
   elapsedMs: number;
@@ -250,7 +273,6 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const [pointIndex, setPointIndex] = useState(0);
   const [points, setPoints] = useState<number[]>(PRESSURE_CAL_PRESETS.standard);
   const [currentKpa, setCurrentKpa] = useState<number | null>(null);
-  const [currentImada, setCurrentImada] = useState<number | null>(null);
   const [calLog, setCalLog] = useState<string[]>([]);
   const [calError, setCalError] = useState("");
   const [configured, setConfigured] = useState(false);
@@ -304,7 +326,6 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       try {
         const r = await api.pressureCalReadings();
         setCurrentKpa(r.uno.pressure_kpa);
-        setCurrentImada(r.imada.value);
       } catch { /* ignore */ }
     }, 2000);
     return () => clearInterval(id);
@@ -352,9 +373,9 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   }
 
   function confirmCurrentPressureValue() {
-    if (phase !== "stabilizing" || currentImada === null) return;
+    if (phase !== "stabilizing" || currentKpa === null) return;
     manualConfirmRef.current = {
-      imadaValue: currentImada,
+      referencePressureKpa: currentKpa,
       reason: "manual_confirm",
       settledKpa: currentKpa,
       elapsedMs: 0,
@@ -366,14 +387,14 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   }
 
   async function waitForStable(targetKpa: number): Promise<PressureStableResult> {
-    let lastImada = 0;
+    let lastReferencePressureKpa: number | null = null;
     let lastKpa: number | null = null;
     const pressureSamples: number[] = [];
     const startedAt = Date.now();
     while (true) {
       if (abortRef.current) {
         return {
-          imadaValue: lastImada,
+          referencePressureKpa: lastReferencePressureKpa,
           reason: "timeout_window",
           settledKpa: lastKpa,
           elapsedMs: Date.now() - startedAt,
@@ -390,8 +411,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       try {
         const r: PressureCalReadings = await api.pressureCalReadings();
         setCurrentKpa(r.uno.pressure_kpa);
-        setCurrentImada(r.imada.value);
-        lastImada = r.imada.value;
+        lastReferencePressureKpa = r.uno.pressure_kpa;
         lastKpa = r.uno.pressure_kpa;
         pressureSamples.push(r.uno.pressure_kpa);
         if (pressureSamples.length > PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES * 2) {
@@ -414,7 +434,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           stableCountRef.current++;
           if (stableCountRef.current >= PRESSURE_STABLE_CONFIRMATION_SAMPLES) {
             return {
-              imadaValue: lastImada,
+              referencePressureKpa: lastReferencePressureKpa,
               reason: "strict",
               settledKpa: r.uno.pressure_kpa,
               elapsedMs,
@@ -433,7 +453,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           )
         ) {
           return {
-            imadaValue: lastImada,
+            referencePressureKpa: lastReferencePressureKpa,
             reason: "adaptive_window",
             settledKpa: pressureWindowAverageKpa(recentPressureWindow(pressureSamples)),
             elapsedMs,
@@ -449,7 +469,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           )
         ) {
           return {
-            imadaValue: lastImada,
+            referencePressureKpa: lastReferencePressureKpa,
             reason: "timeout_window",
             settledKpa: pressureWindowAverageKpa(recentPressureWindow(pressureSamples)),
             elapsedMs,
@@ -475,6 +495,12 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       await api.queueDeviceCommand(deviceUid, { command: "calibration_session_begin" });
       await new Promise<void>((res) => setTimeout(res, 1000));
 
+      setPhase("capturing");
+      addLog("Capturing tare baseline at no load…");
+      await api.queueDeviceCommand(deviceUid, { command: "calibration_capture_tare", duration_ms: 3000 });
+      await new Promise<void>((res) => setTimeout(res, 4000));
+      addLog("Tare baseline captured.");
+
       for (let i = 0; i < sortedPoints.length; i++) {
         if (abortRef.current) break;
         const targetKpa = sortedPoints[i];
@@ -495,16 +521,16 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         if (stability.reason === "adaptive_window") {
           addLog(`Pressure settled at ${stability.settledKpa?.toFixed(3) ?? "-"} kPa after ${Math.round(stability.elapsedMs / 1000)}s; continuing with adaptive window.`);
         } else if (stability.reason === "manual_confirm") {
-          addLog(`Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, IMADA ${stability.imadaValue.toFixed(3)} N`);
+          addLog(`Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, reference pressure sensor ${stability.referencePressureKpa?.toFixed(3) ?? "-"} kPa`);
         } else if (stability.reason === "timeout_window") {
           addLog(`Pressure held within ${PRESSURE_STABLE_TIMEOUT_RANGE_KPA.toFixed(2)} kPa window at ${stability.settledKpa?.toFixed(3) ?? "-"} kPa after ${Math.round(stability.elapsedMs / 1000)}s; continuing without waiting longer.`);
         }
 
         setPhase("capturing");
-        addLog(`Capturing at IMADA ${stability.imadaValue.toFixed(3)} N`);
+        addLog(`Capturing at reference pressure sensor ${stability.referencePressureKpa?.toFixed(3) ?? "-"} kPa`);
         await api.queueDeviceCommand(deviceUid, {
           command: "calibration_capture_all",
-          level: stability.imadaValue,
+          level: stability.referencePressureKpa ?? stability.settledKpa ?? targetKpa,
           duration_ms: 3000,
         });
         await new Promise<void>((res) => setTimeout(res, 4000));
@@ -607,14 +633,14 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           </div>
           <div className="metric-row">
             <Metric label={t("pressureCalUnoKpa")} value={currentKpa !== null ? `${currentKpa.toFixed(3)} kPa` : "-"} />
-            <Metric label={t("pressureCalImadaN")} value={currentImada !== null ? `${currentImada.toFixed(3)} N` : "-"} />
+            <Metric label={t("pressureCalReferencePressure")} value={currentKpa !== null ? `${currentKpa.toFixed(3)} kPa` : "-"} />
           </div>
           {phase === "stabilizing" && (
             <div className="actions compact">
               <button
                 className="button primary"
                 type="button"
-                disabled={currentImada === null}
+                disabled={currentKpa === null}
                 onClick={confirmCurrentPressureValue}
               >
                 {t("manualConfirmCapture")}
@@ -739,11 +765,28 @@ function calibrationSource(value: unknown) {
     "mode_active",
     "session_active",
     "complete",
+    "tare_complete",
+    "levels_complete",
+    "legacy_missing_tare",
+    "tare",
+    "draft_tare",
     "levels",
     "draft_levels",
     "metadata",
   ].some((key) => key in direct);
   return hasTopLevelKeys ? direct : {};
+}
+
+function parseCalibrationCaptureSummary(value: unknown, fallbackSource: string): CalibrationCaptureSummary | null {
+  const source = recordValue(value);
+  if (Object.keys(source).length === 0) return null;
+  return {
+    captured_points: numberValue(source.captured_points, 0),
+    total_points: numberValue(source.total_points, 0),
+    missing_points: numberValue(source.missing_points, 0),
+    complete: source.complete === true,
+    source: stringValue(source.source, fallbackSource),
+  };
 }
 
 function parseCalibrationSummaryList(value: unknown): CalibrationSummary[] {
@@ -768,6 +811,11 @@ function parseCalibrationState(value: unknown): CalibrationState {
     mode_active: source.mode_active === true,
     session_active: source.session_active === true,
     complete: source.complete === true,
+    tare_complete: source.tare_complete === true,
+    levels_complete: source.levels_complete === true,
+    legacy_missing_tare: source.legacy_missing_tare === true,
+    tare: parseCalibrationCaptureSummary(source.tare, "saved"),
+    draft_tare: parseCalibrationCaptureSummary(source.draft_tare, "draft"),
     levels: parseCalibrationSummaryList(source.levels),
     draft_levels: parseCalibrationSummaryList(source.draft_levels),
     metadata: recordValue(source.metadata),
@@ -816,7 +864,32 @@ function parseCalibrationLevelPreview(value: unknown): CalibrationLevelPreview |
   };
 }
 
-function calibrationCellLookup(layer: CalibrationLevelLayer) {
+function parseCalibrationTareLayer(value: unknown): CalibrationTareLayer {
+  if (value === null || value === undefined) return null;
+  const source = recordValue(value);
+  if (Object.keys(source).length === 0) return null;
+  return {
+    captured_points: numberValue(source.captured_points, 0),
+    total_points: numberValue(source.total_points, 0),
+    complete: source.complete === true,
+    cells: parseCalibrationCells(source.cells),
+  };
+}
+
+function parseCalibrationTarePreview(value: unknown): CalibrationTarePreview {
+  const source = recordValue(value);
+  if (!("saved" in source) && !("draft" in source)) {
+    return null;
+  }
+  return {
+    total_points: numberValue(source.total_points, 0),
+    saved: parseCalibrationTareLayer(source.saved),
+    draft: parseCalibrationTareLayer(source.draft),
+    session_active: source.session_active === true,
+  };
+}
+
+function calibrationCellLookup(layer: CalibrationLevelLayer | CalibrationTareLayer) {
   const lookup = new Map<number, CalibrationCell>();
   if (!layer) return lookup;
   layer.cells.forEach((cell) => {
@@ -842,7 +915,9 @@ function CalibrationWorkbench({
   const [calibrationLevel, setCalibrationLevel] = useState(10);
   const [calibrationDuration, setCalibrationDuration] = useState(3000);
   const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
+  const [tarePreview, setTarePreview] = useState<CalibrationTarePreview>(null);
   const [calibrationLevelPreview, setCalibrationLevelPreview] = useState<CalibrationLevelPreview | null>(null);
+  const [tarePreviewError, setTarePreviewError] = useState("");
   const [calibrationPreviewError, setCalibrationPreviewError] = useState("");
 
   useEffect(() => {
@@ -874,12 +949,25 @@ function CalibrationWorkbench({
     setCalibrationLevelPreview(preview);
   }
 
+  async function loadTarePreview() {
+    setTarePreviewError("");
+    const response = await run(t("preview"), { command: "calibration_dump_tare" });
+    const preview = parseCalibrationTarePreview(response.result);
+    if (!preview) {
+      setTarePreviewError(t("previewUnavailable"));
+      return;
+    }
+    setTarePreview(preview);
+  }
+
   useEffect(() => {
     if (!deviceUid || isDeviceOffline) return;
     void syncCalibrationStatus().catch(() => undefined);
   }, [deviceUid, isDeviceOffline]);
 
   const totalSensors = rows * cols;
+  const savedTareLookup = calibrationCellLookup(tarePreview?.saved ?? null);
+  const draftTareLookup = calibrationCellLookup(tarePreview?.draft ?? null);
   const savedLookup = calibrationCellLookup(calibrationLevelPreview?.saved ?? null);
   const draftLookup = calibrationCellLookup(calibrationLevelPreview?.draft ?? null);
   const mergedLevels = useMemo(() => {
@@ -924,6 +1012,19 @@ function CalibrationWorkbench({
     await loadLevelPreview(calibrationLevel);
   }
 
+  async function captureTare() {
+    await run(t("captureTare"), {
+      command: "calibration_capture_tare",
+      duration_ms: calibrationDuration,
+    }, 45000);
+    await syncCalibrationStatus();
+    await loadTarePreview();
+  }
+
+  async function dumpTare() {
+    await loadTarePreview();
+  }
+
   async function startCalibrationSession() {
     await run(t("startCalibrationSession"), { command: "calibration_session_begin" });
     await syncCalibrationStatus();
@@ -932,6 +1033,7 @@ function CalibrationWorkbench({
   async function abortCalibrationSession() {
     if (!window.confirm(t("abortCalibrationSessionConfirm"))) return;
     await run(t("abortCalibrationSession"), { command: "calibration_session_abort" });
+    setTarePreview(null);
     setCalibrationLevelPreview(null);
     setSelectedLevel(null);
     await syncCalibrationStatus();
@@ -940,6 +1042,9 @@ function CalibrationWorkbench({
   async function commitCalibrationSession() {
     await run(t("commitCalibrationSession"), { command: "calibration_session_commit", auto_enable: false });
     await syncCalibrationStatus();
+    if (tarePreview) {
+      await loadTarePreview();
+    }
     if (selectedLevel !== null) {
       await loadLevelPreview(selectedLevel);
     }
@@ -958,6 +1063,7 @@ function CalibrationWorkbench({
   async function clearCalibrationProfile() {
     if (!window.confirm(t("clearCalibrationProfileConfirm"))) return;
     await run(t("clearCalibrationProfile"), { command: "calibration_clear_profile" });
+    setTarePreview(null);
     setCalibrationLevelPreview(null);
     setSelectedLevel(null);
     await syncCalibrationStatus();
@@ -998,9 +1104,12 @@ function CalibrationWorkbench({
         <DetailBox label={t("calibrationEnabled")} value={calibrationState.enabled ? t("enabledState") : t("disabledState")} />
         <DetailBox label={t("calibrationSessionState")} value={calibrationState.session_active ? t("sessionActive") : t("sessionInactive")} />
         <DetailBox label={t("calibrationProfileState")} value={calibrationState.complete ? t("profileComplete") : t("profileIncomplete")} />
+        <DetailBox label={t("tareState")} value={calibrationState.tare_complete ? t("profileComplete") : t("profileIncomplete")} />
+        <DetailBox label={t("levelState")} value={calibrationState.levels_complete ? t("profileComplete") : t("profileIncomplete")} />
         <DetailBox label={t("calibrationLevelCount")} value={calibrationState.levels.length} />
         <DetailBox label={t("matrixShape")} value={`${rows || "-"} x ${cols || "-"}`} />
       </div>
+      {calibrationState.legacy_missing_tare ? <p className="notice">{t("calibrationLegacyMissingTare")}</p> : null}
 
       <div className="settings-card">
         <div className="settings-detail-header">
@@ -1018,6 +1127,12 @@ function CalibrationWorkbench({
           </button>
           <button className="button primary" type="button" disabled={busyCommand === "calibration_session_commit" || !maintenanceMode || !deviceUid} onClick={() => void commitCalibrationSession()}>
             {busyCommand === "calibration_session_commit" ? t("running") : t("commitCalibrationSession")}
+          </button>
+          <button className="button" type="button" disabled={busyCommand === "calibration_capture_tare" || !maintenanceMode || !deviceUid || totalSensors === 0} onClick={() => void captureTare()}>
+            {busyCommand === "calibration_capture_tare" ? t("running") : t("captureTare")}
+          </button>
+          <button className="button" type="button" disabled={busyCommand === "calibration_dump_tare" || !deviceUid || isDeviceOffline} onClick={() => void dumpTare()}>
+            {busyCommand === "calibration_dump_tare" ? t("running") : t("dumpTare")}
           </button>
           <button className="button" type="button" disabled={busyCommand === "calibration_enable" || !deviceUid || !calibrationState.complete} onClick={() => void enableCalibrationProfile()}>
             {busyCommand === "calibration_enable" ? t("running") : t("enableCalibrationProfile")}
@@ -1093,6 +1208,41 @@ function CalibrationWorkbench({
         </section>
 
         <div className="calibration-right-stack">
+          <section className="settings-card calibration-preview-card">
+            <div className="settings-detail-header">
+              <div>
+                <h4>{t("tarePreviewTitle")}</h4>
+                <p>{t("tarePreviewCopy")}</p>
+              </div>
+            </div>
+            <div className="settings-detail-grid compact">
+              <DetailBox label={t("savedCalibrationLayer")} value={tarePreview?.saved?.captured_points ?? calibrationState.tare?.captured_points ?? 0} />
+              <DetailBox label={t("draftCalibrationLayer")} value={tarePreview?.draft?.captured_points ?? calibrationState.draft_tare?.captured_points ?? 0} />
+              <DetailBox label={t("calibrationSessionState")} value={tarePreview?.session_active || calibrationState.session_active ? t("sessionActive") : t("sessionInactive")} />
+            </div>
+            {tarePreviewError ? <p className="notice error">{tarePreviewError}</p> : null}
+            {tarePreview ? (
+              <div className="calibration-preview-grid" style={{ gridTemplateColumns: `repeat(${Math.max(cols, 1)}, minmax(0, 1fr))` }}>
+                {Array.from({ length: totalSensors }).map((_, visualIndex) => {
+                  const rowIndex = rows > 0 ? visualIndex % rows : 0;
+                  const colIndex = rows > 0 ? Math.floor(visualIndex / rows) : 0;
+                  const sensorIndex = colIndex * rows + rowIndex;
+                  const draftCell = draftTareLookup.get(sensorIndex);
+                  const savedCell = savedTareLookup.get(sensorIndex);
+                  const activeCell = draftCell ?? savedCell;
+                  return (
+                    <div key={`tare-preview-${sensorIndex}`} className={`calibration-preview-cell${draftCell?.calibrated ? " draft" : ""}${!draftCell?.calibrated && savedCell?.calibrated ? " saved" : ""}`}>
+                      <strong>P{sensorIndex}</strong>
+                      <span>{activeCell?.calibrated ? String(activeCell.value ?? "-") : "-"}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="service-muted">{t("tarePreviewEmpty")}</p>
+            )}
+          </section>
+
           <section className="settings-card calibration-browser-card">
             <div className="settings-detail-header">
               <div>
@@ -1255,7 +1405,7 @@ export function DeviceSettingsPage() {
   const [scanDraftDirty, setScanDraftDirty] = useState(false);
   const [streamBufferEnabled, setStreamBufferEnabled] = useState(streamBuffer.enabled !== false);
   const [streamBufferMode, setStreamBufferMode] = useState(stringValue(streamBuffer.mode, "standard"));
-  const [chargeProfile, setChargeProfile] = useState(stringValue(batteryStatus.profile, "compatible"));
+  const [chargeProfile, setChargeProfile] = useState(stringValue(batteryStatus.profile, "balanced"));
   const [imuEnabled, setImuEnabled] = useState(imu.enabled !== false);
   const [logEnabled, setLogEnabled] = useState(logging.enabled !== false);
   const [logLevel, setLogLevel] = useState(stringValue(logging.level, "error"));
@@ -2078,8 +2228,11 @@ export function DeviceSettingsPage() {
                   <div className="field">
                     <label>{t("chargeProfile")}</label>
                     <select value={chargeProfile} onChange={(event) => setChargeProfile(event.target.value)}>
-                      <option value="compatible">{t("compatibleChargingMode")}</option>
+                      <option value="ultra_slow">{t("ultraSlowChargingMode")}</option>
+                      <option value="slow">{t("slowChargingMode")}</option>
+                      <option value="balanced">{t("balancedChargingMode")}</option>
                       <option value="fast">{t("fastChargingMode")}</option>
+                      <option value="extreme">{t("extremeChargingMode")}</option>
                     </select>
                   </div>
                 </div>
@@ -2089,8 +2242,6 @@ export function DeviceSettingsPage() {
                   <Metric label={t("chargeCurrentMa")} value={batteryStatus.charge_current_ma ?? "-"} />
                   <Metric label={t("inputLimitMa")} value={batteryStatus.input_limit_ma ?? "-"} />
                   <Metric label={t("vbatRegMv")} value={batteryStatus.vbat_reg_mv ?? "-"} />
-                  <Metric label={t("terminationPercent")} value={batteryStatus.termination_percent ?? "-"} />
-                  <Metric label={t("prechargePercent")} value={batteryStatus.precharge_percent ?? "-"} />
                   <Metric label={t("safetyTimerHours")} value={batteryStatus.safety_timer_hours ?? "-"} />
                   <Metric label={t("configured")} value={boolString(batteryStatus.configured)} />
                   <Metric label={t("chargerDetected")} value={boolString(batteryStatus.charger_detected ?? batteryStatus.detected)} />
