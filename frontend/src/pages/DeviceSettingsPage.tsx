@@ -273,6 +273,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const [pointIndex, setPointIndex] = useState(0);
   const [points, setPoints] = useState<number[]>(PRESSURE_CAL_PRESETS.standard);
   const [currentKpa, setCurrentKpa] = useState<number | null>(null);
+  const [currentImadaKpa, setCurrentImadaKpa] = useState<number | null>(null);
   const [calLog, setCalLog] = useState<string[]>([]);
   const [calError, setCalError] = useState("");
   const [configured, setConfigured] = useState(false);
@@ -326,6 +327,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       try {
         const r = await api.pressureCalReadings();
         setCurrentKpa(r.uno.pressure_kpa);
+        if (r.imada != null) setCurrentImadaKpa(r.imada.value);
       } catch { /* ignore */ }
     }, 2000);
     return () => clearInterval(id);
@@ -411,7 +413,10 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       try {
         const r: PressureCalReadings = await api.pressureCalReadings();
         setCurrentKpa(r.uno.pressure_kpa);
-        lastReferencePressureKpa = r.uno.pressure_kpa;
+        if (r.imada != null) {
+          setCurrentImadaKpa(r.imada.value);
+          lastReferencePressureKpa = r.imada.value;
+        }
         lastKpa = r.uno.pressure_kpa;
         pressureSamples.push(r.uno.pressure_kpa);
         if (pressureSamples.length > PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES * 2) {
@@ -633,7 +638,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           </div>
           <div className="metric-row">
             <Metric label={t("pressureCalUnoKpa")} value={currentKpa !== null ? `${currentKpa.toFixed(3)} kPa` : "-"} />
-            <Metric label={t("pressureCalReferencePressure")} value={currentKpa !== null ? `${currentKpa.toFixed(3)} kPa` : "-"} />
+            <Metric label={t("pressureCalReferencePressure")} value={currentImadaKpa !== null ? `${currentImadaKpa.toFixed(3)} kPa` : "-"} />
           </div>
           {phase === "stabilizing" && (
             <div className="actions compact">
