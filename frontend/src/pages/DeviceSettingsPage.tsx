@@ -560,6 +560,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       addLog("Committing session…");
       await api.queueDeviceCommand(deviceUid, { command: "calibration_session_commit", auto_enable: true });
       await new Promise<void>((res) => setTimeout(res, 1000));
+      await api.queueDeviceCommand(deviceUid, { command: "calibration_status" });
 
       addLog("Returning pressure system to low-pressure hold…");
       setActiveTargetKpa(PRESSURE_POST_CAL_HOLD_KPA);
@@ -1067,6 +1068,11 @@ function CalibrationWorkbench({
     await syncCalibrationStatus();
   }
 
+  async function applyTare() {
+    await run(t("applyTare"), { command: "calibration_tare_capture", duration_ms: 1000 });
+    await syncCalibrationStatus();
+  }
+
   async function clearCalibrationProfile() {
     if (!window.confirm(t("clearCalibrationProfileConfirm"))) return;
     await run(t("clearCalibrationProfile"), { command: "calibration_clear_profile" });
@@ -1146,6 +1152,9 @@ function CalibrationWorkbench({
           </button>
           <button className="button" type="button" disabled={busyCommand === "calibration_disable" || !deviceUid} onClick={() => void disableCalibrationProfile()}>
             {busyCommand === "calibration_disable" ? t("running") : t("disableCalibrationProfile")}
+          </button>
+          <button className="button" type="button" disabled={busyCommand === "calibration_tare_capture" || !maintenanceMode || !deviceUid || isDeviceOffline} onClick={() => void applyTare()} title={t("applyTareHint")}>
+            {busyCommand === "calibration_tare_capture" ? t("running") : t("applyTare")}
           </button>
           <button className="button danger" type="button" disabled={busyCommand === "calibration_clear_profile" || !maintenanceMode || !deviceUid} onClick={() => void clearCalibrationProfile()}>
             {busyCommand === "calibration_clear_profile" ? t("running") : t("clearCalibrationProfile")}
