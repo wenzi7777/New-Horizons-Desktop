@@ -241,7 +241,7 @@ type PressureCalPhase =
   | "capturing" | "stopping_pressure" | "committing" | "done" | "error" | "aborting";
 
 type PressureStableResult = {
-  referencePressureKpa: number | null;
+  referenceN: number | null;
   reason: "strict" | "adaptive_window" | "timeout_window" | "manual_confirm";
   settledKpa: number | null;
   elapsedMs: number;
@@ -273,7 +273,8 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const [pointIndex, setPointIndex] = useState(0);
   const [points, setPoints] = useState<number[]>(PRESSURE_CAL_PRESETS.standard);
   const [currentKpa, setCurrentKpa] = useState<number | null>(null);
-  const [currentImadaKpa, setCurrentImadaKpa] = useState<number | null>(null);
+  const [currentImadaValue, setCurrentImadaValue] = useState<number | null>(null);
+  const [currentImadaUnit, setCurrentImadaUnit] = useState<string>("N");
   const [calLog, setCalLog] = useState<string[]>([]);
   const [calError, setCalError] = useState("");
   const [configured, setConfigured] = useState(false);
@@ -327,7 +328,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       try {
         const r = await api.pressureCalReadings();
         setCurrentKpa(r.uno.pressure_kpa);
-        if (r.imada != null) setCurrentImadaKpa(r.imada.value);
+        if (r.imada != null) { setCurrentImadaValue(r.imada.value); setCurrentImadaUnit(r.imada.unit); }
       } catch { /* ignore */ }
     }, 2000);
     return () => clearInterval(id);
@@ -377,7 +378,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   function confirmCurrentPressureValue() {
     if (phase !== "stabilizing" || currentKpa === null) return;
     manualConfirmRef.current = {
-      referencePressureKpa: currentKpa,
+      referenceN: currentImadaValue,
       reason: "manual_confirm",
       settledKpa: currentKpa,
       elapsedMs: 0,
@@ -389,14 +390,14 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   }
 
   async function waitForStable(targetKpa: number): Promise<PressureStableResult> {
-    let lastReferencePressureKpa: number | null = null;
+    let lastReferenceN: number | null = null;
     let lastKpa: number | null = null;
     const pressureSamples: number[] = [];
     const startedAt = Date.now();
     while (true) {
       if (abortRef.current) {
         return {
-          referencePressureKpa: lastReferencePressureKpa,
+          referenceN: lastReferenceN,
           reason: "timeout_window",
           settledKpa: lastKpa,
           elapsedMs: Date.now() - startedAt,
@@ -414,8 +415,9 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         const r: PressureCalReadings = await api.pressureCalReadings();
         setCurrentKpa(r.uno.pressure_kpa);
         if (r.imada != null) {
-          setCurrentImadaKpa(r.imada.value);
-          lastReferencePressureKpa = r.imada.value;
+          setCurrentImadaValue(r.imada.value);
+          setCurrentImadaUnit(r.imada.unit);
+          lastReferenceN = r.imada.value;
         }
         lastKpa = r.uno.pressure_kpa;
         pressureSamples.push(r.uno.pressure_kpa);
@@ -439,7 +441,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           stableCountRef.current++;
           if (stableCountRef.current >= PRESSURE_STABLE_CONFIRMATION_SAMPLES) {
             return {
-              referencePressureKpa: lastReferencePressureKpa,
+              referenceN: lastReferenceN,
               reason: "strict",
               settledKpa: r.uno.pressure_kpa,
               elapsedMs,
@@ -458,7 +460,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           )
         ) {
           return {
-            referencePressureKpa: lastReferencePressureKpa,
+            referenceN: lastReferenceN,
             reason: "adaptive_window",
             settledKpa: pressureWindowAverageKpa(recentPressureWindow(pressureSamples)),
             elapsedMs,
@@ -474,7 +476,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           )
         ) {
           return {
-            referencePressureKpa: lastReferencePressureKpa,
+            referenceN: lastReferenceN,
             reason: "timeout_window",
             settledKpa: pressureWindowAverageKpa(recentPressureWindow(pressureSamples)),
             elapsedMs,
@@ -526,16 +528,16 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         if (stability.reason === "adaptive_window") {
           addLog(`Pressure settled at ${stability.settledKpa?.toFixed(3) ?? "-"} kPa after ${Math.round(stability.elapsedMs / 1000)}s; continuing with adaptive window.`);
         } else if (stability.reason === "manual_confirm") {
-          addLog(`Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, reference pressure sensor ${stability.referencePressureKpa?.toFixed(3) ?? "-"} kPa`);
+          addLog(`Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, reference sensor ${stability.referenceN?.toFixed(3) ?? "-"} ${currentImadaUnit}`);
         } else if (stability.reason === "timeout_window") {
           addLog(`Pressure held within ${PRESSURE_STABLE_TIMEOUT_RANGE_KPA.toFixed(2)} kPa window at ${stability.settledKpa?.toFixed(3) ?? "-"} kPa after ${Math.round(stability.elapsedMs / 1000)}s; continuing without waiting longer.`);
         }
 
         setPhase("capturing");
-        addLog(`Capturing at reference pressure sensor ${stability.referencePressureKpa?.toFixed(3) ?? "-"} kPa`);
+        addLog(`Capturing at reference sensor ${stability.referenceN?.toFixed(3) ?? "-"} ${currentImadaUnit}`);
         await api.queueDeviceCommand(deviceUid, {
           command: "calibration_capture_all",
-          level: stability.referencePressureKpa ?? stability.settledKpa ?? targetKpa,
+          level: stability.referenceN ?? stability.settledKpa ?? targetKpa,
           duration_ms: 3000,
         });
         await new Promise<void>((res) => setTimeout(res, 4000));
@@ -638,7 +640,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           </div>
           <div className="metric-row">
             <Metric label={t("pressureCalUnoKpa")} value={currentKpa !== null ? `${currentKpa.toFixed(3)} kPa` : "-"} />
-            <Metric label={t("pressureCalReferencePressure")} value={currentImadaKpa !== null ? `${currentImadaKpa.toFixed(3)} kPa` : "-"} />
+            <Metric label={t("pressureCalReferencePressure")} value={currentImadaValue !== null ? `${currentImadaValue.toFixed(3)} ${currentImadaUnit}` : "-"} />
           </div>
           {phase === "stabilizing" && (
             <div className="actions compact">
