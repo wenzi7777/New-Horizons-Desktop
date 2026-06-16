@@ -4125,3 +4125,20 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.upload-progress-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 0.5rem;
+}
+
+.upload-cancel-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  height: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}

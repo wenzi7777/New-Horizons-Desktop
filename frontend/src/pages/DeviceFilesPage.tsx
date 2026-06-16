@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { useI18n } from "../i18n";
@@ -104,6 +104,7 @@ export function DeviceFilesPage() {
   const [previewText, setPreviewText] = useState("");
   const [downloadProgress, setDownloadProgress] = useState<{ loaded: number; total: number; startTime: number } | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{ loaded: number; total: number; startTime: number } | null>(null);
+  const uploadAbortRef = useRef(false);
   const [storage, setStorage] = useState<Record<string, unknown>>({});
 
   const items = useMemo(() => itemsByScope[activeScope], [activeScope, itemsByScope]);
@@ -275,6 +276,7 @@ export function DeviceFilesPage() {
     }
     const bytes = new Uint8Array(await uploadFile.arrayBuffer());
     const ulStartTime = Date.now();
+    uploadAbortRef.current = false;
     setUploadProgress({ loaded: 0, total: bytes.length, startTime: ulStartTime });
     try {
       const begin = await queue({ command: "file_write_begin", scope: "user", path: targetPath, size: bytes.length });
@@ -282,6 +284,9 @@ export function DeviceFilesPage() {
       let offset = 0;
       const chunkSize = 96;
       while (offset < bytes.length) {
+        if (uploadAbortRef.current) {
+          throw new Error("upload_cancelled");
+        }
         const chunk = bytes.slice(offset, offset + chunkSize);
         const written = await queue({
           command: "file_write_chunk",
@@ -305,6 +310,7 @@ export function DeviceFilesPage() {
       const reason = error instanceof Error ? error.message : String(error);
       setStatusMessage(`${t("uploadFailed")}: ${reason}`);
     } finally {
+      uploadAbortRef.current = false;
       setUploadProgress(null);
     }
   }
@@ -426,13 +432,22 @@ export function DeviceFilesPage() {
                 {uploadProgress ? (
                   <div className="download-progress">
                     <div className="download-progress-bar" style={{ width: `${uploadProgress.total > 0 ? Math.round((uploadProgress.loaded / uploadProgress.total) * 100) : 0}%` }} />
-                    {(() => {
-                      const elapsed = (Date.now() - uploadProgress.startTime) / 1000;
-                      const speed = elapsed > 0.5 ? uploadProgress.loaded / elapsed : 0;
-                      const speedStr = formatSpeed(speed);
-                      const eta = formatEta(uploadProgress.total - uploadProgress.loaded, speed);
-                      return <span>{formatFileSize(uploadProgress.loaded)} / {formatFileSize(uploadProgress.total)}{speedStr ? ` · ${speedStr}` : ""}{eta ? ` · ${eta}` : ""}</span>;
-                    })()}
+                    <div className="upload-progress-row">
+                      {(() => {
+                        const elapsed = (Date.now() - uploadProgress.startTime) / 1000;
+                        const speed = elapsed > 0.5 ? uploadProgress.loaded / elapsed : 0;
+                        const speedStr = formatSpeed(speed);
+                        const eta = formatEta(uploadProgress.total - uploadProgress.loaded, speed);
+                        return <span>{formatFileSize(uploadProgress.loaded)} / {formatFileSize(uploadProgress.total)}{speedStr ? ` · ${speedStr}` : ""}{eta ? ` · ${eta}` : ""}</span>;
+                      })()}
+                      <button
+                        className="button danger upload-cancel-btn"
+                        type="button"
+                        onClick={() => { uploadAbortRef.current = true; }}
+                      >
+                        {t("cancel")}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </div>
