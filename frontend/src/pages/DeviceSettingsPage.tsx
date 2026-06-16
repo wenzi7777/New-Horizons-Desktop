@@ -277,6 +277,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const [currentImadaUnit, setCurrentImadaUnit] = useState<string>("N");
   const [calLog, setCalLog] = useState<string[]>([]);
   const [calError, setCalError] = useState("");
+  const [showCompressorOffBanner, setShowCompressorOffBanner] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [serverPresets, setServerPresets] = useState<PressureCalServerPreset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState("lab_pi");
@@ -488,6 +489,8 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   }
 
   async function runCalibration() {
+    if (!window.confirm(t("compressorOnConfirm"))) return;
+    setShowCompressorOffBanner(false);
     abortRef.current = false;
     setCalLog([]);
     setCalError("");
@@ -553,6 +556,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         try { await api.queueDeviceCommand(deviceUid, { command: "calibration_session_abort" }); } catch { /* ignore */ }
         addLog(t("pressureCalSessionAborted"));
         setPhase("idle");
+        setShowCompressorOffBanner(true);
         return;
       }
 
@@ -569,6 +573,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
 
       addLog("Calibration complete! Pressure system holding at low pressure with compensation enabled.");
       setPhase("done");
+      setShowCompressorOffBanner(true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setCalError(msg);
@@ -576,6 +581,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       setPhase("error");
       addLog(`Error: ${msg}`);
       try { await stopPressureControl(); } catch { /* ignore */ }
+      setShowCompressorOffBanner(true);
     }
   }
 
@@ -584,6 +590,16 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       <div className="settings-detail-header">
         <h3>{t("pressureCalibration")}</h3>
       </div>
+
+      {showCompressorOffBanner && (
+        <div className="compressor-safety-banner">
+          <span className="banner-icon">⚠️</span>
+          <span className="banner-text">{t("compressorOffBanner")}</span>
+          <button className="banner-dismiss" type="button" onClick={() => setShowCompressorOffBanner(false)}>
+            {t("compressorOffDismiss")}
+          </button>
+        </div>
+      )}
 
       {/* API Settings */}
       <div className="settings-card">

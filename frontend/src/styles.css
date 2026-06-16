@@ -3008,6 +3008,47 @@ button:disabled {
   color: var(--success);
 }
 
+.compressor-safety-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 8px;
+  background: #fff3cd;
+  border: 2px solid #f0a500;
+  color: #7a4f00;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.compressor-safety-banner .banner-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.compressor-safety-banner .banner-text {
+  flex: 1;
+}
+
+.compressor-safety-banner .banner-dismiss {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1.5px solid #f0a500;
+  background: transparent;
+  color: #7a4f00;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.compressor-safety-banner .banner-dismiss:hover {
+  background: #f0a500;
+  color: #fff;
+}
+
 .profile-editor {
   display: grid;
   gap: 14px;

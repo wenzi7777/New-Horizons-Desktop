@@ -29,6 +29,7 @@ export function PressureControlPlugin() {
   const [phase, setPhase] = useState<PressurePhase>("idle");
   const [currentKpa, setCurrentKpa] = useState<number | null>(null);
   const [imadaReading, setImadaReading] = useState<PressureCalImadaReading | null>(null);
+  const [showCompressorOffBanner, setShowCompressorOffBanner] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stableCountRef = useRef(0);
@@ -103,6 +104,8 @@ export function PressureControlPlugin() {
   async function handleStart() {
     const kpa = parseFloat(targetInput);
     if (isNaN(kpa) || kpa < 0 || kpa > PRESSURE_MAX_KPA) return;
+    if (!window.confirm(t("compressorOnConfirm"))) return;
+    setShowCompressorOffBanner(false);
     try {
       await api.pressureCalSetTarget(kpa);
       stableCountRef.current = 0;
@@ -126,6 +129,7 @@ export function PressureControlPlugin() {
     setPhase("idle");
     setCurrentKpa(null);
     setImadaReading(null);
+    setShowCompressorOffBanner(true);
   }
 
   const phaseLabel = (() => {
@@ -143,6 +147,15 @@ export function PressureControlPlugin() {
 
   return (
     <div className="pressure-control-plugin">
+      {showCompressorOffBanner && (
+        <div className="compressor-safety-banner">
+          <span className="banner-icon">⚠️</span>
+          <span className="banner-text">{t("compressorOffBanner")}</span>
+          <button className="banner-dismiss" type="button" onClick={() => setShowCompressorOffBanner(false)}>
+            {t("compressorOffDismiss")}
+          </button>
+        </div>
+      )}
       {/* API Settings */}
       <div className="settings-card">
         <div className="settings-detail-header">
