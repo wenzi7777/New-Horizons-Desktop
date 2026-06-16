@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
-import type { PressureCalServerPreset } from "../lib/api";
+import type { PressureCalImadaReading, PressureCalServerPreset } from "../lib/api";
 import { useI18n } from "../i18n";
 
 const PRESSURE_MAX_KPA = 45;
@@ -28,6 +28,7 @@ export function PressureControlPlugin() {
   const [isRunning, setIsRunning] = useState(false);
   const [phase, setPhase] = useState<PressurePhase>("idle");
   const [currentKpa, setCurrentKpa] = useState<number | null>(null);
+  const [imadaReading, setImadaReading] = useState<PressureCalImadaReading | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stableCountRef = useRef(0);
@@ -60,6 +61,7 @@ export function PressureControlPlugin() {
       const r = await api.pressureCalReadings();
       const kpa = r.uno.pressure_kpa;
       setCurrentKpa(kpa);
+      setImadaReading(r.imada);
 
       const target = parseFloat(targetInputRef.current);
       if (isNaN(target)) return;
@@ -113,12 +115,17 @@ export function PressureControlPlugin() {
   }
 
   async function handleStop() {
-    setIsRunning(false);
-    setPhase("idle");
+    // Bring pressure to 0 before releasing control so the valve closes cleanly.
+    try {
+      await api.pressureCalSetTarget(0);
+    } catch { /* ignore */ }
     try {
       await api.pressureCalStop();
     } catch { /* ignore */ }
+    setIsRunning(false);
+    setPhase("idle");
     setCurrentKpa(null);
+    setImadaReading(null);
   }
 
   const phaseLabel = (() => {
@@ -273,6 +280,14 @@ export function PressureControlPlugin() {
                   <strong>{targetValid ? `${targetKpa.toFixed(2)} kPa` : "—"}</strong>
                 </span>
               )}
+              <span>
+                {t("pluginPressureControlRefSensor")}:{" "}
+                <strong>
+                  {imadaReading !== null
+                    ? `${imadaReading.value.toFixed(2)} ${imadaReading.unit}`
+                    : "—"}
+                </strong>
+              </span>
             </div>
           </div>
         )}

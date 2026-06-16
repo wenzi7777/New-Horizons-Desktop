@@ -15,7 +15,7 @@ const PLUGIN_REGISTRY: PluginDescriptor[] = [
     id: "pressure-control",
     nameKey: "pluginPressureControlName",
     descriptionKey: "pluginPressureControlDesc",
-    icon: "🔧",
+    icon: "",
     component: PressureControlPlugin,
   },
 ];
@@ -42,7 +42,7 @@ export function PluginsPage() {
             ← {t("pluginBack")}
           </button>
           <span className="plugin-page-title">
-            {active.icon} {t(active.nameKey)}
+            {active.icon ? `${active.icon} ` : ""}{t(active.nameKey)}
           </span>
         </div>
         <div className="plugin-page-body">
@@ -66,7 +66,7 @@ export function PluginsPage() {
             type="button"
             onClick={() => navigate(`/plugins/${plugin.id}`)}
           >
-            <div className="plugin-card-icon">{plugin.icon}</div>
+            {plugin.icon && <div className="plugin-card-icon">{plugin.icon}</div>}
             <div className="plugin-card-name">{t(plugin.nameKey)}</div>
             <div className="plugin-card-desc">{t(plugin.descriptionKey)}</div>
             <div className="plugin-card-open">{t("pluginOpen")} →</div>
