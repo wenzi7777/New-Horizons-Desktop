@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { TriangleAlert } from "lucide-react";
 
 interface ConfirmModalProps {
   title: string;
@@ -22,7 +23,7 @@ export function ConfirmModal({ title, message, confirmLabel, cancelLabel, onConf
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title" onClick={onCancel}>
       <div className="modal-panel confirm-modal-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="confirm-modal-icon">⚠️</div>
+        <div className="confirm-modal-icon"><TriangleAlert size={36} strokeWidth={1.5} /></div>
         <h3 id="confirm-modal-title">{title}</h3>
         <p className="confirm-modal-message">{message}</p>
         <div className="confirm-modal-actions">

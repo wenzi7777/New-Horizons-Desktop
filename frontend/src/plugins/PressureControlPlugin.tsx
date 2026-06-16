@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import type { PressureCalImadaReading, PressureCalServerPreset } from "../lib/api";
 import { useI18n } from "../i18n";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { TriangleAlert } from "lucide-react";
 
 const PRESSURE_MAX_KPA = 45;
 const STABLE_TOLERANCE_KPA = 0.5;
@@ -156,7 +157,7 @@ export function PressureControlPlugin() {
     <div className="pressure-control-plugin">
       {showCompressorOffBanner && (
         <div className="compressor-safety-banner">
-          <span className="banner-icon">⚠️</span>
+          <span className="banner-icon"><TriangleAlert size={22} strokeWidth={1.8} /></span>
           <span className="banner-text">{t("compressorOffBanner")}</span>
           <button className="banner-dismiss" type="button" onClick={() => setShowCompressorOffBanner(false)}>
             {t("compressorOffDismiss")}

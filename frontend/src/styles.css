@@ -3020,7 +3020,8 @@ button:disabled {
 }
 
 .confirm-modal-icon {
-  font-size: 36px;
+  display: flex;
+  color: #f0a500;
   line-height: 1;
 }
 
@@ -3059,8 +3060,10 @@ button:disabled {
 }
 
 .compressor-safety-banner .banner-icon {
-  font-size: 22px;
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
+  color: #f0a500;
 }
 
 .compressor-safety-banner .banner-text {

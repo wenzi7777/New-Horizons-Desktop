@@ -11,6 +11,7 @@ import { appHref } from "../lib/runtime";
 import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { BoardIoModal } from "./TerminalPage";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { TriangleAlert } from "lucide-react";
 
 const STANDARD_LOG_BYTES = 12 * 1024;
 const EXTENDED_LOG_BYTES = 24 * 1024;
@@ -594,7 +595,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
 
       {showCompressorOffBanner && (
         <div className="compressor-safety-banner">
-          <span className="banner-icon">⚠️</span>
+          <span className="banner-icon"><TriangleAlert size={22} strokeWidth={1.8} /></span>
           <span className="banner-text">{t("compressorOffBanner")}</span>
           <button className="banner-dismiss" type="button" onClick={() => setShowCompressorOffBanner(false)}>
             {t("compressorOffDismiss")}
