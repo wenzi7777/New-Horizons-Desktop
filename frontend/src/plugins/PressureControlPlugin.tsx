@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import type { PressureCalImadaReading, PressureCalServerPreset } from "../lib/api";
 import { useI18n } from "../i18n";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 const PRESSURE_MAX_KPA = 45;
 const STABLE_TOLERANCE_KPA = 0.5;
@@ -30,6 +31,7 @@ export function PressureControlPlugin() {
   const [currentKpa, setCurrentKpa] = useState<number | null>(null);
   const [imadaReading, setImadaReading] = useState<PressureCalImadaReading | null>(null);
   const [showCompressorOffBanner, setShowCompressorOffBanner] = useState(false);
+  const [showCompressorOnModal, setShowCompressorOnModal] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stableCountRef = useRef(0);
@@ -101,11 +103,16 @@ export function PressureControlPlugin() {
     }
   }
 
-  async function handleStart() {
+  function handleStart() {
     const kpa = parseFloat(targetInput);
     if (isNaN(kpa) || kpa < 0 || kpa > PRESSURE_MAX_KPA) return;
-    if (!window.confirm(t("compressorOnConfirm"))) return;
+    setShowCompressorOnModal(true);
+  }
+
+  async function handleStartConfirmed() {
+    setShowCompressorOnModal(false);
     setShowCompressorOffBanner(false);
+    const kpa = parseFloat(targetInput);
     try {
       await api.pressureCalSetTarget(kpa);
       stableCountRef.current = 0;
@@ -247,7 +254,7 @@ export function PressureControlPlugin() {
             <button
               className="button primary"
               type="button"
-              onClick={() => void handleStart()}
+              onClick={handleStart}
               disabled={isRunning || !configured || !targetValid}
             >
               {t("pluginPressureControlStart")}
@@ -305,6 +312,17 @@ export function PressureControlPlugin() {
           </div>
         )}
       </div>
+
+      {showCompressorOnModal && (
+        <ConfirmModal
+          title={t("compressorOnConfirmTitle")}
+          message={t("compressorOnConfirm")}
+          confirmLabel={t("compressorOnConfirmOk")}
+          cancelLabel={t("cancel")}
+          onConfirm={() => void handleStartConfirmed()}
+          onCancel={() => setShowCompressorOnModal(false)}
+        />
+      )}
     </div>
   );
 }

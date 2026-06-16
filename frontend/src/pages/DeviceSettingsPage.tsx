@@ -10,6 +10,7 @@ import { useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
 import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { BoardIoModal } from "./TerminalPage";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 const STANDARD_LOG_BYTES = 12 * 1024;
 const EXTENDED_LOG_BYTES = 24 * 1024;
@@ -278,6 +279,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const [calLog, setCalLog] = useState<string[]>([]);
   const [calError, setCalError] = useState("");
   const [showCompressorOffBanner, setShowCompressorOffBanner] = useState(false);
+  const [showCompressorOnModal, setShowCompressorOnModal] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [serverPresets, setServerPresets] = useState<PressureCalServerPreset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState("lab_pi");
@@ -489,7 +491,6 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   }
 
   async function runCalibration() {
-    if (!window.confirm(t("compressorOnConfirm"))) return;
     setShowCompressorOffBanner(false);
     abortRef.current = false;
     setCalLog([]);
@@ -751,7 +752,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           className="button primary"
           type="button"
           disabled={isRunning || !configured || !deviceUid || points.length === 0}
-          onClick={() => void runCalibration()}
+          onClick={() => setShowCompressorOnModal(true)}
         >
           {t("pressureCalStart")}
         </button>
@@ -761,6 +762,17 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           </button>
         )}
       </div>
+
+      {showCompressorOnModal && (
+        <ConfirmModal
+          title={t("compressorOnConfirmTitle")}
+          message={t("compressorOnConfirm")}
+          confirmLabel={t("compressorOnConfirmOk")}
+          cancelLabel={t("cancel")}
+          onConfirm={() => { setShowCompressorOnModal(false); void runCalibration(); }}
+          onCancel={() => setShowCompressorOnModal(false)}
+        />
+      )}
     </div>
   );
 }

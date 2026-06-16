@@ -3008,6 +3008,42 @@ button:disabled {
   color: var(--success);
 }
 
+.confirm-modal-panel {
+  width: min(440px, 100%);
+  max-height: unset;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 28px 24px;
+}
+
+.confirm-modal-icon {
+  font-size: 36px;
+  line-height: 1;
+}
+
+.confirm-modal-panel h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.confirm-modal-message {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  justify-content: center;
+}
+
 .compressor-safety-banner {
   display: flex;
   align-items: center;
