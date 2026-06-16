@@ -539,10 +539,10 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         }
 
         setPhase("capturing");
-        addLog(`Capturing at reference sensor ${stability.referenceN?.toFixed(3) ?? "-"} ${currentImadaUnit}`);
+        addLog(`Capturing at ${stability.settledKpa?.toFixed(3) ?? "-"} kPa`);
         await api.queueDeviceCommand(deviceUid, {
           command: "calibration_capture_all",
-          level: stability.referenceN ?? stability.settledKpa ?? targetKpa,
+          level: stability.settledKpa ?? targetKpa,
           duration_ms: 3000,
         });
         await new Promise<void>((res) => setTimeout(res, 4000));
@@ -1302,7 +1302,7 @@ function CalibrationWorkbench({
                   <div className={`calibration-level-item${selectedLevel === item.level ? " active" : ""}`} key={`${item.source}-${item.level}`}>
                     <button type="button" onClick={() => void loadLevelPreview(item.level)}>
                       <div className="calibration-level-item-header">
-                        <strong>{t("paramLevel")} {item.level}</strong>
+                        <strong>{t("paramLevel")} {item.level} kPa</strong>
                         <span className={`level-source-badge${item.source === "draft" ? " draft" : ""}`}>{item.source}</span>
                       </div>
                       <div className="level-progress-bar">
