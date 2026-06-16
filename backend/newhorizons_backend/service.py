@@ -86,6 +86,7 @@ class NewHorizonsService:
         "calibration_session_abort",
         "calibration_session_commit",
         "calibration_capture_tare",
+        "calibration_tare_capture",
         "calibration_capture_cell",
         "calibration_capture_all",
         "file_write_begin",
