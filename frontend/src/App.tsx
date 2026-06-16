@@ -8,6 +8,7 @@ import { FilesPage } from "./pages/FilesPage";
 import { GatewaysPage } from "./pages/GatewaysPage";
 import { LaunchpadPage } from "./pages/LaunchpadPage";
 import { LoginPage } from "./pages/LoginPage";
+import { PluginsPage } from "./pages/PluginsPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { TerminalPage } from "./pages/TerminalPage";
 import { VisualizationPage } from "./pages/VisualizationPage";
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { to: "/profiles", labelKey: "navProfile", roles: ["admin", "user"] as Role[] },
   { to: "/wiki", labelKey: "navWiki", roles: ["admin", "user"] as Role[] },
   { to: "/csv", labelKey: "csvExport", roles: ["admin"] as Role[] },
+  { to: "/plugins", labelKey: "navPlugins", roles: ["admin"] as Role[] },
 ];
 
 function allowedRoles(roles: readonly string[], currentRole: string | undefined) {
@@ -187,6 +189,22 @@ function AuthenticatedApp() {
             element={
               <RequireRole roles={["admin"]}>
                 <GatewaysPage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/plugins"
+            element={
+              <RequireRole roles={["admin"]}>
+                <PluginsPage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/plugins/:pluginId"
+            element={
+              <RequireRole roles={["admin"]}>
+                <PluginsPage />
               </RequireRole>
             }
           />
