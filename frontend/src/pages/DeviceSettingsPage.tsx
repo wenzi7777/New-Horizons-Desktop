@@ -511,7 +511,8 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       addLog("Capturing tare baseline at no load…");
       await api.queueDeviceCommand(deviceUid, { command: "calibration_capture_tare", duration_ms: 3000 });
       await new Promise<void>((res) => setTimeout(res, 4000));
-      addLog("Tare baseline captured.");
+      const baselineKpa = currentKpa ?? 0;
+      addLog(`Tare baseline captured. Baseline pressure: ${baselineKpa.toFixed(3)} kPa (levels will be stored as differential).`);
 
       for (let i = 0; i < sortedPoints.length; i++) {
         if (abortRef.current) break;
@@ -539,10 +540,12 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         }
 
         setPhase("capturing");
-        addLog(`Capturing at ${stability.settledKpa?.toFixed(3) ?? "-"} kPa`);
+        const absoluteKpa = stability.settledKpa ?? targetKpa;
+        const differentialKpa = Math.max(0, absoluteKpa - baselineKpa);
+        addLog(`Capturing at ${absoluteKpa.toFixed(3)} kPa (differential: ${differentialKpa.toFixed(3)} kPa)`);
         await api.queueDeviceCommand(deviceUid, {
           command: "calibration_capture_all",
-          level: stability.settledKpa ?? targetKpa,
+          level: differentialKpa,
           duration_ms: 3000,
         });
         await new Promise<void>((res) => setTimeout(res, 4000));
