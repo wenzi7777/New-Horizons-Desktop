@@ -302,6 +302,8 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const stableCountRef = useRef(0);
   const overshootCountRef = useRef(0);
   const manualConfirmRef = useRef<PressureStableResult | null>(null);
+  const addLogRef = useRef<((line: string) => void) | null>(null);
+  const [safetyLatchedWarning, setSafetyLatchedWarning] = useState(false);
 
   const isRunning = phase !== "idle" && phase !== "done" && phase !== "error"
     && phase !== "residual_unsafe" && phase !== "safe_done";
@@ -442,6 +444,28 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           pressureSamples.shift();
         }
         const elapsedMs = Date.now() - startedAt;
+
+        // UNO soft-safety: when pressure exceeded the hardware limit, the UNO
+        // automatically retargets to the baseline and sets safety_latched. We
+        // reset all counters and re-issue the calibration target once pressure
+        // has dropped back near baseline so the approach restarts cleanly.
+        if (r.uno.safety_latched) {
+          setSafetyLatchedWarning(true);
+          overshootCountRef.current = 0;
+          stableCountRef.current = 0;
+          pressureSamples.length = 0;
+          addLogRef.current?.(`Safety limit triggered at ${r.uno.pressure_kpa.toFixed(2)} kPa — waiting for pressure to drop, then retrying target ${targetKpa} kPa…`);
+          if (r.uno.pressure_kpa < PRESSURE_BASELINE_KPA + 2.0) {
+            // Pressure has dropped near baseline: re-issue target so UNO starts climbing again.
+            addLogRef.current?.(`Pressure back at baseline — re-issuing target ${targetKpa} kPa.`);
+            setSafetyLatchedWarning(false);
+            try { await api.pressureCalSetTarget(targetKpa); } catch { /* ignore */ }
+          }
+          await new Promise<void>((res) => setTimeout(res, PRESSURE_STABLE_SAMPLE_INTERVAL_MS));
+          continue;
+        }
+        setSafetyLatchedWarning(false);
+
         if (
           r.uno.valve_open
           && r.uno.pressure_kpa > targetKpa + PRESSURE_OVERSHOOT_ABORT_KPA
@@ -510,7 +534,9 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
     setCalLog([]);
     setCalError("");
     setPointIndex(0);
+    setSafetyLatchedWarning(false);
     const addLog = (line: string) => setCalLog((prev) => [...prev, line]);
+    addLogRef.current = addLog;
     const sortedPoints = [...points].sort((a, b) => a - b);
 
     try {
@@ -857,6 +883,9 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
               </div>
             )}
             {phase === "error" && <p className="notice error">{calError}</p>}
+            {safetyLatchedWarning && phase === "stabilizing" && (
+              <p className="notice warning">{t("safetyLatchedWarning")}</p>
+            )}
             {phase === "awaiting_compressor_off" && !showCompressorOffModal && (
               <div className="actions compact">
                 <button className="button primary" type="button" onClick={() => setShowCompressorOffModal(true)}>

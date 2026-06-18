@@ -257,6 +257,7 @@ export type PressureCalUnoReading = {
   control_enabled: boolean;
   hold_mode: boolean;
   valve_open: boolean;
+  safety_latched: boolean;
   observed_at: string;
 };
 
