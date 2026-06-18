@@ -3008,6 +3008,11 @@ button:disabled {
   color: var(--success);
 }
 
+.notice.warning {
+  color: #b8860b;
+  font-weight: 600;
+}
+
 .confirm-modal-panel {
   width: min(440px, 100%);
   max-height: unset;

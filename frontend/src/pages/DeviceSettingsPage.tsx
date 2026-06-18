@@ -218,12 +218,17 @@ type CalibrationTarePreview = {
 // ---------------------------------------------------------------------------
 
 const PRESSURE_CAL_PRESETS: Record<string, number[]> = {
-  quick:    [3, 20, 45],
-  standard: [3, 10, 20, 35, 45],
-  detailed: [3, 5, 10, 20, 30, 40, 45],
-  fine:     [3, 5, 10, 15, 20, 25, 30, 38, 45],
+  quick:    [5, 20, 45],
+  standard: [5, 10, 20, 35, 45],
+  detailed: [5, 10, 20, 30, 40, 45],
+  fine:     [5, 10, 15, 20, 25, 30, 38, 45],
 };
 const PRESSURE_MAX_KPA = 45;
+// 無加壓狀態下氣壓本就約 3.5 kPa（tare/0 點基準）。低於此值的校準點不可達。
+const PRESSURE_BASELINE_KPA = 3.5;
+// 結束後的殘壓安全測試：嘗試穩定在此壓力，達標代表殘壓仍高、不可安全關閉氣壓控制。
+const PRESSURE_RESIDUAL_TEST_KPA = 10;
+const PRESSURE_RESIDUAL_TEST_TIMEOUT_MS = 15000;
 const PRESSURE_STABLE_TOLERANCE_KPA = 0.5;
 const PRESSURE_STABLE_CONFIRMATION_SAMPLES = 5;
 const PRESSURE_STABLE_SAMPLE_INTERVAL_MS = 500;
@@ -235,12 +240,13 @@ const PRESSURE_STABLE_MAX_WAIT_MS = 20000;
 const PRESSURE_STABLE_TIMEOUT_RANGE_KPA = 0.4;
 const PRESSURE_OVERSHOOT_ABORT_KPA = 2.0;
 const PRESSURE_OVERSHOOT_ABORT_SAMPLES = 3;
-const PRESSURE_POST_CAL_HOLD_KPA = 3;
+const PRESSURE_POST_CAL_HOLD_KPA = PRESSURE_BASELINE_KPA;
 const PRESSURE_POST_CAL_HOLD_SETTLE_MS = 3000;
 
 type PressureCalPhase =
-  | "idle" | "starting_session" | "setting_pressure" | "stabilizing"
-  | "capturing" | "stopping_pressure" | "committing" | "done" | "error" | "aborting";
+  | "idle" | "starting_session" | "holding_baseline" | "setting_pressure" | "stabilizing"
+  | "capturing" | "stopping_pressure" | "committing" | "done" | "error" | "aborting"
+  | "awaiting_compressor_off" | "testing_residual" | "residual_unsafe" | "safe_done";
 
 type PressureStableResult = {
   referenceN: number | null;
@@ -281,6 +287,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const [calError, setCalError] = useState("");
   const [showCompressorOffBanner, setShowCompressorOffBanner] = useState(false);
   const [showCompressorOnModal, setShowCompressorOnModal] = useState(false);
+  const [showCompressorOffModal, setShowCompressorOffModal] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [serverPresets, setServerPresets] = useState<PressureCalServerPreset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState("lab_pi");
@@ -296,13 +303,15 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const overshootCountRef = useRef(0);
   const manualConfirmRef = useRef<PressureStableResult | null>(null);
 
-  const isRunning = phase !== "idle" && phase !== "done" && phase !== "error";
+  const isRunning = phase !== "idle" && phase !== "done" && phase !== "error"
+    && phase !== "residual_unsafe" && phase !== "safe_done";
   const pressureFillPercent = Math.max(0, Math.min(100, ((currentKpa ?? 0) / PRESSURE_MAX_KPA) * 100));
 
   const phaseLabel = (() => {
     switch (phase) {
       case "idle":              return t("pressureCalStateIdle");
       case "starting_session":  return t("pressureCalStateStartingSession");
+      case "holding_baseline":  return t("pressureCalStateHoldingBaseline");
       case "setting_pressure":  return t("pressureCalStateSettingPressure");
       case "stabilizing":       return t("pressureCalStateStabilizing");
       case "capturing":         return t("pressureCalStateCapturing");
@@ -311,6 +320,10 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       case "done":              return t("pressureCalStateDone");
       case "aborting":          return t("pressureCalStateAborting");
       case "error":             return t("pressureCalStateError");
+      case "awaiting_compressor_off": return t("pressureCalStateAwaitingCompressorOff");
+      case "testing_residual":  return t("pressureCalStateTestingResidual");
+      case "residual_unsafe":   return t("pressureCalStateResidualUnsafe");
+      case "safe_done":         return t("pressureCalStateSafeDone");
       default:                  return phase;
     }
   })();
@@ -368,7 +381,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
 
   function handleAddPoint() {
     const val = parseFloat(newPointInput);
-    if (Number.isNaN(val) || val < 0 || val > PRESSURE_MAX_KPA) return;
+    if (Number.isNaN(val) || val < PRESSURE_BASELINE_KPA || val > PRESSURE_MAX_KPA) return;
     setPoints((prev) => prev.includes(val) ? prev : [...prev, val].sort((a, b) => a - b));
     setPresetKey("custom");
     setNewPointInput("");
@@ -507,8 +520,30 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       await api.queueDeviceCommand(deviceUid, { command: "calibration_session_begin" });
       await new Promise<void>((res) => setTimeout(res, 1000));
 
+      // Hold the pressure controller at the baseline (≈3.5 kPa) BEFORE sampling the
+      // tare/zero point. Otherwise the intake valve keeps feeding air and the pressure
+      // drifts upward, contaminating the tare baseline.
+      setPhase("holding_baseline");
+      setActiveTargetKpa(PRESSURE_BASELINE_KPA);
+      addLog(`Holding at baseline ${PRESSURE_BASELINE_KPA} kPa before tare…`);
+      await api.pressureCalSetTarget(PRESSURE_BASELINE_KPA);
+      stableCountRef.current = 0;
+      overshootCountRef.current = 0;
+      manualConfirmRef.current = null;
+      await waitForStable(PRESSURE_BASELINE_KPA);
+      if (abortRef.current) {
+        setPhase("aborting");
+        setActiveTargetKpa(null);
+        addLog("Aborting…");
+        try { await stopPressureControl(); } catch { /* ignore */ }
+        try { await api.queueDeviceCommand(deviceUid, { command: "calibration_session_abort" }); } catch { /* ignore */ }
+        addLog(t("pressureCalSessionAborted"));
+        setPhase("idle");
+        return;
+      }
+
       setPhase("capturing");
-      addLog("Capturing tare baseline at no load…");
+      addLog("Capturing tare baseline at baseline pressure…");
       await api.queueDeviceCommand(deviceUid, { command: "calibration_capture_tare", duration_ms: 3000 });
       await new Promise<void>((res) => setTimeout(res, 4000));
       const baselineKpa = currentKpa ?? 0;
@@ -571,14 +606,16 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       await new Promise<void>((res) => setTimeout(res, 1000));
       await api.queueDeviceCommand(deviceUid, { command: "calibration_status" });
 
-      addLog("Returning pressure system to low-pressure hold…");
+      addLog("Returning pressure system to baseline hold…");
       setActiveTargetKpa(PRESSURE_POST_CAL_HOLD_KPA);
       await api.pressureCalSetTarget(PRESSURE_POST_CAL_HOLD_KPA);
       await new Promise<void>((res) => setTimeout(res, PRESSURE_POST_CAL_HOLD_SETTLE_MS));
 
-      addLog("Calibration complete! Pressure system holding at low pressure with compensation enabled.");
-      setPhase("done");
-      setShowCompressorOffBanner(true);
+      addLog("Calibration complete! Holding at baseline. Please turn OFF the air compressor.");
+      // Hold at baseline and ask the user (full-screen) to turn off the compressor.
+      // The residual-pressure safety test runs only after they confirm.
+      setPhase("awaiting_compressor_off");
+      setShowCompressorOffModal(true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setCalError(msg);
@@ -587,6 +624,74 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       addLog(`Error: ${msg}`);
       try { await stopPressureControl(); } catch { /* ignore */ }
       setShowCompressorOffBanner(true);
+    }
+  }
+
+  // Drive the controller toward targetKpa for up to timeoutMs. Returns true if the
+  // pressure converges near the target (residual is high enough to hold it), false if
+  // the timeout elapses without reaching it (residual is depleted → safe to shut down).
+  async function waitForResidualOrTimeout(targetKpa: number, timeoutMs: number): Promise<boolean> {
+    const startedAt = Date.now();
+    let stable = 0;
+    while (Date.now() - startedAt < timeoutMs) {
+      if (abortRef.current) return false;
+      try {
+        const r: PressureCalReadings = await api.pressureCalReadings();
+        setCurrentKpa(r.uno.pressure_kpa);
+        if (r.imada != null) { setCurrentImadaValue(r.imada.value); setCurrentImadaUnit(r.imada.unit); }
+        if (Math.abs(r.uno.pressure_kpa - targetKpa) < PRESSURE_STABLE_TOLERANCE_KPA) {
+          stable++;
+          if (stable >= PRESSURE_STABLE_CONFIRMATION_SAMPLES) return true;
+        } else {
+          stable = 0;
+        }
+      } catch { /* ignore */ }
+      await new Promise<void>((res) => setTimeout(res, PRESSURE_STABLE_SAMPLE_INTERVAL_MS));
+    }
+    return false;
+  }
+
+  // Triggered after the user confirms the compressor is off. Probes whether residual
+  // pressure can still hold PRESSURE_RESIDUAL_TEST_KPA. If it can, disabling pressure
+  // control would let stored pressure rush in dangerously, so we keep holding at the
+  // baseline and let the user bleed off pressure and re-test. Only when the residual is
+  // too low to reach the test pressure do we disable pressure control.
+  async function runResidualSafetyTest() {
+    setShowCompressorOffModal(false);
+    const addLog = (line: string) => setCalLog((prev) => [...prev, line]);
+    abortRef.current = false;
+    try {
+      setPhase("testing_residual");
+      setActiveTargetKpa(PRESSURE_RESIDUAL_TEST_KPA);
+      addLog(`Testing residual pressure: trying to hold ${PRESSURE_RESIDUAL_TEST_KPA} kPa…`);
+      await api.pressureCalSetTarget(PRESSURE_RESIDUAL_TEST_KPA);
+      const reached = await waitForResidualOrTimeout(PRESSURE_RESIDUAL_TEST_KPA, PRESSURE_RESIDUAL_TEST_TIMEOUT_MS);
+      if (abortRef.current) {
+        try { await stopPressureControl(); } catch { /* ignore */ }
+        setActiveTargetKpa(null);
+        setPhase("idle");
+        return;
+      }
+      if (reached) {
+        // Residual still high → unsafe to disable. Return to baseline hold and wait.
+        addLog(`Residual pressure still holds ${PRESSURE_RESIDUAL_TEST_KPA} kPa — not safe to disable pressure control. Bleed off pressure and re-test.`);
+        setActiveTargetKpa(PRESSURE_BASELINE_KPA);
+        try { await api.pressureCalSetTarget(PRESSURE_BASELINE_KPA); } catch { /* ignore */ }
+        setPhase("residual_unsafe");
+      } else {
+        // Residual depleted → safe to disable pressure control.
+        addLog("Residual pressure depleted — disabling pressure control.");
+        await api.pressureCalStop();
+        setActiveTargetKpa(null);
+        setPhase("safe_done");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setCalError(msg);
+      setActiveTargetKpa(null);
+      setPhase("error");
+      addLog(`Error: ${msg}`);
+      try { await stopPressureControl(); } catch { /* ignore */ }
     }
   }
 
@@ -715,8 +820,8 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         {!isRunning && (
           <div className="field-grid">
             <div className="field">
-              <label>kPa (0–{PRESSURE_MAX_KPA})</label>
-              <input type="number" min={0} max={PRESSURE_MAX_KPA} value={newPointInput} onChange={(e) => setNewPointInput(e.target.value)} />
+              <label>kPa ({PRESSURE_BASELINE_KPA}–{PRESSURE_MAX_KPA})</label>
+              <input type="number" min={PRESSURE_BASELINE_KPA} max={PRESSURE_MAX_KPA} value={newPointInput} onChange={(e) => setNewPointInput(e.target.value)} />
             </div>
             <div className="field settings-field-action">
               <button className="button" type="button" onClick={handleAddPoint}>
@@ -728,27 +833,51 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       </div>
 
       {/* Progress */}
-      {phase !== "idle" && (
-        <div className="settings-card">
-          <div className="settings-detail-header">
-            <div>
-              <h4>{t("pressureCalProgress")}</h4>
-              <p>{phaseLabel}{phase !== "done" && phase !== "error" ? ` — ${pointIndex + 1}/${points.length}` : ""}</p>
+      {phase !== "idle" && (() => {
+        const terminalPhase = phase === "done" || phase === "error"
+          || phase === "residual_unsafe" || phase === "safe_done";
+        const showPointCounter = !terminalPhase
+          && phase !== "awaiting_compressor_off" && phase !== "testing_residual";
+        return (
+          <div className="settings-card">
+            <div className="settings-detail-header">
+              <div>
+                <h4>{t("pressureCalProgress")}</h4>
+                <p>{phaseLabel}{showPointCounter ? ` — ${pointIndex + 1}/${points.length}` : ""}</p>
+              </div>
             </div>
+            {!terminalPhase && (
+              <div className="level-progress-bar">
+                <div className="level-progress-bar-fill" style={{ width: `${Math.round((pointIndex / Math.max(points.length, 1)) * 100)}%` }} />
+              </div>
+            )}
+            {calLog.length > 0 && (
+              <div className="changelog-panel">
+                <pre>{calLog.slice(-10).join("\n")}</pre>
+              </div>
+            )}
+            {phase === "error" && <p className="notice error">{calError}</p>}
+            {phase === "awaiting_compressor_off" && !showCompressorOffModal && (
+              <div className="actions compact">
+                <button className="button primary" type="button" onClick={() => setShowCompressorOffModal(true)}>
+                  {t("compressorOffConfirmOk")}
+                </button>
+              </div>
+            )}
+            {phase === "residual_unsafe" && (
+              <>
+                <p className="notice warning">{t("residualUnsafeMessage")}</p>
+                <div className="actions compact">
+                  <button className="button primary" type="button" onClick={() => void runResidualSafetyTest()}>
+                    {t("residualRetryTest")}
+                  </button>
+                </div>
+              </>
+            )}
+            {phase === "safe_done" && <p className="notice success">{t("residualSafeMessage")}</p>}
           </div>
-          {phase !== "done" && phase !== "error" && (
-            <div className="level-progress-bar">
-              <div className="level-progress-bar-fill" style={{ width: `${Math.round((pointIndex / Math.max(points.length, 1)) * 100)}%` }} />
-            </div>
-          )}
-          {calLog.length > 0 && (
-            <div className="changelog-panel">
-              <pre>{calLog.slice(-10).join("\n")}</pre>
-            </div>
-          )}
-          {phase === "error" && <p className="notice error">{calError}</p>}
-        </div>
-      )}
+        );
+      })()}
 
       {/* Controls */}
       <div className="actions compact">
@@ -775,6 +904,17 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           cancelLabel={t("cancel")}
           onConfirm={() => { setShowCompressorOnModal(false); void runCalibration(); }}
           onCancel={() => setShowCompressorOnModal(false)}
+        />
+      )}
+
+      {showCompressorOffModal && (
+        <ConfirmModal
+          title={t("compressorOffConfirmTitle")}
+          message={t("compressorOffConfirmMsg")}
+          confirmLabel={t("compressorOffConfirmOk")}
+          cancelLabel={t("cancel")}
+          onConfirm={() => void runResidualSafetyTest()}
+          onCancel={() => setShowCompressorOffModal(false)}
         />
       )}
     </div>
