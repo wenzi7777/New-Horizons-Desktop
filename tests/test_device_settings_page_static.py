@@ -50,16 +50,25 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn("page-header-actions", source)
         self.assertNotIn('className="device-settings-subnav"', source)
 
-    def test_settings_sidebar_is_single_label_and_scan_io_live_under_pins(self):
+    def test_settings_sidebar_uses_task_oriented_tabs(self):
         source = SETTINGS_PAGE.read_text()
 
         self.assertNotIn('| "scan"', source)
         self.assertNotIn('| "io"', source)
+        self.assertNotIn('| "about"', source)
+        self.assertNotIn('| "gateway"', source)
+        self.assertNotIn('| "update"', source)
+        self.assertNotIn('| "pins"', source)
+        self.assertNotIn('| "indicators"', source)
+        self.assertNotIn('| "flash"', source)
         self.assertNotIn("detail:", source)
         self.assertNotIn("<span>{section.detail}</span>", source)
         self.assertNotIn('activeSection === "scan"', source)
         self.assertNotIn('activeSection === "io"', source)
-        self.assertIn('activeSection === "pins"', source)
+        for section in ("overview", "hardware", "runtime", "maintenance", "diagnostics", "files", "experimental"):
+            self.assertIn(f'| "{section}"', source)
+            self.assertIn(f'activeSection === "{section}"', source)
+            self.assertIn(f'{{ id: "{section}", label: t("settingsSection_{section}") }}', source)
         self.assertIn('t("scanPerformance")', source)
         self.assertIn('t("ioConfigOpen")', source)
 
@@ -164,7 +173,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("externalLed.last_error", source)
         self.assertIn("lastIndicatorsStatusAutoRefreshKeyRef", source)
         self.assertIn("runIndicatorsStatusRefresh", source)
-        self.assertIn('activeSection !== "indicators"', source)
+        self.assertIn('activeSection !== "hardware"', source)
         self.assertIn("lastIndicatorsStatusAutoRefreshKeyRef.current = \"\"", source)
         self.assertIn('command: "status"', source)
         self.assertNotIn("manual_preset", source)
@@ -214,7 +223,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         source = SETTINGS_PAGE.read_text()
 
         self.assertIn("pinStatusAutoRequestedRef", source)
-        self.assertIn('activeSection === "pins"', source)
+        self.assertIn('activeSection === "hardware"', source)
         self.assertIn('command: "status"', source)
         self.assertIn("busyCommand", source)
         self.assertIn("isCommandBusy", source)
@@ -241,12 +250,12 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('className="operation-log"', source)
         self.assertNotIn('{message ? <p className="notice success">{message}</p> : null}', source)
 
-    def test_device_flash_is_own_settings_tab_with_storage_status_and_file_browser(self):
+    def test_files_tab_exposes_storage_status_and_file_browser(self):
         source = SETTINGS_PAGE.read_text()
 
-        self.assertIn('| "flash"', source)
-        self.assertIn('{ id: "flash", label: t("deviceFlash") }', source)
-        self.assertIn('activeSection === "flash"', source)
+        self.assertIn('| "files"', source)
+        self.assertIn('{ id: "files", label: t("settingsSection_files") }', source)
+        self.assertIn('activeSection === "files"', source)
         self.assertIn('command: "storage_status"', source)
         self.assertIn("storageUsage", source)
         self.assertIn("storage-bar-track", source)
@@ -278,7 +287,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
         self.assertIn("statusDrivenSectionAutoRefreshKeyRef", source)
         self.assertIn("shouldAutoRefreshStatusForSection", source)
-        self.assertIn('const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["about", "gateway", "update", "diagnostics", "flash"]', source)
+        self.assertIn('const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["overview", "hardware", "runtime", "diagnostics", "files", "experimental"]', source)
         self.assertIn('command: "status"', source)
 
     def test_offline_device_skips_auto_refresh_and_disables_live_queries(self):
@@ -287,8 +296,8 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("const isDeviceOffline = normalized?.isOffline === true", source)
         self.assertIn("if (!ramMonitorEnabled || !deviceUid || isDeviceOffline) return undefined;", source)
         self.assertIn("if (!deviceUid || !shouldAutoRefreshStatusForSection(activeSection) || isDeviceOffline)", source)
-        self.assertIn('if (activeSection !== "pins" || !deviceUid || busyCommand || isDeviceOffline) return;', source)
-        self.assertIn('if (activeSection !== "indicators" || !deviceUid || isDeviceOffline)', source)
+        self.assertIn('if (activeSection !== "hardware" || !deviceUid || busyCommand || isDeviceOffline) return;', source)
+        self.assertIn('if (activeSection !== "hardware" || !deviceUid || isDeviceOffline)', source)
         self.assertIn("if (!deviceUid || isDeviceOffline) return;", source)
         self.assertIn('disabled={isCommandBusy("status") || !deviceUid || isDeviceOffline}', source)
         self.assertIn('disabled={isCommandBusy("findme_discover") || !deviceUid || isDeviceOffline}', source)
@@ -444,12 +453,34 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('await api.queueDeviceCommand(deviceUid, { command: "calibration_session_commit", auto_enable: true });', source)
         self.assertNotIn("level: stability.imadaValue", source)
 
-    def test_filter_ui_is_removed_from_settings(self):
+    def test_filter_ui_is_experimental_only(self):
         source = SETTINGS_PAGE.read_text()
 
-        self.assertNotIn("filterEnabled", source)
-        self.assertNotIn('command: "set_filter"', source)
-        self.assertNotIn('t("filterDiagnostics")', source)
+        self.assertIn('activeSection === "experimental"', source)
+        self.assertIn("filterEnabled", source)
+        self.assertIn("filterMedian", source)
+        self.assertIn("filterAlpha", source)
+        self.assertIn("async function applyFilter()", source)
+        self.assertIn('command: "set_filter"', source)
+        self.assertIn('t("filterDiagnostics")', source)
+        self.assertIn("useState(filter.enabled === true)", source)
+        self.assertIn("setFilterEnabled(filter.enabled === true)", source)
+        self.assertNotIn("filter.enabled !== false", source)
+
+        runtime_start = source.index('activeSection === "runtime"')
+        maintenance_start = source.index('activeSection === "maintenance"')
+        diagnostics_start = source.index('activeSection === "diagnostics"')
+        files_start = source.index('activeSection === "files"')
+        experimental_start = source.index('activeSection === "experimental"')
+        runtime_block = source[runtime_start:maintenance_start]
+        diagnostics_block = source[diagnostics_start:files_start]
+        experimental_block = source[experimental_start:]
+
+        self.assertNotIn('t("filterDiagnostics")', runtime_block)
+        self.assertNotIn('command: "set_filter"', runtime_block)
+        self.assertNotIn('t("filterDiagnostics")', diagnostics_block)
+        self.assertNotIn('command: "set_filter"', diagnostics_block)
+        self.assertIn('t("filterDiagnostics")', experimental_block)
 
     def test_scan_timing_sends_full_runtime_timing_controls(self):
         source = SETTINGS_PAGE.read_text()
