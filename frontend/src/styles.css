@@ -3013,6 +3013,12 @@ button:disabled {
   font-weight: 600;
 }
 
+.ref-not-connected {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-style: italic;
+}
+
 .confirm-modal-panel {
   width: min(440px, 100%);
   max-height: unset;

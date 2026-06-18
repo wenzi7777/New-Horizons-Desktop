@@ -793,7 +793,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           </div>
           <div className="metric-row">
             <Metric label={t("pressureCalUnoKpa")} value={currentKpa !== null ? `${currentKpa.toFixed(3)} kPa` : "-"} />
-            <Metric label={t("pressureCalReferencePressure")} value={currentImadaValue !== null ? `${currentImadaValue.toFixed(3)} ${currentImadaUnit}` : "-"} />
+            <Metric label={t("pressureCalReferencePressure")} value={currentImadaValue !== null ? `${currentImadaValue.toFixed(3)} ${currentImadaUnit}` : t("pressureCalRefNotConnected")} />
           </div>
           {phase === "stabilizing" && (
             <div className="actions compact">

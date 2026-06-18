@@ -271,7 +271,7 @@ export type PressureCalImadaReading = {
 
 export type PressureCalReadings = {
   uno: PressureCalUnoReading;
-  imada: PressureCalImadaReading;
+  imada: PressureCalImadaReading | null;
 };
 
 export class RequestError extends Error {

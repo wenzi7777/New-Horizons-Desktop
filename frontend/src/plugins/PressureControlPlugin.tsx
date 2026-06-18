@@ -392,11 +392,11 @@ export function PressureControlPlugin() {
               )}
               <span>
                 {t("pluginPressureControlRefSensor")}:{" "}
-                <strong>
-                  {imadaReading !== null
-                    ? `${imadaReading.value.toFixed(2)} ${imadaReading.unit}`
-                    : "—"}
-                </strong>
+                {imadaReading !== null ? (
+                  <strong>{`${imadaReading.value.toFixed(2)} ${imadaReading.unit}`}</strong>
+                ) : (
+                  <strong className="ref-not-connected">{t("pressureCalRefNotConnected")}</strong>
+                )}
               </span>
             </div>
           </div>
