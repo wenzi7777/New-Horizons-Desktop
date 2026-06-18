@@ -14,6 +14,7 @@ from newhorizons_backend.standalone import create_standalone_app  # noqa: E402
 
 
 WIKI_PAGE = ROOT / "frontend" / "src" / "pages" / "DeviceWikiPage.tsx"
+DOCKERFILE = ROOT / "Dockerfile"
 
 
 class WikiApiAndPageTest(unittest.TestCase):
@@ -79,6 +80,15 @@ class WikiApiAndPageTest(unittest.TestCase):
         self.assertIn("wiki-workspace", source)
         self.assertIn("wiki-preview-panel", source)
         self.assertIn("wiki-preview-content", styles)
+        self.assertIn("documentLoading", source)
+        self.assertIn('t("wikiEmptyDocuments")', source)
+        self.assertEqual(source.count('t("wikiCopy")'), 1)
+
+    def test_docker_image_includes_repository_wiki_tree(self):
+        dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+        self.assertIn("COPY wiki ./wiki", dockerfile)
+        self.assertIn("ENV NEWHORIZONS_FRONTEND_DIST=/app/frontend/dist", dockerfile)
 
 
 if __name__ == "__main__":

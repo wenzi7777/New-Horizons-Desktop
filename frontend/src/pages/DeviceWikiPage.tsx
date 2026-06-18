@@ -152,6 +152,7 @@ export function DeviceWikiPage() {
   const [entries, setEntries] = useState<WikiEntry[]>([]);
   const [selectedPath, setSelectedPath] = useState("");
   const [document, setDocument] = useState<WikiDocumentResponse | null>(null);
+  const [documentLoading, setDocumentLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
   const selectedRuntimeDevice = useMemo(() => {
@@ -191,7 +192,8 @@ export function DeviceWikiPage() {
       .then((response) => {
         if (cancelled) return;
         setEntries(response.items);
-        const preferred = response.items.find((item) => item.path === "README.md") ?? response.items[0] ?? null;
+        const markdownItems = response.items.filter((item) => !item.is_dir);
+        const preferred = markdownItems.find((item) => item.path === "README.md") ?? markdownItems[0] ?? null;
         setSelectedPath("");
         setDocument(null);
         if (preferred) setSelectedPath(preferred.path);
@@ -206,8 +208,14 @@ export function DeviceWikiPage() {
   }, [selectedDevice, locale]);
 
   useEffect(() => {
-    if (!selectedDevice || !selectedPath) return;
+    if (!selectedDevice || !selectedPath) {
+      setDocument(null);
+      setDocumentLoading(false);
+      return;
+    }
     let cancelled = false;
+    setDocument(null);
+    setDocumentLoading(true);
     void api.wikiDocument(selectedDevice, selectedPath, locale)
       .then((response) => {
         if (cancelled) return;
@@ -216,6 +224,10 @@ export function DeviceWikiPage() {
       .catch((error: unknown) => {
         if (cancelled) return;
         setErrorMessage(error instanceof Error ? error.message : "wiki_document_failed");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setDocumentLoading(false);
       });
     return () => {
       cancelled = true;
@@ -284,7 +296,9 @@ export function DeviceWikiPage() {
 
         <article className="panel wiki-preview-panel">
           <div className="wiki-preview-content">
-            {document ? renderMarkdown(document.content) : <p>{t("loading")}</p>}
+            {documentLoading ? <p>{t("loading")}</p> : null}
+            {!documentLoading && document ? renderMarkdown(document.content) : null}
+            {!documentLoading && !document ? <p>{selectedDevice ? t("wikiEmptyDocuments") : t("wikiEmptyDevices")}</p> : null}
           </div>
         </article>
       </section>

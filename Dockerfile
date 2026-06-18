@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend ./backend
 COPY mock_data ./mock_data
+COPY wiki ./wiki
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 EXPOSE 5051/tcp
