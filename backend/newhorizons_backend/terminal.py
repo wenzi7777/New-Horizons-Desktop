@@ -40,6 +40,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "set_ota_config",
     "set_indicators",
     "set_imu",
+    "set_filter",
     "file_list",
     "file_read_begin",
     "file_read_chunk",

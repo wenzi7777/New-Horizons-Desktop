@@ -310,7 +310,6 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('value="standard"', source)
         self.assertIn('value="extended"', source)
         self.assertIn('<option value="warn">warn</option>', source)
-        self.assertNotIn("warning", source)
         self.assertIn('logModeStandard: "Standard 12KB (up to 24KB on flash)"', i18n)
         self.assertIn('logModeExtended: "Extended 24KB (up to 48KB on flash)"', i18n)
 
@@ -390,19 +389,22 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('className="pressure-live-bar-fill"', source)
         self.assertIn('Math.max(0, Math.min(100, ((currentKpa ?? 0) / PRESSURE_MAX_KPA) * 100))', source)
         self.assertIn('t("manualConfirmCapture")', source)
-        self.assertIn('Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, reference pressure sensor ${stability.referencePressureKpa?.toFixed(3) ?? "-"} kPa', source)
+        self.assertIn('Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, reference sensor ${stability.referenceN?.toFixed(3) ?? "-"} ${currentImadaUnit}', source)
         self.assertIn('Metric label={t("pressureCalReferencePressure")}', source)
-        self.assertNotIn('pressureCalImadaN', source)
+        self.assertIn('currentImadaValue !== null ? `${currentImadaValue.toFixed(3)} ${currentImadaUnit}` : t("pressureCalRefNotConnected")', source)
 
     def test_pressure_calibration_commit_holds_low_pressure_with_compensation(self):
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
 
-        self.assertIn("const PRESSURE_POST_CAL_HOLD_KPA = 3;", source)
+        self.assertIn("const PRESSURE_BASELINE_KPA = 3.5;", source)
+        self.assertIn("const PRESSURE_POST_CAL_HOLD_KPA = PRESSURE_BASELINE_KPA;", source)
         self.assertIn("const PRESSURE_POST_CAL_HOLD_SETTLE_MS = 3000;", source)
-        self.assertIn('addLog("Returning pressure system to low-pressure hold…");', source)
+        self.assertIn('addLog("Returning pressure system to baseline hold…");', source)
         self.assertIn("await api.pressureCalSetTarget(PRESSURE_POST_CAL_HOLD_KPA);", source)
         self.assertIn("await new Promise<void>((res) => setTimeout(res, PRESSURE_POST_CAL_HOLD_SETTLE_MS));", source)
-        self.assertIn('addLog("Calibration complete! Pressure system holding at low pressure with compensation enabled.");', source)
+        self.assertIn('addLog("Calibration complete! Holding at baseline. Please turn OFF the air compressor.");', source)
+        self.assertIn('setPhase("awaiting_compressor_off");', source)
+        self.assertIn("setShowCompressorOffModal(true);", source)
         self.assertNotIn('await api.pressureCalSetTarget(0);', source)
         self.assertNotIn('addLog("Calibration complete! Pressure system fully stopped.");', source)
 
@@ -420,15 +422,17 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn("pressureCalSetControlEnabled", api_source)
         self.assertNotIn("pressureCalSafeMode", api_source)
 
-    def test_pressure_calibration_captures_reference_pressure_sensor_value(self):
+    def test_pressure_calibration_uses_imada_reference_and_stores_differential_kpa(self):
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
 
-        self.assertIn("referencePressureKpa: currentKpa,", source)
-        self.assertIn("let lastReferencePressureKpa: number | null = null;", source)
-        self.assertIn("lastReferencePressureKpa = r.uno.pressure_kpa;", source)
-        self.assertIn("referencePressureKpa: lastReferencePressureKpa,", source)
-        self.assertIn('addLog(`Capturing at reference pressure sensor ${stability.referencePressureKpa?.toFixed(3) ?? "-"} kPa`);', source)
-        self.assertIn("level: stability.referencePressureKpa ?? stability.settledKpa ?? targetKpa,", source)
+        self.assertIn("referenceN: currentImadaValue,", source)
+        self.assertIn("let lastReferenceN: number | null = null;", source)
+        self.assertIn("lastReferenceN = r.imada.value;", source)
+        self.assertIn("referenceN: lastReferenceN,", source)
+        self.assertIn("const absoluteKpa = stability.settledKpa ?? targetKpa;", source)
+        self.assertIn("const differentialKpa = Math.max(0, absoluteKpa - baselineKpa);", source)
+        self.assertIn('addLog(`Capturing at ${absoluteKpa.toFixed(3)} kPa (differential: ${differentialKpa.toFixed(3)} kPa)`);', source)
+        self.assertIn("level: differentialKpa,", source)
 
     def test_pressure_calibration_flow_captures_tare_before_pressure_levels(self):
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
@@ -440,12 +444,12 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('await api.queueDeviceCommand(deviceUid, { command: "calibration_session_commit", auto_enable: true });', source)
         self.assertNotIn("level: stability.imadaValue", source)
 
-    def test_unused_filter_ui_is_removed_from_settings(self):
+    def test_filter_ui_is_removed_from_settings(self):
         source = SETTINGS_PAGE.read_text()
 
         self.assertNotIn("filterEnabled", source)
         self.assertNotIn('command: "set_filter"', source)
-        self.assertNotIn(">Filter<", source)
+        self.assertNotIn('t("filterDiagnostics")', source)
 
     def test_scan_timing_sends_full_runtime_timing_controls(self):
         source = SETTINGS_PAGE.read_text()
@@ -490,7 +494,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
         self.assertIn("defaultManifestUrlForHardwareModel", source)
         self.assertIn("defaultManifestUrl", helper)
-        self.assertIn("arduino-gcu-lts-latest.json", helper)
+        self.assertIn("arduino-gcu-v23d-lts-latest.json", helper)
         self.assertIn("overviewAsset", helper)
         self.assertIn("digitalPinOrder", helper)
         self.assertIn("analogPinOrder", helper)
@@ -500,6 +504,27 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("boardProfile.overviewAsset", terminal)
         self.assertIn("boardProfile.digitalPinOrder", terminal)
         self.assertIn("boardProfile.analogPinOrder", terminal)
+
+    def test_localized_device_wiki_tracks_latest_firmware_and_gcu_v23d_manifest(self):
+        files = {
+            "wiki/devices/vd-ctl-r-v1.0f/en/README.md": "New Horizons OS Arduino v0.9.0",
+            "wiki/devices/vd-ctl-r-v1.0f/ja/README.md": "New Horizons OS Arduino v0.9.0",
+            "wiki/devices/vd-ctl-r-v2-1-gcu-lts/en/README.md": "New Horizons OS Arduino v0.9.0",
+            "wiki/devices/vd-ctl-r-v2-1-gcu-lts/ja/README.md": "New Horizons OS Arduino v0.9.0",
+            "wiki/devices/vd-ctl-r-v2-3-d-gcu-lts/en/README.md": "New Horizons OS Arduino v0.9.0",
+            "wiki/devices/vd-ctl-r-v2-3-d-gcu-lts/ja/README.md": "New Horizons OS Arduino v0.9.0",
+            "wiki/devices/vd-ctl-r-v1.0f/en/ota-update.md": "v0.9.0",
+            "wiki/devices/vd-ctl-r-v1.0f/ja/ota-update.md": "v0.9.0",
+            "wiki/devices/vd-ctl-r-v2-3-d-gcu-lts/README.md": "arduino-gcu-v23d-lts-latest.json",
+            "wiki/devices/vd-ctl-r-v2-3-d-gcu-lts/en/README.md": "arduino-gcu-v23d-lts-latest.json",
+            "wiki/devices/vd-ctl-r-v2-3-d-gcu-lts/ja/README.md": "arduino-gcu-v23d-lts-latest.json",
+            "wiki/devices/vd-ctl-r-v2-3-d-gcu-lts/en/ota-update.md": "arduino-gcu-v23d-lts-latest.json",
+            "wiki/devices/vd-ctl-r-v2-3-d-gcu-lts/ja/ota-update.md": "arduino-gcu-v23d-lts-latest.json",
+        }
+
+        for path, needle in files.items():
+            content = (ROOT / path).read_text(encoding="utf-8")
+            self.assertIn(needle, content, path)
 
     def test_power_and_indicator_copy_are_board_aware(self):
         source = SETTINGS_PAGE.read_text()

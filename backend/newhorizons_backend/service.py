@@ -72,6 +72,7 @@ class NewHorizonsService:
         "power_set_state",
         "set_indicators",
         "set_imu",
+        "set_filter",
         "calibration_status",
         "calibration_enable",
         "calibration_disable",
@@ -652,6 +653,13 @@ class NewHorizonsService:
             payload["imu"] = dict(imu_data) if imu_data else {
                 "enabled": bool(request.get("enabled", True)),
             }
+        elif command == "set_filter" and ok:
+            filter_data = data.get("filter") if isinstance(data.get("filter"), dict) else {}
+            payload["filter"] = dict(filter_data) if filter_data else {
+                "enabled": bool(request.get("enabled", False)),
+                "median": int(request.get("median", 3)),
+                "alpha": float(request.get("alpha", 0.25)),
+            }
         elif command == "set_log" and ok:
             logging_data = data.get("log_status") if isinstance(data.get("log_status"), dict) else {}
             if not logging_data:
@@ -737,6 +745,7 @@ class NewHorizonsService:
             "set_charge_profile",
             "power_set_state",
             "set_imu",
+            "set_filter",
             "set_indicators",
             "set_log",
             "set_ota_config",
@@ -1443,6 +1452,17 @@ class NewHorizonsService:
                 )
                 runtime["imu"] = imu
                 status["imu"] = imu
+            elif command == "set_filter":
+                enabled = bool(payload.get("enabled", False))
+                median = int(payload.get("median", 3))
+                alpha = float(payload.get("alpha", 0.25))
+                if median not in (1, 3, 5):
+                    median = 3
+                alpha = max(0.05, min(0.6, alpha))
+                filter_cfg = dict(runtime.get("filter") or {})
+                filter_cfg.update({"enabled": enabled, "median": median, "alpha": alpha})
+                runtime["filter"] = filter_cfg
+                status["filter"] = dict(filter_cfg)
             elif command == "set_log":
                 mode = str(payload.get("mode") or "standard")
                 max_bytes = int(payload.get("max_bytes") or (24576 if mode == "extended" else 12288))
@@ -1624,6 +1644,14 @@ class NewHorizonsService:
                     "message": "imu_updated",
                     "imu": runtime.get("imu", {}),
                     "runtime": {"imu": runtime.get("imu", {})},
+                    "applied": True,
+                })
+            elif command == "set_filter":
+                result_payload.update({
+                    "status": "ok",
+                    "message": "filter_updated",
+                    "filter": runtime.get("filter", {}),
+                    "runtime": {"filter": runtime.get("filter", {})},
                     "applied": True,
                 })
             elif command == "set_stream_buffer":

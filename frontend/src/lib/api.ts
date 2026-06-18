@@ -404,10 +404,10 @@ export const api = {
   previewCsv: (deviceUid: string, path: string) =>
     request<CsvPreviewResponse>(`/files/preview?device_uid=${encodeURIComponent(deviceUid)}&path=${encodeURIComponent(path)}`),
   wikiDevices: () => request<{ items: WikiDeviceEntry[] }>("/wiki/devices"),
-  wikiDirectory: (device: string, path = "") =>
-    request<WikiDirectoryResponse>(`/wiki?device=${encodeURIComponent(device)}&path=${encodeURIComponent(path)}`),
-  wikiDocument: (device: string, path: string) =>
-    request<WikiDocumentResponse>(`/wiki/document?device=${encodeURIComponent(device)}&path=${encodeURIComponent(path)}`),
+  wikiDirectory: (device: string, path = "", lang = "en") =>
+    request<WikiDirectoryResponse>(`/wiki?device=${encodeURIComponent(device)}&path=${encodeURIComponent(path)}&lang=${encodeURIComponent(lang)}`),
+  wikiDocument: (device: string, path: string, lang = "en") =>
+    request<WikiDocumentResponse>(`/wiki/document?device=${encodeURIComponent(device)}&path=${encodeURIComponent(path)}&lang=${encodeURIComponent(lang)}`),
   deleteCsvEntry: (deviceUid: string, path: string) =>
     request<{ status: string; deleted_path: string; deleted_kind: "file" | "directory" }>(
       `/files?device_uid=${encodeURIComponent(deviceUid)}&path=${encodeURIComponent(path)}`,

@@ -102,14 +102,24 @@ def create_blueprint(
     def _wiki_devices_root() -> Path:
         return _wiki_root() / "devices"
 
-    def _wiki_device_dir(slug: str) -> Path:
+    _SUPPORTED_WIKI_LANGS: frozenset[str] = frozenset({"en", "ja"})
+
+    def _wiki_device_slug_dir(slug: str) -> Path:
         clean_slug = str(slug or "").strip()
         if not GATEWAY_ID_PATTERN.fullmatch(clean_slug):
             raise ValueError("invalid_device")
         return (_wiki_devices_root() / clean_slug).resolve()
 
-    def _resolve_wiki_path(slug: str, raw_path: str) -> tuple[Path, Path]:
-        device_dir = _wiki_device_dir(slug)
+    def _wiki_device_dir(slug: str, lang: str | None = None) -> Path:
+        base = _wiki_device_slug_dir(slug)
+        if lang and lang in _SUPPORTED_WIKI_LANGS:
+            lang_dir = (base / lang).resolve()
+            if lang_dir.is_dir():
+                return lang_dir
+        return base
+
+    def _resolve_wiki_path(slug: str, raw_path: str, lang: str | None = None) -> tuple[Path, Path]:
+        device_dir = _wiki_device_dir(slug, lang)
         relative = Path(str(raw_path or "").strip().strip("/"))
         target = (device_dir / relative).resolve()
         try:
@@ -409,8 +419,10 @@ def create_blueprint(
         if not slug:
             return json_response({"error": "device_required"}), 400
         raw_path = str(request.args.get("path") or "").strip()
+        lang_raw = str(request.args.get("lang") or "").strip()
+        lang = lang_raw if lang_raw in _SUPPORTED_WIKI_LANGS else None
         try:
-            device_dir, target = _resolve_wiki_path(slug, raw_path)
+            device_dir, target = _resolve_wiki_path(slug, raw_path, lang)
         except ValueError:
             return json_response({"error": "invalid_device"}), 400
         except PermissionError:
@@ -450,8 +462,10 @@ def create_blueprint(
             return json_response({"error": "device_required"}), 400
         if not raw_path:
             return json_response({"error": "path_required"}), 400
+        lang_raw = str(request.args.get("lang") or "").strip()
+        lang = lang_raw if lang_raw in _SUPPORTED_WIKI_LANGS else None
         try:
-            device_dir, target = _resolve_wiki_path(slug, raw_path)
+            device_dir, target = _resolve_wiki_path(slug, raw_path, lang)
         except ValueError:
             return json_response({"error": "invalid_device"}), 400
         except PermissionError:
@@ -463,8 +477,10 @@ def create_blueprint(
         if target.is_dir() or target.suffix.lower() != ".md":
             return json_response({"error": "markdown_required"}), 400
         relative_path = target.relative_to(device_dir).as_posix()
-        github_url = f"https://github.com/wenzi7777/New-Horizons-Desktop/blob/main/wiki/devices/{slug}/{relative_path}"
-        raw_url = f"https://raw.githubusercontent.com/wenzi7777/New-Horizons-Desktop/main/wiki/devices/{slug}/{relative_path}"
+        slug_dir = _wiki_device_slug_dir(slug)
+        github_relative = target.relative_to(slug_dir).as_posix()
+        github_url = f"https://github.com/wenzi7777/New-Horizons-Desktop/blob/main/wiki/devices/{slug}/{github_relative}"
+        raw_url = f"https://raw.githubusercontent.com/wenzi7777/New-Horizons-Desktop/main/wiki/devices/{slug}/{github_relative}"
         return json_response(
             {
                 "device": slug,

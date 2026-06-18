@@ -219,7 +219,7 @@ const V21_GCU_PROFILE: BoardProfile = {
 const GCU_PROFILE: BoardProfile = {
   hardwareModel: GCU_HARDWARE_MODEL,
   wikiSlug: "vd-ctl-r-v2-3-d-gcu-lts",
-  defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-lts-latest.json",
+  defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v23d-lts-latest.json",
   defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
   defaultSelectPins: [16, 17, 18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45, 46],
   supportsIoVisualizer: true,

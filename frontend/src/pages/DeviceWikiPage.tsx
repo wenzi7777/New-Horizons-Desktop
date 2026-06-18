@@ -144,7 +144,7 @@ export function renderMarkdown(content: string) {
 }
 
 export function DeviceWikiPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { deviceUid } = useParams();
   const { devices } = useDevicesPolling();
   const [deviceEntries, setDeviceEntries] = useState<WikiDeviceEntry[]>([]);
@@ -187,12 +187,14 @@ export function DeviceWikiPage() {
   useEffect(() => {
     if (!selectedDevice) return;
     let cancelled = false;
-    void api.wikiDirectory(selectedDevice)
+    void api.wikiDirectory(selectedDevice, "", locale)
       .then((response) => {
         if (cancelled) return;
         setEntries(response.items);
         const preferred = response.items.find((item) => item.path === "README.md") ?? response.items[0] ?? null;
-        setSelectedPath((current) => current || preferred?.path || "");
+        setSelectedPath("");
+        setDocument(null);
+        if (preferred) setSelectedPath(preferred.path);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -201,12 +203,12 @@ export function DeviceWikiPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedDevice]);
+  }, [selectedDevice, locale]);
 
   useEffect(() => {
     if (!selectedDevice || !selectedPath) return;
     let cancelled = false;
-    void api.wikiDocument(selectedDevice, selectedPath)
+    void api.wikiDocument(selectedDevice, selectedPath, locale)
       .then((response) => {
         if (cancelled) return;
         setDocument(response);
@@ -218,7 +220,7 @@ export function DeviceWikiPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedDevice, selectedPath]);
+  }, [selectedDevice, selectedPath, locale]);
 
   return (
     <>

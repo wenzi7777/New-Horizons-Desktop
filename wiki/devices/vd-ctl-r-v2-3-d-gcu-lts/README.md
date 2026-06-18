@@ -8,4 +8,4 @@ This wiki directory is the device-level documentation entry for the `VD-CTL/R v2
 - Matrix default layout is `15 x 15`.
 - IMU packets keep the base 7-float payload and may append a 3-float `mag` block.
 - This board does not expose the legacy local action button, external LED strip, or OLED path.
-- OTA should point at the GCU-specific manifest track: `releases/arduino-gcu-lts-latest.json`.
+- OTA should point at the GCU-specific manifest track: `releases/arduino-gcu-v23d-lts-latest.json`.
