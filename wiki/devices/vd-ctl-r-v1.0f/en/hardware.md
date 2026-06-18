@@ -55,7 +55,7 @@
 | SCL | 42 | 400 kHz |
 | SDA | 45 | 400 kHz |
 
-Devices on the I2C bus: SSD1306 OLED.
+Devices on the I2C bus: SSD1306 OLED, BMI270 IMU, BQ25180 charger. A BMM150 magnetometer is not populated on v1.0.F.
 
 ## GPIO Assignment Summary
 
@@ -84,6 +84,11 @@ Devices on the I2C bus: SSD1306 OLED.
 - Interface: I2C (address 0x3C typical)
 - Resolution: 128×64 pixels
 - Configurable via `DeviceConfig.oled`: mode, page, update Hz, contrast, rotation
+
+### BMI270 IMU
+- Interface: I2C
+- Provides accelerometer, gyroscope, and temperature telemetry
+- BMM150 magnetometer is not populated on v1.0.F, so magnetometer payload is unavailable
 
 ### Action Button
 - GPIO: 46, active-low

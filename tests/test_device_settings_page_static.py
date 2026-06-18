@@ -557,6 +557,28 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
             content = (ROOT / path).read_text(encoding="utf-8")
             self.assertIn(needle, content, path)
 
+    def test_v10f_wiki_documents_bmi270_without_bmm150(self):
+        files = [
+            "wiki/devices/vd-ctl-r-v1.0f/en/README.md",
+            "wiki/devices/vd-ctl-r-v1.0f/en/configuration.md",
+            "wiki/devices/vd-ctl-r-v1.0f/en/hardware.md",
+            "wiki/devices/vd-ctl-r-v1.0f/en/protocol.md",
+            "wiki/devices/vd-ctl-r-v1.0f/ja/README.md",
+            "wiki/devices/vd-ctl-r-v1.0f/ja/configuration.md",
+            "wiki/devices/vd-ctl-r-v1.0f/ja/hardware.md",
+            "wiki/devices/vd-ctl-r-v1.0f/ja/protocol.md",
+        ]
+
+        for path in files:
+            content = (ROOT / path).read_text(encoding="utf-8")
+            self.assertIn("BMI270", content, path)
+            self.assertIn("BMM150", content, path)
+            self.assertNotIn("IMU is not present", content, path)
+            self.assertNotIn("IMU はこのボードには搭載されていません", content, path)
+            self.assertNotIn("IMU は搭載されていません", content, path)
+            self.assertNotIn("has no effect", content, path)
+            self.assertNotIn("効果はありません", content, path)
+
     def test_power_and_indicator_copy_are_board_aware(self):
         source = SETTINGS_PAGE.read_text()
         i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")

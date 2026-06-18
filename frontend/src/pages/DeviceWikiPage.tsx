@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
 import { useI18n } from "../i18n";
 import { api, type WikiDeviceEntry, type WikiDocumentResponse, type WikiEntry } from "../lib/api";
@@ -242,9 +242,6 @@ export function DeviceWikiPage() {
           <p className="page-copy">{t("wikiCopy")}</p>
         </div>
         <div className="page-header-actions">
-          <Link className="button" to="/">
-            {t("home")}
-          </Link>
           {document?.github_url ? (
             <a className="button" href={document.github_url} target="_blank" rel="noreferrer">
               {t("wikiSource")}

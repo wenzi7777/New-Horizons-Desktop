@@ -83,6 +83,7 @@ class WikiApiAndPageTest(unittest.TestCase):
         self.assertIn("documentLoading", source)
         self.assertIn('t("wikiEmptyDocuments")', source)
         self.assertEqual(source.count('t("wikiCopy")'), 1)
+        self.assertNotIn('<Link className="button" to="/">', source)
 
     def test_docker_image_includes_repository_wiki_tree(self):
         dockerfile = DOCKERFILE.read_text(encoding="utf-8")

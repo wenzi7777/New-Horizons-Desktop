@@ -42,7 +42,7 @@ The scan ring buffer queues packets for retry when a UDP send fails.
 
 ## IMU
 
-IMU is not present on the v1.0.F board. The `imu.enabled` flag can be set but has no effect.
+The v1.0.F board includes a BMI270 accelerometer + gyroscope. The `imu.enabled` flag controls BMI270 telemetry in live packets. A BMM150 magnetometer is not populated on this board, so `MAG_FLAG` and the `mag` payload are not available.
 
 ## External LED Strip
 

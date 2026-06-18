@@ -28,20 +28,20 @@ The device communicates over UDP using the `NHO/Arduino/1` protocol for sensor d
 
 | Bit | Value | Name | Meaning |
 |-----|-------|------|---------|
-| 0 | 0x01 | `IMU_FLAG` | Payload includes IMU data (7 floats) |
+| 0 | 0x01 | `IMU_FLAG` | Payload includes BMI270 IMU data (7 floats) |
 | 1 | 0x02 | `BATTERY_FLAG` | Payload includes battery data (4 bytes) |
-| 2 | 0x04 | `MAG_FLAG` | Payload includes magnetometer data (3 floats, only if IMU_FLAG is set) |
+| 2 | 0x04 | `MAG_FLAG` | Payload includes BMM150 magnetometer data (3 floats, only if IMU_FLAG is set; not emitted on v1.0.F) |
 | 6 | 0x40 | `HMAC_FLAG` | Payload includes HMAC-SHA256 (16 bytes) — reserved, not currently used |
 | 7 | 0x80 | `HEARTBEAT_FLAG` | Heartbeat packet — no payload data |
 
 ### Payload Layout (in order)
 
 1. **Matrix data** — `sensor_count × 4` bytes, each value is IEEE 754 float32 LE (row-major order)
-2. **IMU data** — 28 bytes, only if `IMU_FLAG` set:
+2. **BMI270 IMU data** — 28 bytes, only if `IMU_FLAG` set:
    - `acc[3]` — accelerometer X, Y, Z (float32 each)
    - `gyro[3]` — gyroscope X, Y, Z (float32 each)
    - `temperature_c` — temperature in °C (float32)
-3. **Magnetometer data** — 12 bytes, only if both `IMU_FLAG` and `MAG_FLAG` set:
+3. **BMM150 magnetometer data** — 12 bytes, only if both `IMU_FLAG` and `MAG_FLAG` set. v1.0.F does not populate BMM150, so this block is not expected on that board:
    - `mag[3]` — magnetic field X, Y, Z (float32 each)
 4. **Battery data** — 4 bytes, only if `BATTERY_FLAG` set:
    - `status` (u8), `fault` (u8), `vbat_mv` (u16 LE)

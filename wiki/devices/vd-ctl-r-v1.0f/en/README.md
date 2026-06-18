@@ -1,6 +1,6 @@
 # VD-CTL/R v1.0.F 2026.4
 
-The VD-CTL/R v1.0.F 2026.4 is the primary consumer hardware revision in the New Horizons family. It features a full-size key matrix, built-in status LED, external addressable LED strip, OLED display, physical action button, and BQ25180-based charging circuitry.
+The VD-CTL/R v1.0.F 2026.4 is the primary consumer hardware revision in the New Horizons family. It features a full-size key matrix, built-in status LED, external addressable LED strip, OLED display, BMI270 IMU, physical action button, and BQ25180-based charging circuitry.
 
 ## Specifications
 
@@ -13,6 +13,7 @@ The VD-CTL/R v1.0.F 2026.4 is the primary consumer hardware revision in the New 
 | Status LED | SK6812 (on-board, GPIO 11) |
 | External LED | WS2812B-compatible strip (GPIO 12, 3 pixels) |
 | OLED | SSD1306 128×64, I2C |
+| IMU | BMI270 accelerometer + gyroscope; no BMM150 magnetometer |
 | I2C | SCL GPIO 42 · SDA GPIO 45 · 400 kHz |
 | Action button | GPIO 46 |
 | Charger | BQ25180 |
@@ -34,5 +35,5 @@ https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduin
 - Physical action button for wake, maintenance entry, and WiFi setup
 - BQ25180 battery charging with selectable charge profiles
 - Soft-off / soft-wake power transitions with animations
-- IMU is not present on this board
+- BMI270 IMU telemetry; BMM150 magnetometer is not populated on this board
 - Full `DeviceConfig` support: scan timing, stream buffer, logging, OTA
