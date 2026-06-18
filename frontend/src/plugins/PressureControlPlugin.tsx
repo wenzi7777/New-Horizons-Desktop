@@ -6,11 +6,17 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { TriangleAlert } from "lucide-react";
 
 const PRESSURE_MAX_KPA = 45;
+const PRESSURE_BASELINE_KPA = 3.5;
+const PRESSURE_RESIDUAL_TEST_KPA = 10;
+const PRESSURE_RESIDUAL_TEST_TIMEOUT_MS = 15000;
 const STABLE_TOLERANCE_KPA = 0.5;
 const STABLE_CONFIRM_SAMPLES = 5;
 const POLL_INTERVAL_MS = 500;
 
-type PressurePhase = "idle" | "pressurizing" | "stabilizing" | "stable";
+type PressurePhase =
+  | "idle" | "pressurizing" | "stabilizing" | "stable"
+  | "stopping" | "awaiting_compressor_off" | "testing_residual"
+  | "residual_unsafe" | "safe_done";
 
 export function PressureControlPlugin() {
   const { t } = useI18n();
@@ -33,9 +39,11 @@ export function PressureControlPlugin() {
   const [imadaReading, setImadaReading] = useState<PressureCalImadaReading | null>(null);
   const [showCompressorOffBanner, setShowCompressorOffBanner] = useState(false);
   const [showCompressorOnModal, setShowCompressorOnModal] = useState(false);
+  const [showCompressorOffModal, setShowCompressorOffModal] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stableCountRef = useRef(0);
+  const abortShutdownRef = useRef(false);
   // Keep a ref to targetInput so the polling closure always reads the latest value
   const targetInputRef = useRef(targetInput);
   useEffect(() => { targetInputRef.current = targetInput; }, [targetInput]);
@@ -126,26 +134,84 @@ export function PressureControlPlugin() {
   }
 
   async function handleStop() {
-    // Bring pressure to 0 before releasing control so the valve closes cleanly.
-    try {
-      await api.pressureCalSetTarget(0);
-    } catch { /* ignore */ }
-    try {
-      await api.pressureCalStop();
-    } catch { /* ignore */ }
+    // Stop the live polling loop; residual test does its own manual polling.
     setIsRunning(false);
-    setPhase("idle");
-    setCurrentKpa(null);
-    setImadaReading(null);
-    setShowCompressorOffBanner(true);
+    abortShutdownRef.current = false;
+    setPhase("stopping");
+    // Hold at baseline so the intake valve stops feeding air before we ask the
+    // user to turn off the compressor.
+    try { await api.pressureCalSetTarget(PRESSURE_BASELINE_KPA); } catch { /* ignore */ }
+    setPhase("awaiting_compressor_off");
+    setShowCompressorOffModal(true);
   }
+
+  async function waitForResidualOrTimeout(targetKpa: number, timeoutMs: number): Promise<boolean> {
+    const startedAt = Date.now();
+    let stable = 0;
+    while (Date.now() - startedAt < timeoutMs) {
+      if (abortShutdownRef.current) return false;
+      try {
+        const r = await api.pressureCalReadings();
+        setCurrentKpa(r.uno.pressure_kpa);
+        setImadaReading(r.imada);
+        if (Math.abs(r.uno.pressure_kpa - targetKpa) < STABLE_TOLERANCE_KPA) {
+          stable++;
+          if (stable >= STABLE_CONFIRM_SAMPLES) return true;
+        } else {
+          stable = 0;
+        }
+      } catch { /* ignore */ }
+      await new Promise<void>((res) => setTimeout(res, POLL_INTERVAL_MS));
+    }
+    return false;
+  }
+
+  async function runResidualSafetyTest() {
+    setShowCompressorOffModal(false);
+    abortShutdownRef.current = false;
+    try {
+      setPhase("testing_residual");
+      await api.pressureCalSetTarget(PRESSURE_RESIDUAL_TEST_KPA);
+      const reached = await waitForResidualOrTimeout(PRESSURE_RESIDUAL_TEST_KPA, PRESSURE_RESIDUAL_TEST_TIMEOUT_MS);
+      if (abortShutdownRef.current) {
+        try { await api.pressureCalStop(); } catch { /* ignore */ }
+        setPhase("idle");
+        setCurrentKpa(null);
+        setImadaReading(null);
+        return;
+      }
+      if (reached) {
+        // Residual still high — not safe to disable. Return to baseline and wait.
+        try { await api.pressureCalSetTarget(PRESSURE_BASELINE_KPA); } catch { /* ignore */ }
+        setPhase("residual_unsafe");
+      } else {
+        // Residual depleted — safe to disable.
+        await api.pressureCalStop();
+        setPhase("safe_done");
+      }
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : String(err));
+      try { await api.pressureCalStop(); } catch { /* ignore */ }
+      setPhase("idle");
+      setCurrentKpa(null);
+      setImadaReading(null);
+    }
+  }
+
+  const isShuttingDown = phase === "stopping" || phase === "awaiting_compressor_off"
+    || phase === "testing_residual" || phase === "residual_unsafe";
 
   const phaseLabel = (() => {
     switch (phase) {
-      case "pressurizing": return t("pluginPressureControlPressurizing");
-      case "stabilizing":  return t("pluginPressureControlStabilizing");
-      case "stable":       return t("pluginPressureControlStable");
-      default:             return t("pluginPressureControlIdle");
+      case "pressurizing":          return t("pluginPressureControlPressurizing");
+      case "stabilizing":           return t("pluginPressureControlStabilizing");
+      case "stable":                return t("pluginPressureControlStable");
+      case "stopping":              return t("pressureCalStateStoppingPressure");
+      case "awaiting_compressor_off": return t("pressureCalStateAwaitingCompressorOff");
+      case "testing_residual":      return t("pressureCalStateTestingResidual");
+      case "residual_unsafe":       return t("pressureCalStateResidualUnsafe");
+      case "safe_done":             return t("pressureCalStateSafeDone");
+      default:                      return t("pluginPressureControlIdle");
     }
   })();
 
@@ -161,6 +227,13 @@ export function PressureControlPlugin() {
           <span className="banner-text">{t("compressorOffBanner")}</span>
           <button className="banner-dismiss" type="button" onClick={() => setShowCompressorOffBanner(false)}>
             {t("compressorOffDismiss")}
+          </button>
+        </div>
+      )}
+      {phase === "awaiting_compressor_off" && !showCompressorOffModal && (
+        <div className="actions compact">
+          <button className="button primary" type="button" onClick={() => setShowCompressorOffModal(true)}>
+            {t("compressorOffConfirmOk")}
           </button>
         </div>
       )}
@@ -256,7 +329,7 @@ export function PressureControlPlugin() {
               className="button primary"
               type="button"
               onClick={handleStart}
-              disabled={isRunning || !configured || !targetValid}
+              disabled={isRunning || isShuttingDown || phase === "safe_done" || !configured || !targetValid}
             >
               {t("pluginPressureControlStart")}
             </button>
@@ -264,21 +337,36 @@ export function PressureControlPlugin() {
               className="button danger"
               type="button"
               onClick={() => void handleStop()}
-              disabled={!isRunning}
+              disabled={!isRunning || isShuttingDown}
             >
               {t("pluginPressureControlStop")}
             </button>
           </div>
 
-          {isRunning && (
+          {(isRunning || isShuttingDown || phase === "safe_done") && (
             <div className={`pressure-phase-badge phase-${phase}`}>
               {phaseLabel}
             </div>
           )}
+
+          {phase === "residual_unsafe" && (
+            <>
+              <p className="notice warning">{t("residualUnsafeMessage")}</p>
+              <div className="actions compact">
+                <button className="button primary" type="button" onClick={() => void runResidualSafetyTest()}>
+                  {t("residualRetryTest")}
+                </button>
+              </div>
+            </>
+          )}
+
+          {phase === "safe_done" && (
+            <p className="notice success">{t("residualSafeMessage")}</p>
+          )}
         </div>
 
-        {/* Right: Live reading (shown while running or after first reading) */}
-        {(isRunning || currentKpa !== null) && (
+        {/* Right: Live reading (shown while running, shutting down, or after first reading) */}
+        {(isRunning || isShuttingDown || currentKpa !== null) && (
           <div className="settings-card pressure-live-panel">
             <h4>{t("pluginPressureControlLiveReading")}</h4>
             <div
@@ -322,6 +410,17 @@ export function PressureControlPlugin() {
           cancelLabel={t("cancel")}
           onConfirm={() => void handleStartConfirmed()}
           onCancel={() => setShowCompressorOnModal(false)}
+        />
+      )}
+
+      {showCompressorOffModal && (
+        <ConfirmModal
+          title={t("compressorOffConfirmTitle")}
+          message={t("compressorOffConfirmMsg")}
+          confirmLabel={t("compressorOffConfirmOk")}
+          cancelLabel={t("cancel")}
+          onConfirm={() => void runResidualSafetyTest()}
+          onCancel={() => setShowCompressorOffModal(false)}
         />
       )}
     </div>
