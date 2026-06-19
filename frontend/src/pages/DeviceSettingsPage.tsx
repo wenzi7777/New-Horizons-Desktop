@@ -5,6 +5,13 @@ import { api, type PressureCalReadings, type PressureCalServerPreset } from "../
 
 import { useI18n } from "../i18n";
 import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
+import {
+  getPrimaryStepDisabledReason,
+  getPrimaryStepStates,
+  type CalibrationDisabledReason,
+  type CalibrationFlowSnapshot,
+  type CalibrationPrimaryStepId,
+} from "../lib/calibrationFlow";
 import { normalizeDevice, useDevicesPolling } from "../lib/device";
 import { useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
@@ -1098,6 +1105,74 @@ function calibrationCellLookup(layer: CalibrationLevelLayer | CalibrationTareLay
   return lookup;
 }
 
+function calibrationReasonKey(reason: CalibrationDisabledReason) {
+  switch (reason) {
+    case "device_offline":
+      return "calibrationReasonDeviceOffline";
+    case "needs_maintenance_mode":
+      return "calibrationReasonNeedsMaintenanceMode";
+    case "needs_active_session":
+      return "calibrationReasonNeedsActiveSession";
+    case "needs_tare":
+      return "calibrationReasonNeedsTare";
+    case "needs_levels":
+      return "calibrationReasonNeedsLevels";
+    case "needs_complete_profile":
+      return "calibrationReasonNeedsCompleteProfile";
+    case "already_enabled":
+      return "calibrationReasonAlreadyEnabled";
+    case "no_sensors":
+      return "calibrationReasonNoSensors";
+  }
+}
+
+function calibrationPrimaryStepMeta(stepId: CalibrationPrimaryStepId) {
+  switch (stepId) {
+    case "enter_maintenance":
+      return {
+        titleKey: "calibrationStepEnterMaintenanceTitle",
+        copyKey: "calibrationStepEnterMaintenanceCopy",
+        actionLabelKey: "enterMaintenance",
+        command: "enter_maintenance",
+      };
+    case "start_session":
+      return {
+        titleKey: "calibrationStepStartSessionTitle",
+        copyKey: "calibrationStepStartSessionCopy",
+        actionLabelKey: "startCalibrationSession",
+        command: "calibration_session_begin",
+      };
+    case "capture_tare":
+      return {
+        titleKey: "calibrationStepCaptureTareTitle",
+        copyKey: "calibrationStepCaptureTareCopy",
+        actionLabelKey: "captureTare",
+        command: "calibration_capture_tare",
+      };
+    case "capture_level":
+      return {
+        titleKey: "calibrationStepCaptureLevelTitle",
+        copyKey: "calibrationStepCaptureLevelCopy",
+        actionLabelKey: "captureSelectedSensor",
+        command: "calibration_capture_cell",
+      };
+    case "commit_session":
+      return {
+        titleKey: "calibrationStepCommitSessionTitle",
+        copyKey: "calibrationStepCommitSessionCopy",
+        actionLabelKey: "commitCalibrationSession",
+        command: "calibration_session_commit",
+      };
+    case "enable_profile":
+      return {
+        titleKey: "calibrationStepEnableProfileTitle",
+        copyKey: "calibrationStepEnableProfileCopy",
+        actionLabelKey: "enableCalibrationProfile",
+        command: "calibration_enable",
+      };
+  }
+}
+
 function CalibrationWorkbench({
   t,
   deviceUid,
@@ -1178,6 +1253,90 @@ function CalibrationWorkbench({
     });
     return Array.from(seen.values()).sort((a, b) => a.level - b.level);
   }, [calibrationState.draft_levels, calibrationState.levels]);
+
+  const deviceConnected = Boolean(deviceUid) && !isDeviceOffline;
+  const flowSnapshot: CalibrationFlowSnapshot = {
+    deviceConnected,
+    maintenanceMode,
+    sessionActive: calibrationState.session_active,
+    profileComplete: calibrationState.complete,
+    profileEnabled: calibrationState.enabled,
+    tareComplete: calibrationState.tare_complete,
+    levelsComplete: calibrationState.levels_complete,
+    totalSensors,
+  };
+  const primarySteps = getPrimaryStepStates(flowSnapshot);
+  const captureLevelReason = getPrimaryStepDisabledReason("capture_level", flowSnapshot);
+  const abortSessionReason = !deviceConnected
+    ? "device_offline"
+    : !maintenanceMode
+      ? "needs_maintenance_mode"
+      : !calibrationState.session_active
+        ? "needs_active_session"
+        : null;
+  const clearProfileReason = !deviceConnected
+    ? "device_offline"
+    : !maintenanceMode
+      ? "needs_maintenance_mode"
+      : null;
+  const disableProfileReason = deviceConnected ? null : "device_offline";
+  const applyTareReason = !deviceConnected
+    ? "device_offline"
+    : !maintenanceMode
+      ? "needs_maintenance_mode"
+      : null;
+  const exitMaintenanceReason = !deviceConnected
+    ? "device_offline"
+    : !maintenanceMode
+      ? "needs_maintenance_mode"
+      : null;
+  const refreshStatusReason = deviceConnected ? null : "device_offline";
+
+  function reasonText(reason: CalibrationDisabledReason | null) {
+    return reason ? t(calibrationReasonKey(reason)) : "";
+  }
+
+  function flowStatusLabel(status: "complete" | "current" | "upcoming") {
+    switch (status) {
+      case "complete":
+        return t("calibrationFlowCompleteBadge");
+      case "current":
+        return t("calibrationFlowCurrentBadge");
+      case "upcoming":
+        return t("calibrationFlowUpcomingBadge");
+    }
+  }
+
+  function flowStatusTone(status: "complete" | "current" | "upcoming") {
+    return status === "upcoming" ? "waiting" : "live";
+  }
+
+  function summaryTone(isReady: boolean) {
+    return isReady ? "live" : "waiting";
+  }
+
+  async function runPrimaryStep(stepId: CalibrationPrimaryStepId) {
+    switch (stepId) {
+      case "enter_maintenance":
+        await run(t("enterMaintenance"), { command: "enter_maintenance", reason: "calibration_workbench" });
+        return;
+      case "start_session":
+        await startCalibrationSession();
+        return;
+      case "capture_tare":
+        await captureTare();
+        return;
+      case "capture_level":
+        await captureSelectedSensor();
+        return;
+      case "commit_session":
+        await commitCalibrationSession();
+        return;
+      case "enable_profile":
+        await enableCalibrationProfile();
+        return;
+    }
+  }
 
   function findNextUncalibrated(current: number): number | null {
     for (let i = 1; i < totalSensors; i++) {
@@ -1291,72 +1450,93 @@ function CalibrationWorkbench({
           <h3>{t("settingsSection_maintenance")}</h3>
           <p>{t("calibrationWorkbenchCopy")}</p>
         </div>
-        <div className="actions compact">
-          <button className="button primary" type="button" disabled={busyCommand === "enter_maintenance" || !deviceUid} onClick={() => void run(t("enterMaintenance"), { command: "enter_maintenance", reason: "calibration_workbench" })}>
-            {busyCommand === "enter_maintenance" ? t("running") : t("enterMaintenance")}
-          </button>
-          <button className="button" type="button" disabled={busyCommand === "exit_maintenance" || !deviceUid} onClick={() => void run(t("exitMaintenance"), { command: "exit_maintenance" })}>
-            {busyCommand === "exit_maintenance" ? t("running") : t("exitMaintenance")}
-          </button>
-          <button className="button" type="button" disabled={busyCommand === "calibration_status" || !deviceUid || isDeviceOffline} onClick={() => void syncCalibrationStatus()}>
-            {busyCommand === "calibration_status" ? t("running") : t("refreshStatus")}
-          </button>
+      </div>
+
+      <div className="settings-card calibration-status-card">
+        <div className="settings-detail-header">
+          <div>
+            <h4>{t("calibrationStatusSummaryTitle")}</h4>
+            <p>{t("calibrationStatusSummaryCopy")}</p>
+          </div>
+        </div>
+        <div className="settings-detail-grid compact calibration-status-grid calibration-status-summary">
+          <div>
+            <span>{t("maintenanceModeLabel")}</span>
+            <strong><span className={`status-pill ${summaryTone(maintenanceMode)}`}>{maintenanceMode ? t("enabledState") : t("disabledState")}</span></strong>
+          </div>
+          <div>
+            <span>{t("calibrationEnabled")}</span>
+            <strong><span className={`status-pill ${summaryTone(calibrationState.enabled)}`}>{calibrationState.enabled ? t("enabledState") : t("disabledState")}</span></strong>
+          </div>
+          <div>
+            <span>{t("calibrationSessionState")}</span>
+            <strong><span className={`status-pill ${summaryTone(calibrationState.session_active)}`}>{calibrationState.session_active ? t("sessionActive") : t("sessionInactive")}</span></strong>
+          </div>
+          <div>
+            <span>{t("calibrationProfileState")}</span>
+            <strong><span className={`status-pill ${summaryTone(calibrationState.complete)}`}>{calibrationState.complete ? t("profileComplete") : t("profileIncomplete")}</span></strong>
+          </div>
+          <div>
+            <span>{t("tareState")}</span>
+            <strong><span className={`status-pill ${summaryTone(calibrationState.tare_complete)}`}>{calibrationState.tare_complete ? t("profileComplete") : t("profileIncomplete")}</span></strong>
+          </div>
+          <div>
+            <span>{t("levelState")}</span>
+            <strong><span className={`status-pill ${summaryTone(calibrationState.levels_complete)}`}>{calibrationState.levels_complete ? t("profileComplete") : t("profileIncomplete")}</span></strong>
+          </div>
+          <DetailBox label={t("calibrationLevelCount")} value={calibrationState.levels.length} />
+          <DetailBox label={t("matrixShape")} value={`${rows || "-"} x ${cols || "-"}`} />
         </div>
       </div>
 
-      <div className="settings-detail-grid compact calibration-status-grid">
-        <DetailBox label={t("maintenanceModeLabel")} value={maintenanceMode ? t("enabledState") : t("disabledState")} />
-        <DetailBox label={t("calibrationEnabled")} value={calibrationState.enabled ? t("enabledState") : t("disabledState")} />
-        <DetailBox label={t("calibrationSessionState")} value={calibrationState.session_active ? t("sessionActive") : t("sessionInactive")} />
-        <DetailBox label={t("calibrationProfileState")} value={calibrationState.complete ? t("profileComplete") : t("profileIncomplete")} />
-        <DetailBox label={t("tareState")} value={calibrationState.tare_complete ? t("profileComplete") : t("profileIncomplete")} />
-        <DetailBox label={t("levelState")} value={calibrationState.levels_complete ? t("profileComplete") : t("profileIncomplete")} />
-        <DetailBox label={t("calibrationLevelCount")} value={calibrationState.levels.length} />
-        <DetailBox label={t("matrixShape")} value={`${rows || "-"} x ${cols || "-"}`} />
-      </div>
-      {calibrationState.legacy_missing_tare ? <p className="notice">{t("calibrationLegacyMissingTare")}</p> : null}
+      {calibrationState.legacy_missing_tare ? (
+        <div className="calibration-warning-banner">
+          <span className="banner-icon"><TriangleAlert size={18} strokeWidth={1.8} /></span>
+          <div className="banner-text">{t("calibrationLegacyMissingTare")}</div>
+        </div>
+      ) : null}
 
-      <div className="settings-card">
+      <div className="settings-card calibration-primary-flow-card">
         <div className="settings-detail-header">
           <div>
             <h4>{t("calibrationFlowControls")}</h4>
             <p>{t("calibrationFlowControlsCopy")}</p>
           </div>
         </div>
-        <div className="actions compact">
-          <button className="button" type="button" disabled={busyCommand === "calibration_session_begin" || !maintenanceMode || !deviceUid} onClick={() => void startCalibrationSession()}>
-            {busyCommand === "calibration_session_begin" ? t("running") : t("startCalibrationSession")}
-          </button>
-          <button className="button danger" type="button" disabled={busyCommand === "calibration_session_abort" || !maintenanceMode || !deviceUid} onClick={() => void abortCalibrationSession()}>
-            {busyCommand === "calibration_session_abort" ? t("running") : t("abortCalibrationSession")}
-          </button>
-          <button className="button primary" type="button" disabled={busyCommand === "calibration_session_commit" || !maintenanceMode || !deviceUid} onClick={() => void commitCalibrationSession()}>
-            {busyCommand === "calibration_session_commit" ? t("running") : t("commitCalibrationSession")}
-          </button>
-          <button className="button" type="button" disabled={busyCommand === "calibration_capture_tare" || !maintenanceMode || !deviceUid || totalSensors === 0} onClick={() => void captureTare()}>
-            {busyCommand === "calibration_capture_tare" ? t("running") : t("captureTare")}
-          </button>
-          <button className="button" type="button" disabled={busyCommand === "calibration_dump_tare" || !deviceUid || isDeviceOffline} onClick={() => void dumpTare()}>
-            {busyCommand === "calibration_dump_tare" ? t("running") : t("dumpTare")}
-          </button>
-          <button className="button" type="button" disabled={busyCommand === "calibration_enable" || !deviceUid || !calibrationState.complete} onClick={() => void enableCalibrationProfile()}>
-            {busyCommand === "calibration_enable" ? t("running") : t("enableCalibrationProfile")}
-          </button>
-          <button className="button" type="button" disabled={busyCommand === "calibration_disable" || !deviceUid} onClick={() => void disableCalibrationProfile()}>
-            {busyCommand === "calibration_disable" ? t("running") : t("disableCalibrationProfile")}
-          </button>
-          <button className="button" type="button" disabled={busyCommand === "calibration_tare_capture" || !maintenanceMode || !deviceUid || isDeviceOffline} onClick={() => void applyTare()} title={t("applyTareHint")}>
-            {busyCommand === "calibration_tare_capture" ? t("running") : t("applyTare")}
-          </button>
-          <button className="button danger" type="button" disabled={busyCommand === "calibration_clear_profile" || !maintenanceMode || !deviceUid} onClick={() => void clearCalibrationProfile()}>
-            {busyCommand === "calibration_clear_profile" ? t("running") : t("clearCalibrationProfile")}
-          </button>
-          <button className="button" type="button" disabled={busyCommand === "storage_status" || !deviceUid || isDeviceOffline} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
-            {busyCommand === "storage_status" ? t("running") : t("refreshFlashUsage")}
-          </button>
-          <a className="button" href={appHref(`device/${encodeURIComponent(deviceUid)}/files`)} target="_blank" rel="noreferrer">
-            {t("maintenanceFiles")}
-          </a>
+        {!deviceConnected ? <p className="notice warning">{t("calibrationPrimaryFlowOffline")}</p> : null}
+        <div className="calibration-flow-grid">
+          {primarySteps.map((step, index) => {
+            const meta = calibrationPrimaryStepMeta(step.id);
+            const isBusy = busyCommand === meta.command;
+            const disabledMessage = reasonText(step.disabledReason);
+            return (
+              <section key={step.id} className={`calibration-flow-step ${step.status}`}>
+                <div className="calibration-flow-step-header">
+                  <div className="calibration-flow-step-labels">
+                    <span className="calibration-flow-step-index">{index + 1}</span>
+                    <div>
+                      <h5>{t(meta.titleKey)}</h5>
+                      <p>{t(meta.copyKey)}</p>
+                    </div>
+                  </div>
+                  <span className={`status-pill ${flowStatusTone(step.status)}`}>{flowStatusLabel(step.status)}</span>
+                </div>
+                <div className="actions compact">
+                  <button
+                    className={step.status === "current" ? "button primary" : "button"}
+                    type="button"
+                    disabled={isBusy || step.disabledReason !== null}
+                    title={disabledMessage || undefined}
+                    onClick={() => void runPrimaryStep(step.id)}
+                  >
+                    {isBusy ? t("running") : t(meta.actionLabelKey)}
+                  </button>
+                </div>
+                {step.id === "capture_level" ? <p className="service-muted">{t("calibrationStepCaptureLevelHint")}</p> : null}
+                {step.disabledReason ? <p className="service-muted">{disabledMessage}</p> : null}
+              </section>
+            );
+          })}
         </div>
       </div>
 
@@ -1384,10 +1564,22 @@ function CalibrationWorkbench({
           </div>
 
           <div className="actions compact">
-            <button className="button primary" type="button" disabled={busyCommand === "calibration_capture_cell" || !maintenanceMode || !deviceUid || totalSensors === 0} onClick={() => void captureSelectedSensor()}>
+            <button
+              className="button primary"
+              type="button"
+              disabled={busyCommand === "calibration_capture_cell" || captureLevelReason !== null}
+              title={reasonText(captureLevelReason) || undefined}
+              onClick={() => void captureSelectedSensor()}
+            >
               {busyCommand === "calibration_capture_cell" ? t("running") : t("captureSelectedSensor")}
             </button>
-            <button className="button" type="button" disabled={busyCommand === "calibration_capture_all" || !maintenanceMode || !deviceUid || totalSensors === 0} onClick={() => void captureAllSensors()}>
+            <button
+              className="button"
+              type="button"
+              disabled={busyCommand === "calibration_capture_all" || captureLevelReason !== null}
+              title={reasonText(captureLevelReason) || undefined}
+              onClick={() => void captureAllSensors()}
+            >
               {busyCommand === "calibration_capture_all" ? t("running") : t("captureAllSensors")}
             </button>
           </div>
@@ -1422,6 +1614,15 @@ function CalibrationWorkbench({
                 <h4>{t("tarePreviewTitle")}</h4>
                 <p>{t("tarePreviewCopy")}</p>
               </div>
+              <button
+                className="button"
+                type="button"
+                disabled={busyCommand === "calibration_dump_tare" || !deviceConnected}
+                title={reasonText(refreshStatusReason) || undefined}
+                onClick={() => void dumpTare()}
+              >
+                {busyCommand === "calibration_dump_tare" ? t("running") : t("dumpTare")}
+              </button>
             </div>
             <div className="settings-detail-grid compact">
               <DetailBox label={t("savedCalibrationLayer")} value={tarePreview?.saved?.captured_points ?? calibrationState.tare?.captured_points ?? 0} />
@@ -1474,7 +1675,7 @@ function CalibrationWorkbench({
                       <span className="level-progress-text">{item.captured_points}/{item.total_points} ({pct}%)</span>
                     </button>
                     <button className="button danger tiny" type="button" disabled={busyCommand === "calibration_delete_level" || !maintenanceMode} onClick={() => void deleteCalibrationLevel(item.level)}>
-                      {t("delete")}
+                      {t("deleteCalibrationLevel")}
                     </button>
                   </div>
                 );
@@ -1522,6 +1723,128 @@ function CalibrationWorkbench({
             ) : (
               <p className="service-muted">{t("noCalibrationPreviewSelected")}</p>
             )}
+          </section>
+        </div>
+      </div>
+
+      <div className="settings-card calibration-advanced-card">
+        <div className="settings-detail-header">
+          <div>
+            <h4>{t("calibrationAdvancedActionsTitle")}</h4>
+            <p>{t("calibrationAdvancedActionsCopy")}</p>
+          </div>
+        </div>
+        <div className="calibration-advanced-grid">
+          <section className="settings-card calibration-advanced-group">
+            <div className="settings-detail-header">
+              <div>
+                <h5>{t("calibrationAdvancedSessionProfileTitle")}</h5>
+                <p>{t("calibrationAdvancedSessionProfileCopy")}</p>
+              </div>
+            </div>
+            <div className="calibration-action-list">
+              <div className="calibration-action-row">
+                <div>
+                  <strong>{t("abortCalibrationSession")}</strong>
+                  <p>{t("abortCalibrationSessionHint")}</p>
+                </div>
+                <button
+                  className="button danger"
+                  type="button"
+                  disabled={busyCommand === "calibration_session_abort" || abortSessionReason !== null}
+                  title={reasonText(abortSessionReason) || undefined}
+                  onClick={() => void abortCalibrationSession()}
+                >
+                  {busyCommand === "calibration_session_abort" ? t("running") : t("abortCalibrationSession")}
+                </button>
+              </div>
+              <div className="calibration-action-row">
+                <div>
+                  <strong>{t("clearCalibrationProfile")}</strong>
+                  <p>{t("clearCalibrationProfileHint")}</p>
+                </div>
+                <button
+                  className="button danger"
+                  type="button"
+                  disabled={busyCommand === "calibration_clear_profile" || clearProfileReason !== null}
+                  title={reasonText(clearProfileReason) || undefined}
+                  onClick={() => void clearCalibrationProfile()}
+                >
+                  {busyCommand === "calibration_clear_profile" ? t("running") : t("clearCalibrationProfile")}
+                </button>
+              </div>
+              <div className="calibration-action-row">
+                <div>
+                  <strong>{t("disableCalibrationProfile")}</strong>
+                  <p>{t("disableCalibrationProfileHint")}</p>
+                </div>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={busyCommand === "calibration_disable" || disableProfileReason !== null}
+                  title={reasonText(disableProfileReason) || undefined}
+                  onClick={() => void disableCalibrationProfile()}
+                >
+                  {busyCommand === "calibration_disable" ? t("running") : t("disableCalibrationProfile")}
+                </button>
+              </div>
+              <div className="calibration-action-row">
+                <div>
+                  <strong>{t("applyTare")}</strong>
+                  <p>{t("applyTareHint")}</p>
+                </div>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={busyCommand === "calibration_tare_capture" || applyTareReason !== null}
+                  title={reasonText(applyTareReason) || undefined}
+                  onClick={() => void applyTare()}
+                >
+                  {busyCommand === "calibration_tare_capture" ? t("running") : t("applyTare")}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="settings-card calibration-advanced-group">
+            <div className="settings-detail-header">
+              <div>
+                <h5>{t("calibrationAdvancedMaintenanceTitle")}</h5>
+                <p>{t("calibrationAdvancedMaintenanceCopy")}</p>
+              </div>
+            </div>
+            <div className="calibration-action-list">
+              <div className="calibration-action-row">
+                <div>
+                  <strong>{t("exitMaintenance")}</strong>
+                  <p>{t("exitMaintenanceHint")}</p>
+                </div>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={busyCommand === "exit_maintenance" || exitMaintenanceReason !== null}
+                  title={reasonText(exitMaintenanceReason) || undefined}
+                  onClick={() => void run(t("exitMaintenance"), { command: "exit_maintenance" })}
+                >
+                  {busyCommand === "exit_maintenance" ? t("running") : t("exitMaintenance")}
+                </button>
+              </div>
+              <div className="calibration-action-row">
+                <div>
+                  <strong>{t("refreshStatus")}</strong>
+                  <p>{t("refreshCalibrationStatusHint")}</p>
+                </div>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={busyCommand === "calibration_status" || refreshStatusReason !== null}
+                  title={reasonText(refreshStatusReason) || undefined}
+                  onClick={() => void syncCalibrationStatus()}
+                >
+                  {busyCommand === "calibration_status" ? t("running") : t("refreshStatus")}
+                </button>
+              </div>
+            </div>
           </section>
         </div>
       </div>
