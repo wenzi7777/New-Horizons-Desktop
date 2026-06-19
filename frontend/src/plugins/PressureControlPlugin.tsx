@@ -74,7 +74,7 @@ export function PressureControlPlugin() {
       const kpa = r.uno.pressure_kpa;
       setCurrentKpa(kpa);
       setImadaReading(r.imada);
-      if (r.uno.safety_latched) setPhase("pressurizing"); // safety recovery: UNO retargeted to baseline
+      if (r.uno.safety_latched) setPhase("pressurizing"); // safety clamp: UNO paused intake, target preserved, auto-resumes
 
       const target = parseFloat(targetInputRef.current);
       if (isNaN(target)) return;

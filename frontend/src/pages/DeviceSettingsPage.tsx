@@ -444,22 +444,14 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         }
         const elapsedMs = Date.now() - startedAt;
 
-        // UNO soft-safety: when pressure exceeded the hardware limit, the UNO
-        // automatically retargets to the baseline and sets safety_latched. We
-        // reset all counters and re-issue the calibration target once pressure
-        // has dropped back near baseline so the approach restarts cleanly.
+        // UNO safety clamp: the firmware closes the intake but PRESERVES the target
+        // and auto-recovers via hysteresis. Do NOT re-issue the target here — a fresh
+        // PSET would reset hold_mode back to Boost and spike from the high pressure.
+        // Just surface the warning and keep waiting; the firmware resumes climbing.
         if (r.uno.safety_latched) {
           setSafetyLatchedWarning(true);
-          overshootCountRef.current = 0;
           stableCountRef.current = 0;
-          pressureSamples.length = 0;
-          addLogRef.current?.(`Safety limit triggered at ${r.uno.pressure_kpa.toFixed(2)} kPa — waiting for pressure to drop, then retrying target ${targetKpa} kPa…`);
-          if (r.uno.pressure_kpa < PRESSURE_BASELINE_KPA + 2.0) {
-            // Pressure has dropped near baseline: re-issue target so UNO starts climbing again.
-            addLogRef.current?.(`Pressure back at baseline — re-issuing target ${targetKpa} kPa.`);
-            setSafetyLatchedWarning(false);
-            try { await api.pressureCalSetTarget(targetKpa); } catch { /* ignore */ }
-          }
+          addLogRef.current?.(`Safety clamp active at ${r.uno.pressure_kpa.toFixed(2)} kPa — holding, will auto-resume.`);
           await new Promise<void>((res) => setTimeout(res, PRESSURE_STABLE_SAMPLE_INTERVAL_MS));
           continue;
         }
