@@ -201,6 +201,11 @@ export function PressureControlPlugin() {
 
   const isShuttingDown = phase === "stopping" || phase === "awaiting_compressor_off"
     || phase === "testing_residual" || phase === "residual_unsafe";
+  // Active shutdown steps that must block Start. Terminal states (residual_unsafe,
+  // safe_done) are NOT included so the user can configure and start again without a
+  // page refresh.
+  const shutdownActive = phase === "stopping" || phase === "awaiting_compressor_off"
+    || phase === "testing_residual";
 
   const phaseLabel = (() => {
     switch (phase) {
@@ -330,7 +335,7 @@ export function PressureControlPlugin() {
               className="button primary"
               type="button"
               onClick={handleStart}
-              disabled={isRunning || isShuttingDown || phase === "safe_done" || !configured || !targetValid}
+              disabled={isRunning || shutdownActive || !configured || !targetValid}
             >
               {t("pluginPressureControlStart")}
             </button>
