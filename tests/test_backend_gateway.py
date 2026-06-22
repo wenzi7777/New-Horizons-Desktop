@@ -694,6 +694,11 @@ class IndependentNewHorizonsTest(unittest.TestCase):
                 with csv_files[0].open(newline="", encoding="utf-8") as handle:
                     rows = list(csv.reader(handle))
                 self.assertEqual(len(rows), 6)
+                self.assertEqual(rows[0][0], "timestamp_ms")
+                recorded_timestamps = [int(row[0]) for row in rows[1:]]
+                self.assertTrue(all(value > 1_700_000_000_000 for value in recorded_timestamps))
+                self.assertEqual(recorded_timestamps, sorted(recorded_timestamps))
+                self.assertNotIn("123456", rows[1][0])
                 self.assertEqual([float(row[1]) for row in rows[1:]], [315.0, 316.0, 317.0, 318.0, 319.0])
             finally:
                 if previous_data_root is None:

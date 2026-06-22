@@ -2048,6 +2048,22 @@ class NewHorizonsService:
             return "0x" + normalized[2:]
         return normalized
 
+    @staticmethod
+    def _csv_timestamp_ms(payload: dict[str, Any], fallback: datetime) -> int:
+        received_at = payload.get("received_at")
+        if isinstance(received_at, str) and received_at.strip():
+            text = received_at.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                parsed = datetime.fromisoformat(text)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return int(parsed.timestamp() * 1000)
+            except ValueError:
+                pass
+        return int(fallback.timestamp() * 1000)
+
     def _write_csv_sample(self, device_uid: str, payload: dict[str, Any]) -> None:
         pressures = payload.get("p")
         if not isinstance(pressures, list):
@@ -2063,12 +2079,12 @@ class NewHorizonsService:
         gyro = payload.get("gyro") or imu.get("gyro") or [0, 0, 0]
         acc = payload.get("acc") or imu.get("acc") or [0, 0, 0]
         mag = payload.get("mag") or imu.get("mag") or [0, 0, 0]
-        timestamp = payload.get("ts") or payload.get("timestamp") or payload.get("timestamp_ms") or now.isoformat()
+        timestamp = self._csv_timestamp_ms(payload, now)
         with path.open("a", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             if is_new:
                 writer.writerow(
-                    ["Timestamp"]
+                    ["timestamp_ms"]
                     + ["P{}".format(index + 1) for index in range(len(pressures))]
                     + ["Mag_x", "Mag_y", "Mag_z", "Gyro_x", "Gyro_y", "Gyro_z", "Acc_x", "Acc_y", "Acc_z"]
                 )
