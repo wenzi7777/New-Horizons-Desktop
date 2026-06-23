@@ -11,6 +11,7 @@ const GLOBAL_APPS = [
   { to: "/profiles", icon: "PF", titleKey: "profileEditor" },
   { to: "/csv", icon: "CSV", titleKey: "csvExport" },
 ];
+const FOLDER_PREVIEW_SLOTS = 4;
 
 type LaunchpadFolder = {
   id: string;
@@ -38,6 +39,13 @@ function batteryLabel(device: NormalizedDevice, t: (key: string) => string) {
   if (device.batteryState === "charge_done") return t("batteryChargeDone");
   if (device.batteryState === "not_charging") return t("batteryNotCharging");
   return "-";
+}
+
+function folderPreviewCaption(devices: NormalizedDevice[]) {
+  if (devices.length === 0) return "";
+  if (devices.length === 1) return devices[0].displayName;
+  const visible = devices.slice(0, 2).map((device) => device.displayName);
+  return devices.length > 2 ? `${visible.join(" · ")} · +${devices.length - 2}` : visible.join(" · ");
 }
 
 function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) {
@@ -147,7 +155,7 @@ export function LaunchpadPage() {
       </section>
       {errorMessage ? <p className="notice error">{errorMessage}</p> : null}
 
-      <section className="desktop-section">
+      <section className="desktop-section launchpad-groups">
         <h3>{t("discoveredDevices")}</h3>
         {normalized.length === 0 ? (
           <div className="panel empty-device-state">
@@ -174,8 +182,9 @@ export function LaunchpadPage() {
           {folders.map((folder) => (
             <button
               key={folder.id}
-              className={`folder-preview-card ${folder.tone}`}
+              className={`folder-preview-card ${folder.tone}${folder.devices.length === 0 ? " is-empty" : ""}`}
               type="button"
+              disabled={folder.devices.length === 0}
               onClick={() => setActiveFolder(folder)}
             >
               <div className="folder-preview-header">
@@ -183,21 +192,39 @@ export function LaunchpadPage() {
                   <Folder size={18} strokeWidth={1.8} />
                   <strong>{folder.label}</strong>
                 </div>
-                <span>{folder.devices.length}</span>
+                <span className="folder-count-badge">{folder.devices.length}</span>
               </div>
-              <div className="folder-preview-grid">
-                {folder.devices.slice(0, 4).map((device) => (
-                  <div key={device.uid} className={`folder-device-chip ${deviceClassName(device)}`}>
-                    <span>{device.displayName.slice(0, 2).toUpperCase()}</span>
+              {folder.devices.length > 0 ? (
+                <>
+                  <div className="folder-preview-grid">
+                    {Array.from({ length: FOLDER_PREVIEW_SLOTS }).map((_, index) => {
+                      const device = folder.devices[index];
+                      if (!device) {
+                        return <div key={`${folder.id}-placeholder-${index}`} className="folder-device-chip placeholder" aria-hidden="true" />;
+                      }
+                      return (
+                        <div key={device.uid} className={`folder-device-chip ${deviceClassName(device)}`}>
+                          <span>{device.displayName.slice(0, 2).toUpperCase()}</span>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
+                  <p className="folder-preview-caption">{folderPreviewCaption(folder.devices)}</p>
+                </>
+              ) : (
+                <div className="folder-preview-empty" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              )}
             </button>
           ))}
         </div>
       </section>
 
-      <section className="desktop-section">
+      <section className="desktop-section launchpad-apps">
         <h3>{t("globalApps")}</h3>
         <div className="launch-grid">
           {GLOBAL_APPS.map((card) => (
