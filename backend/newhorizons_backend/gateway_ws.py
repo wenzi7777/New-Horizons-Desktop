@@ -23,7 +23,7 @@ from .service import NewHorizonsService
 
 PACKET_TEXT_PREFIX = "NHPKT1:"
 DEFAULT_GATEWAY_MANIFEST_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-Gateway/main/releases/gateway-latest.json"
-DEFAULT_LATEST_GATEWAY_VERSION = "v0.3.2"
+DEFAULT_LATEST_GATEWAY_VERSION = "v0.3.3"
 _LATEST_GATEWAY_VERSION_CACHE = {"value": "", "expires_at": 0.0}
 _LATEST_GATEWAY_VERSION_LOCK = threading.RLock()
 
