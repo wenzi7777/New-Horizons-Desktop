@@ -826,6 +826,10 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(devices["3CDC7545CCD0"]["mode"], "normal")
         self.assertFalse(devices["3CDC7545CCD0"]["gateway_connected"])
 
+        hello_ack = json.loads(ws.sent[1])
+        self.assertEqual(hello_ack["type"], "gateway_hello_ack")
+        self.assertTrue(str(hello_ack.get("latest_gateway_version") or "").startswith("v"))
+
     def test_gateway_ws_accepts_json_bytes_status_and_registers_device(self):
         service = NewHorizonsService(mock_mode=False)
         ws = FakeGatewayWebSocket([

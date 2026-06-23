@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from flask import request
@@ -18,6 +20,21 @@ from .service import NewHorizonsService
 
 
 PACKET_TEXT_PREFIX = "NHPKT1:"
+
+
+def latest_gateway_version() -> str:
+    override = str(os.getenv("NEWHORIZONS_LATEST_GATEWAY_VERSION") or "").strip()
+    if override:
+        return override
+    manifest_path = Path(__file__).resolve().parents[3] / "New-Horizons-Gateway" / "releases" / "gateway-latest.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        version = str(payload.get("version") or "").strip()
+        if version:
+            return version
+    except Exception:
+        pass
+    return "v0.3.0"
 
 
 def _token_from_request() -> str:
@@ -55,6 +72,7 @@ class GatewaySocketSession:
                 "type": "gateway_hello_ack",
                 "server_time": datetime.now(timezone.utc).isoformat(),
                 "transport_mode": "udp_gateway_wss",
+                "latest_gateway_version": latest_gateway_version(),
             }
         )
         try:
@@ -97,6 +115,7 @@ class GatewaySocketSession:
                     "gateway_id": self.gateway_id,
                     "server_time": datetime.now(timezone.utc).isoformat(),
                     "transport_mode": "udp_gateway_wss",
+                    "latest_gateway_version": latest_gateway_version(),
                 }
             )
             return
