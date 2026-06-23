@@ -67,14 +67,23 @@ class IndependentNewHorizonsTest(unittest.TestCase):
 
         self.assertEqual(version, "v9.9.9")
 
-    def test_gateway_latest_version_falls_back_to_local_manifest_when_remote_fails(self):
+    def test_gateway_latest_version_uses_stale_cached_github_value_when_remote_fails(self):
+        with patch.dict("os.environ", {}, clear=False), \
+             patch.object(gateway_ws, "_LATEST_GATEWAY_VERSION_CACHE", {"value": "v9.9.8", "expires_at": 999.0}), \
+             patch("newhorizons_backend.gateway_ws.urllib.request.urlopen", side_effect=RuntimeError("offline")), \
+             patch("newhorizons_backend.gateway_ws.time.time", return_value=1000.0):
+            version = gateway_ws.latest_gateway_version()
+
+        self.assertEqual(version, "v9.9.8")
+
+    def test_gateway_latest_version_returns_empty_when_remote_fails_without_cache(self):
         with patch.dict("os.environ", {}, clear=False), \
              patch.object(gateway_ws, "_LATEST_GATEWAY_VERSION_CACHE", {"value": "", "expires_at": 0.0}), \
              patch("newhorizons_backend.gateway_ws.urllib.request.urlopen", side_effect=RuntimeError("offline")), \
              patch("newhorizons_backend.gateway_ws.time.time", return_value=1000.0):
             version = gateway_ws.latest_gateway_version()
 
-        self.assertTrue(version.startswith("v"))
+        self.assertEqual(version, "")
 
     def test_discovery_responder_supports_json_findme(self):
         from newhorizons_backend.discovery import DiscoveryResponder
@@ -848,7 +857,20 @@ class IndependentNewHorizonsTest(unittest.TestCase):
             None,
         ])
 
-        GatewaySocketSession(service, ws).handle()
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"version":"v0.4.0"}'
+
+        with patch.object(gateway_ws, "_LATEST_GATEWAY_VERSION_CACHE", {"value": "", "expires_at": 0.0}), \
+             patch("newhorizons_backend.gateway_ws.urllib.request.urlopen", return_value=FakeResponse()), \
+             patch("newhorizons_backend.gateway_ws.time.time", return_value=1000.0):
+            GatewaySocketSession(service, ws).handle()
 
         devices = {item["device_uid"]: item for item in service.list_devices()}
         self.assertIn("3CDC7545CCD0", devices)
@@ -857,7 +879,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
 
         hello_ack = json.loads(ws.sent[1])
         self.assertEqual(hello_ack["type"], "gateway_hello_ack")
-        self.assertTrue(str(hello_ack.get("latest_gateway_version") or "").startswith("v"))
+        self.assertEqual(hello_ack.get("latest_gateway_version"), "v0.4.0")
 
     def test_gateway_ws_accepts_json_bytes_status_and_registers_device(self):
         service = NewHorizonsService(mock_mode=False)
