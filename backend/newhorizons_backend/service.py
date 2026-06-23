@@ -234,13 +234,15 @@ class NewHorizonsService:
                     continue
                 if entry.get("gateway_connected") is not True:
                     continue
-                transport_path = str(entry.get("transport_path") or "")
-                if transport_path == "gateway_status":
+                # Use the time the device was *genuinely online* (last_live_seen_at),
+                # not last_seen_at: the gateway keeps mentioning a disconnected
+                # device in every snapshot (until its own 90s stale window), which
+                # would refresh last_seen_at every ~5s and mean this watchdog could
+                # never trip — a powered-off / soft-off device would stay online.
+                live_at = str(entry.get("last_live_seen_at") or entry.get("received_at") or "")
+                if not live_at:
                     continue
-                received_at = str(entry.get("received_at") or entry.get("last_seen_at") or "")
-                if not received_at:
-                    continue
-                parsed = self._parse_iso_datetime(received_at)
+                parsed = self._parse_iso_datetime(live_at)
                 if parsed is None:
                     continue
                 if now - parsed.timestamp() <= self.STALE_DEVICE_TIMEOUT_SEC:
@@ -1109,6 +1111,7 @@ class NewHorizonsService:
         allow_disconnect_grace: bool = False,
     ) -> dict[str, Any] | None:
         existing = dict(self._devices.get(device_uid, {}))
+        actually_connected = connected
         if not connected and allow_disconnect_grace and self._should_preserve_recent_findme_attachment(existing, seen_at):
             connected = True
             device = dict(device)
@@ -1175,7 +1178,15 @@ class NewHorizonsService:
         if mode:
             incoming["mode"] = mode
         incoming["last_seen_at"] = seen_at
-        if connected:
+        # `last_live_seen_at` tracks when the device was *genuinely* online.
+        # The findme disconnect grace may keep `gateway_connected` (and thus
+        # connected) reported as True to ride out a transient snapshot, but
+        # that grace must NOT advance the live-seen clock — otherwise the
+        # gateway's repeated disconnected snapshots would keep last_live_seen_at
+        # fresh forever, the grace would never expire, and a powered-off /
+        # soft-off device would stay "online" with an ever-advancing "last seen".
+        # So live-seen only advances on an actually-connected snapshot.
+        if actually_connected:
             incoming["last_live_seen_at"] = seen_at
             incoming["last_kind"] = "gateway"
         elif existing and (existing.get("gateway_connected") is not False or existing.get("gateway_id") == gateway_id):
@@ -1191,14 +1202,23 @@ class NewHorizonsService:
         findme = existing.get("findme") if isinstance(existing.get("findme"), dict) else {}
         if str(findme.get("state") or "").strip().lower() != "attached":
             return False
-        last_seen = str(existing.get("last_seen_at") or "")
-        if not last_seen:
+        # Measure how long ago the device was *genuinely online*, not how long
+        # ago the gateway last mentioned it. `last_seen_at` is refreshed every
+        # gateway snapshot even while the gateway reports the device as
+        # disconnected (the gateway keeps mentioning the device for its own
+        # 90s stale window), so using it would make this grace window never
+        # expire — a powered-off / soft-off device would stay "online" forever.
+        # `last_live_seen_at` is only refreshed while the device is connected,
+        # so the grace correctly rides out a single transient disconnect
+        # snapshot and then lets the device go offline.
+        last_live = str(existing.get("last_live_seen_at") or existing.get("last_seen_at") or "")
+        if not last_live:
             return False
         seen_dt = cls._parse_iso_datetime(seen_at)
-        last_seen_dt = cls._parse_iso_datetime(last_seen)
-        if seen_dt is None or last_seen_dt is None:
+        last_live_dt = cls._parse_iso_datetime(last_live)
+        if seen_dt is None or last_live_dt is None:
             return False
-        age = (seen_dt - last_seen_dt).total_seconds()
+        age = (seen_dt - last_live_dt).total_seconds()
         return 0 <= age <= cls.FINDME_DISCONNECT_GRACE_SEC
 
     @staticmethod

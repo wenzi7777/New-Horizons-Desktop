@@ -468,6 +468,57 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(device["findme"]["state"], "attached")
         self.assertEqual(device["findme"]["host"], "192.168.1.1")
 
+    def test_gateway_disconnect_after_grace_expires_goes_offline(self):
+        # Regression: a device that was online and then powered off / soft-off
+        # keeps receiving gateway snapshots reporting connected=False. The
+        # findme disconnect grace (15s) is meant to ride out a single
+        # transient snapshot, NOT to keep the device online forever. Once the
+        # device has not actually been online for longer than the grace, it
+        # must flip offline and its last_live_seen_at must freeze.
+        service = NewHorizonsService(mock_mode=False)
+        with service._lock:
+            service._stopped = False
+        device_uid = "3CDC7545CCD0"
+
+        # Device was genuinely online a little over the grace window ago.
+        last_live = (datetime.now(timezone.utc).timestamp() - 20)
+        last_live_iso = datetime.fromtimestamp(last_live, tz=timezone.utc).isoformat()
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "message": "status",
+            "mode": "normal",
+            "gateway_connected": True,
+            "received_at": last_live_iso,
+            "findme": {"state": "attached", "gateway_id": "gw-main"},
+        })
+
+        snapshot_before = service.get_device(device_uid)
+        self.assertEqual(snapshot_before["last_live_seen_at"], last_live_iso)
+
+        # Gateway keeps reporting the device as disconnected, but still mentions
+        # it in every 5s snapshot (it doesn't remove entries until its own 90s
+        # stale threshold). Backend must mark offline once the live-seen age
+        # exceeds the grace.
+        for _ in range(4):
+            service.record_gateway_summary("gw-main", {
+                "gateway_name": "Bench Gateway",
+                "state": {
+                    "devices": [{
+                        "device_uid": device_uid,
+                        "connected": False,
+                        "findme_state": "disconnected",
+                    }],
+                },
+            })
+
+        device = service.get_device(device_uid)
+        self.assertIsNotNone(device)
+        self.assertFalse(device["gateway_connected"],
+                         "after findme grace expires, gateway_connected must go False")
+        self.assertEqual(device["last_live_seen_at"], last_live_iso,
+                         "last_live_seen_at (the UI 'last seen' source) must freeze at "
+                         "the last genuine online time, not keep refreshing")
+
     def test_removed_recovery_boot_command_is_unknown_and_not_queued(self):
         service = NewHorizonsService(mock_mode=False)
         sent = []
@@ -1258,7 +1309,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal",
                          "gateway_status with mode='normal' must be accepted after exit_maintenance")
 
-    def _seed_gateway_connected_device(self, service, device_uid, gateway_id, transport_path="gateway"):
+    def _seed_gateway_connected_device(self, service, device_uid, gateway_id):
         """Seed a gateway-relayed device that the frontend regards as connected."""
         service.record_gateway_summary(gateway_id, {
             "gateway_name": "test-gw",
@@ -1281,11 +1332,11 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertIsNotNone(device)
         self.assertTrue(device.get("gateway_connected"))
         self.assertTrue((device.get("gateway_state") or {}).get("connected"))
-        # Stale check keys off received_at/last_seen_at; override the transport_path so
-        # the gateway_status snapshot entry is treated as a live (non-snapshot) device.
+        # Stale check keys off last_live_seen_at (time the device was genuinely
+        # online, not just mentioned by the gateway snapshot).
         with service._lock:
             entry = service._devices.get(device_uid)
-            entry["transport_path"] = transport_path
+            entry["last_live_seen_at"] = entry.get("last_seen_at") or entry.get("received_at")
             service._devices[device_uid] = entry
 
     def test_stale_gateway_device_marked_offline(self):
@@ -1299,13 +1350,12 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         events = []
         service.add_event_listener(events.append)
 
-        # Push the presence timestamp past STALE_DEVICE_TIMEOUT_SEC (30s).
+        # Push the last-live-seen timestamp past STALE_DEVICE_TIMEOUT_SEC (30s).
         stale = (datetime.now(timezone.utc).timestamp() - 40)
         stale_iso = datetime.fromtimestamp(stale, tz=timezone.utc).isoformat()
         with service._lock:
             entry = service._devices.get(device_uid)
-            entry["last_seen_at"] = stale_iso
-            entry["received_at"] = stale_iso
+            entry["last_live_seen_at"] = stale_iso
             service._devices[device_uid] = entry
 
         service._check_stale_devices()

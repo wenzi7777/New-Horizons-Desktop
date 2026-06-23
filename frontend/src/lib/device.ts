@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { DeviceEntry } from "./api";
+import { deriveConnectionState } from "./connectionState";
 import { valueToCsv } from "./valueFormat";
 import { useWsState } from "./wsClient";
 
 export type DeviceMode = "normal" | "maintenance" | "safe_maintenance" | "booting" | "offline" | string;
-export type DeviceConnectionState = "online" | "reconnecting" | "offline" | "booting";
+export type { DeviceConnectionState } from "./connectionState";
 
 export type NormalizedDevice = {
   uid: string;
@@ -58,8 +59,6 @@ const STATUS_SNAPSHOT_COMMANDS = new Set([
   "scan_health",
   "storage_status",
 ]);
-const RECONNECTING_GRACE_MS = 15000;
-
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -137,16 +136,17 @@ export function normalizeDevice(device: DeviceEntry): NormalizedDevice {
   const eventSeenAt = stringValue(device.last_seen_at ?? status.received_at ?? device.last_gateway_seen_at, "");
   const lastSeenAt = stringValue(device.last_live_seen_at ?? eventSeenAt, "");
   const isBooting = device.booting === true || status.booting === true;
-  const isReconnecting = Boolean(
-    !isBooting
-      && !gatewayConnected
-      && eventSeenAt
-      && Date.now() - dateValue(eventSeenAt) <= RECONNECTING_GRACE_MS,
-  );
-  const offline = Boolean(!isBooting && !gatewayConnected && !isReconnecting);
+  // Connection state derives from `lastSeenAt` (which prefers the backend's
+  // genuinely-online `last_live_seen_at`), NOT `eventSeenAt`/`last_seen_at`:
+  // a gateway re-mentions a disconnected device every ~5s, so `last_seen_at`
+  // stays fresh forever and would pin the UI to "reconnecting", never offline.
+  const { connectionState, isReconnecting } = deriveConnectionState({
+    isBooting,
+    gatewayConnected,
+    liveSeenAt: lastSeenAt,
+  });
   const rawMode = stringValue(device.mode ?? status.mode ?? runtime.mode, "normal");
   const mode = isBooting ? "booting" : rawMode;
-  const connectionState = isBooting ? "booting" : isReconnecting ? "reconnecting" : offline ? "offline" : "online";
   const nickname = stringValue(device.nickname, "");
   const deviceGroup = stringValue(device.device_group, "");
   const name = stringValue(device.device_name ?? status.device_name ?? system.name, device.device_uid);

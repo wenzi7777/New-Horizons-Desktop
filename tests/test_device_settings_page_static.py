@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS_PAGE = ROOT / "frontend" / "src" / "pages" / "DeviceSettingsPage.tsx"
 DEVICE_LIB = ROOT / "frontend" / "src" / "lib" / "device.ts"
+CONNECTION_STATE_LIB = ROOT / "frontend" / "src" / "lib" / "connectionState.ts"
 DEVICE_COMMAND_LIB = ROOT / "frontend" / "src" / "lib" / "deviceCommand.ts"
 APP_TSX = ROOT / "frontend" / "src" / "App.tsx"
 STYLES = ROOT / "frontend" / "src" / "styles.css"
@@ -319,16 +320,21 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
     def test_device_normalization_tracks_reconnecting_and_live_seen_time(self):
         source = DEVICE_LIB.read_text()
+        conn = CONNECTION_STATE_LIB.read_text()
         i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
 
         self.assertIn('connectionState: "online" | "reconnecting" | "offline" | "booting"', source)
         self.assertIn("isReconnecting: boolean", source)
         self.assertIn("isControlUnavailable: boolean", source)
-        self.assertIn("const RECONNECTING_GRACE_MS = 15000;", source)
         self.assertIn("device.last_live_seen_at", source)
-        self.assertIn('const connectionState = isBooting ? "booting"', source)
-        self.assertIn('? "reconnecting"', source)
-        self.assertIn('? "offline"', source)
+        # Connection state is derived in the standalone connectionState helper and
+        # MUST key off the genuinely-online clock (lastSeenAt -> last_live_seen_at),
+        # never eventSeenAt/last_seen_at, or the UI would never reach "offline".
+        self.assertIn("deriveConnectionState", source)
+        self.assertIn("liveSeenAt: lastSeenAt", source)
+        self.assertIn("const RECONNECTING_GRACE_MS = 15000;", conn)
+        self.assertIn('? "reconnecting"', conn)
+        self.assertIn('? "offline"', conn)
         self.assertIn("useState(0)", source)
         self.assertIn("window.setInterval", source)
         self.assertIn("reconnecting", i18n)
