@@ -592,6 +592,17 @@ button:disabled {
   letter-spacing: 0;
 }
 
+.device-code-mark {
+  display: grid;
+  justify-items: center;
+  line-height: 1;
+  gap: 3px;
+}
+
+.device-code-mark span {
+  display: block;
+}
+
 .device-card-copy {
   display: grid;
   gap: 6px;
@@ -793,6 +804,10 @@ button:disabled {
   color: var(--text-dim);
   font-size: 15px;
   font-weight: 700;
+}
+
+.folder-device-chip .device-code-mark {
+  font-size: 14px;
 }
 
 .folder-device-chip.placeholder {

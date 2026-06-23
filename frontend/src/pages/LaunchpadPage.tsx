@@ -41,6 +41,20 @@ function batteryLabel(device: NormalizedDevice, t: (key: string) => string) {
   return "-";
 }
 
+function deviceMacSuffix(uid: string) {
+  return uid.slice(-4).toUpperCase();
+}
+
+function renderDeviceCode(uid: string) {
+  const suffix = deviceMacSuffix(uid);
+  return (
+    <span className="device-code-mark">
+      <span>{suffix.slice(0, 2)}</span>
+      <span>{suffix.slice(2, 4)}</span>
+    </span>
+  );
+}
+
 function folderPreviewCaption(devices: NormalizedDevice[]) {
   if (devices.length === 0) return "";
   if (devices.length === 1) return devices[0].displayName;
@@ -52,9 +66,7 @@ function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) 
   return (
     <article key={device.uid} className={`device-card ${deviceClassName(device)}`}>
       <Link className="device-main-link" to={`/device/${encodeURIComponent(device.uid)}/settings`}>
-        <div className="device-icon" aria-hidden="true">
-          NH
-        </div>
+        <div className="device-icon" aria-hidden="true">{renderDeviceCode(device.uid)}</div>
         <div className="device-card-copy">
           <div className="device-card-header">
             <h3>{device.displayName}</h3>
@@ -204,7 +216,7 @@ export function LaunchpadPage() {
                       }
                       return (
                         <div key={device.uid} className={`folder-device-chip ${deviceClassName(device)}`}>
-                          <span>{device.displayName.slice(0, 2).toUpperCase()}</span>
+                          {renderDeviceCode(device.uid)}
                         </div>
                       );
                     })}
