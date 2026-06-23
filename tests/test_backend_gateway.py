@@ -19,6 +19,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from newhorizons_backend.api import create_blueprint  # noqa: E402
+from newhorizons_backend import gateway_ws  # noqa: E402
 from newhorizons_backend.gateway_ws import GatewaySocketSession, PACKET_TEXT_PREFIX  # noqa: E402
 from newhorizons_backend.service import NewHorizonsService  # noqa: E402
 from newhorizons_backend.standalone import create_standalone_app  # noqa: E402
@@ -47,6 +48,34 @@ class FakeGatewayWebSocket:
 
 
 class IndependentNewHorizonsTest(unittest.TestCase):
+    def test_gateway_latest_version_prefers_remote_manifest(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"version":"v9.9.9"}'
+
+        with patch.dict("os.environ", {}, clear=False), \
+             patch.object(gateway_ws, "_LATEST_GATEWAY_VERSION_CACHE", {"value": "", "expires_at": 0.0}), \
+             patch("newhorizons_backend.gateway_ws.urllib.request.urlopen", return_value=FakeResponse()), \
+             patch("newhorizons_backend.gateway_ws.time.time", return_value=1000.0):
+            version = gateway_ws.latest_gateway_version()
+
+        self.assertEqual(version, "v9.9.9")
+
+    def test_gateway_latest_version_falls_back_to_local_manifest_when_remote_fails(self):
+        with patch.dict("os.environ", {}, clear=False), \
+             patch.object(gateway_ws, "_LATEST_GATEWAY_VERSION_CACHE", {"value": "", "expires_at": 0.0}), \
+             patch("newhorizons_backend.gateway_ws.urllib.request.urlopen", side_effect=RuntimeError("offline")), \
+             patch("newhorizons_backend.gateway_ws.time.time", return_value=1000.0):
+            version = gateway_ws.latest_gateway_version()
+
+        self.assertTrue(version.startswith("v"))
+
     def test_discovery_responder_supports_json_findme(self):
         from newhorizons_backend.discovery import DiscoveryResponder
 

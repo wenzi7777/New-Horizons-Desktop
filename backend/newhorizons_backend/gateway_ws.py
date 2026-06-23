@@ -7,6 +7,8 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import time
+import urllib.request
 
 from flask import request
 
@@ -20,21 +22,56 @@ from .service import NewHorizonsService
 
 
 PACKET_TEXT_PREFIX = "NHPKT1:"
+DEFAULT_GATEWAY_MANIFEST_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-Gateway/main/releases/gateway-latest.json"
+DEFAULT_LATEST_GATEWAY_VERSION = "v0.3.2"
+_LATEST_GATEWAY_VERSION_CACHE = {"value": "", "expires_at": 0.0}
+_LATEST_GATEWAY_VERSION_LOCK = threading.RLock()
+
+
+def _latest_gateway_version_from_remote() -> str:
+    manifest_url = str(os.getenv("NEWHORIZONS_GATEWAY_LATEST_MANIFEST_URL") or DEFAULT_GATEWAY_MANIFEST_URL).strip()
+    if not manifest_url:
+        return ""
+    with urllib.request.urlopen(manifest_url, timeout=5) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    version = str(payload.get("version") or "").strip() if isinstance(payload, dict) else ""
+    return version
+
+
+def _latest_gateway_version_from_local_manifest() -> str:
+    manifest_path = Path(__file__).resolve().parents[3] / "New-Horizons-Gateway" / "releases" / "gateway-latest.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    return str(payload.get("version") or "").strip() if isinstance(payload, dict) else ""
 
 
 def latest_gateway_version() -> str:
     override = str(os.getenv("NEWHORIZONS_LATEST_GATEWAY_VERSION") or "").strip()
     if override:
         return override
-    manifest_path = Path(__file__).resolve().parents[3] / "New-Horizons-Gateway" / "releases" / "gateway-latest.json"
-    try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        version = str(payload.get("version") or "").strip()
-        if version:
-            return version
-    except Exception:
-        pass
-    return "v0.3.1"
+    now = time.time()
+    with _LATEST_GATEWAY_VERSION_LOCK:
+        cached = str(_LATEST_GATEWAY_VERSION_CACHE.get("value") or "").strip()
+        expires_at = float(_LATEST_GATEWAY_VERSION_CACHE.get("expires_at") or 0.0)
+        if cached and now < expires_at:
+            return cached
+        version = ""
+        try:
+            version = _latest_gateway_version_from_remote()
+        except Exception:
+            version = ""
+        if not version:
+            version = _latest_gateway_version_from_local_manifest()
+        if not version:
+            version = DEFAULT_LATEST_GATEWAY_VERSION
+        _LATEST_GATEWAY_VERSION_CACHE["value"] = version
+        _LATEST_GATEWAY_VERSION_CACHE["expires_at"] = now + max(
+            60,
+            int(os.getenv("NEWHORIZONS_GATEWAY_LATEST_VERSION_CACHE_SEC", "300")),
+        )
+        return version
 
 
 def _token_from_request() -> str:
