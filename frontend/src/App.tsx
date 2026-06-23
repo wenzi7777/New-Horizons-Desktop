@@ -71,6 +71,7 @@ function AuthenticatedApp() {
               <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
                 <option value="en">English</option>
                 <option value="ja">日本語</option>
+                <option value="zh-CN">简体中文</option>
               </select>
             </label>
             <div className="session-chip">
