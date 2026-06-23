@@ -1914,6 +1914,7 @@ export function DeviceSettingsPage() {
   const ramUsedPercent = percent(ramUsed, ramTotal);
   const imu = recordValue(status.imu ?? runtime.imu ?? (lastResultCommand === "set_imu" ? lastResult.imu : undefined));
   const filter = recordValue(status.filter ?? runtime.filter ?? (lastResultCommand === "set_filter" ? lastResult.filter : undefined));
+  const streamRawAdcEnabled = (status.stream_raw_adc ?? runtime.stream_raw_adc ?? (lastResultCommand === "set_raw_adc" ? lastResult.stream_raw_adc : undefined)) === true;
   const calibrationStatus = recordValue(status.calibration);
   const lastKnownIndicatorsRef = useRef<Record<string, unknown>>({});
   const lastKnownIndicatorsDeviceUidRef = useRef(deviceUid);
@@ -1962,6 +1963,7 @@ export function DeviceSettingsPage() {
   const [filterEnabled, setFilterEnabled] = useState(filter.enabled === true);
   const [filterMedian, setFilterMedian] = useState(numberValue(filter.median, 3));
   const [filterAlpha, setFilterAlpha] = useState(numberValue(filter.alpha, 0.25));
+  const [rawAdcEnabled, setRawAdcEnabled] = useState(streamRawAdcEnabled);
   const [logEnabled, setLogEnabled] = useState(logging.enabled !== false);
   const [logLevel, setLogLevel] = useState(stringValue(logging.level, "error"));
   const [logMode, setLogMode] = useState(stringValue(logging.mode, "standard"));
@@ -2067,6 +2069,10 @@ export function DeviceSettingsPage() {
     if (filter.median !== undefined) setFilterMedian(numberValue(filter.median, 3));
     if (filter.alpha !== undefined) setFilterAlpha(numberValue(filter.alpha, 0.25));
   }, [deviceUid, filter.alpha, filter.enabled, filter.median]);
+
+  useEffect(() => {
+    setRawAdcEnabled(streamRawAdcEnabled);
+  }, [deviceUid, streamRawAdcEnabled]);
 
   useEffect(() => {
     if (streamBuffer.enabled !== undefined) {
@@ -2351,6 +2357,13 @@ export function DeviceSettingsPage() {
       enabled: filterEnabled,
       median: filterMedian,
       alpha: filterAlpha,
+    });
+  }
+
+  async function applyRawAdc() {
+    await run(t("saveRawAdc"), {
+      command: "set_raw_adc",
+      enabled: rawAdcEnabled,
     });
   }
 
@@ -3098,6 +3111,26 @@ export function DeviceSettingsPage() {
                 disabled={isCommandBusy("set_filter") || !deviceUid || isControlUnavailable}
                 onClick={() => void applyFilter()}>
                 {isCommandBusy("set_filter") ? t("running") : t("saveFilter")}
+              </button>
+            </div>
+          </div>
+          <div className="settings-card">
+            <h4>{t("rawAdcDiagnostics")}</h4>
+            <p>{t("rawAdcDiagnosticsCopy")}</p>
+            <div className="field-grid">
+              <label className="switch-row">
+                <input type="checkbox" checked={rawAdcEnabled} onChange={(event) => setRawAdcEnabled(event.target.checked)} />
+                <span>{t("rawAdcEnabled")}</span>
+              </label>
+            </div>
+            <div className="metric-row">
+              <Metric label={t("rawAdcEnabled")} value={boolString(streamRawAdcEnabled)} />
+            </div>
+            <div className="actions compact">
+              <button className="button primary" type="button"
+                disabled={isCommandBusy("set_raw_adc") || !deviceUid || isControlUnavailable}
+                onClick={() => void applyRawAdc()}>
+                {isCommandBusy("set_raw_adc") ? t("running") : t("saveRawAdc")}
               </button>
             </div>
           </div>

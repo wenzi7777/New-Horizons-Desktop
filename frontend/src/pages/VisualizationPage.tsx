@@ -68,6 +68,7 @@ type MatrixView = {
   rows: number;
   cols: number;
   values: number[][];
+  rawValues: number[][] | null;
   points: DisplayPoint[];
   usesProfileSensors: boolean;
 };
@@ -480,6 +481,7 @@ function buildMatrixView(
       rows,
       cols,
       values: [],
+      rawValues: null,
       points: enabledSensors,
       usesProfileSensors: true,
     };
@@ -494,6 +496,18 @@ function buildMatrixView(
     }),
   );
 
+  const rawSource = item?.raw_adc;
+  const rawValues = Array.isArray(rawSource) && rawSource.length === source.length
+    ? Array.from({ length: rows }, (_, row) =>
+        Array.from({ length: cols }, (_, col) => {
+          const sourceRow = rowMirror ? rows - 1 - row : row;
+          const sourceCol = colMirror ? cols - 1 - col : col;
+          const sourceIndex = sourceRow * cols + sourceCol;
+          return asFiniteNumber(rawSource[sourceIndex], 0);
+        }),
+      )
+    : null;
+
   const points = values.flatMap((row, rowIndex) =>
     row.map((value, colIndex) => ({
       index: rowIndex * cols + colIndex,
@@ -504,7 +518,7 @@ function buildMatrixView(
     })),
   );
 
-  return { rows, cols, values, points, usesProfileSensors: false };
+  return { rows, cols, values, rawValues, points, usesProfileSensors: false };
 }
 
 function computeCop(points: DisplayPoint[], rows: number, cols: number) {
@@ -641,6 +655,8 @@ function PressureHeatmap2D({
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.font = `${Math.max(9, Math.min(12, cellWidth * 0.28))}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
+      const rawGrid = currentMatrix.rawValues;
+      const showRaw = showText && rawGrid !== null && cellHeight >= 30;
       for (let row = 0; row < currentMatrix.rows; row += 1) {
         for (let col = 0; col < currentMatrix.cols; col += 1) {
           const value = asFiniteNumber(currentMatrix.values[row]?.[col], 0);
@@ -652,7 +668,13 @@ function PressureHeatmap2D({
           context.fill();
           if (showText) {
             context.fillStyle = "#101317";
-            context.fillText(value.toFixed(1), x + cellWidth / 2, y + cellHeight / 2);
+            if (showRaw) {
+              const rawValue = asFiniteNumber(rawGrid[row]?.[col], 0);
+              context.fillText(value.toFixed(1), x + cellWidth / 2, y + cellHeight / 2 - cellHeight * 0.16);
+              context.fillText(`raw ${rawValue.toFixed(0)}`, x + cellWidth / 2, y + cellHeight / 2 + cellHeight * 0.2);
+            } else {
+              context.fillText(value.toFixed(1), x + cellWidth / 2, y + cellHeight / 2);
+            }
           }
         }
       }

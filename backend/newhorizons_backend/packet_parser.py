@@ -16,6 +16,7 @@ BATTERY_BYTES = 4
 FLAG_IMU = 0x01
 FLAG_BATTERY = 0x02
 FLAG_MAG = 0x04
+FLAG_RAWADC = 0x08
 
 
 class PacketParseError(ValueError):
@@ -30,9 +31,12 @@ def infer_sensor_count(flags: int, payload_len: int) -> int:
         matrix_bytes -= MAG_BYTES
     if flags & FLAG_BATTERY:
         matrix_bytes -= BATTERY_BYTES
-    if matrix_bytes < 0 or matrix_bytes % 4 != 0:
+    # When raw ADC streaming is on, the matrix region carries two parallel
+    # float arrays per sensor: the calibrated level and the raw reading.
+    bytes_per_sensor = 8 if flags & FLAG_RAWADC else 4
+    if matrix_bytes < 0 or matrix_bytes % bytes_per_sensor != 0:
         raise PacketParseError("invalid_payload_layout")
-    return matrix_bytes // 4
+    return matrix_bytes // bytes_per_sensor
 
 
 def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_uid: str | None = None) -> dict[str, Any]:
@@ -62,6 +66,14 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
 
     matrix = _round_list(struct.unpack("<" + ("f" * sensor_count), payload[HEADER_LEN:matrix_end])) if sensor_count else []
     offset = matrix_end
+
+    raw_adc = None
+    if flags & FLAG_RAWADC:
+        raw_end = offset + (sensor_count * 4)
+        if raw_end > expected_len:
+            raise PacketParseError("sensor_count_out_of_range")
+        raw_adc = _round_list(struct.unpack("<" + ("f" * sensor_count), payload[offset:raw_end])) if sensor_count else []
+        offset = raw_end
 
     imu_payload = None
     acc = None
@@ -108,6 +120,7 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
         "ts": float(timestamp_ms) / 1000.0,
         "sn": int(sensor_count),
         "p": matrix,
+        "raw_adc": raw_adc,
         "acc": acc,
         "gyro": gyro,
         "mag": mag,

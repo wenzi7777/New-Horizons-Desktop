@@ -58,6 +58,7 @@ export type VisualizationEntry = {
   dn: string;
   sn: number;
   p: number[];
+  raw_adc?: number[] | null;
   ts?: number;
   timestamp_ms?: number;
   received_at_ms?: number;

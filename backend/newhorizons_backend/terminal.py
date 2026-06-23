@@ -41,6 +41,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "set_indicators",
     "set_imu",
     "set_filter",
+    "set_raw_adc",
     "file_list",
     "file_read_begin",
     "file_read_chunk",

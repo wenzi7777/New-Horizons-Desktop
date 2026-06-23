@@ -2106,6 +2106,8 @@ class NewHorizonsService:
         gyro = payload.get("gyro") or imu.get("gyro") or [0, 0, 0]
         acc = payload.get("acc") or imu.get("acc") or [0, 0, 0]
         mag = payload.get("mag") or imu.get("mag") or [0, 0, 0]
+        raw_adc = payload.get("raw_adc")
+        include_raw = isinstance(raw_adc, list) and len(raw_adc) == len(pressures)
         timestamp = self._csv_timestamp_ms(payload, now)
         with path.open("a", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
@@ -2113,11 +2115,13 @@ class NewHorizonsService:
                 writer.writerow(
                     ["timestamp_ms"]
                     + ["P{}".format(index + 1) for index in range(len(pressures))]
+                    + (["RawADC_{}".format(index + 1) for index in range(len(pressures))] if include_raw else [])
                     + ["Mag_x", "Mag_y", "Mag_z", "Gyro_x", "Gyro_y", "Gyro_z", "Acc_x", "Acc_y", "Acc_z"]
                 )
             writer.writerow(
                 [timestamp]
                 + pressures
+                + (list(raw_adc) if include_raw else [])
                 + list(mag[:3])
                 + list(gyro[:3])
                 + list(acc[:3])
