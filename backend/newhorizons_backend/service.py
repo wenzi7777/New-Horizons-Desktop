@@ -35,9 +35,13 @@ class NewHorizonsService:
     COMMAND_TTL_MS = 15000
     BOOT_GRACE_SEC = 90.0
     ARDUINO_STREAM_STATUS_INTERVAL_SEC = 5.0
-    FINDME_DISCONNECT_GRACE_SEC = 15.0
-    STALE_DEVICE_CHECK_INTERVAL_SEC = 15
-    STALE_DEVICE_TIMEOUT_SEC = 30
+    # The gateway now debounces device liveness within ~16s (its control_stale_sec),
+    # so the desktop no longer needs long windows on top of it. The findme grace only
+    # rides out a single transient disconnected snapshot, and the watchdog is the
+    # backstop that clears gateway_connected once last_live_seen_at goes stale.
+    FINDME_DISCONNECT_GRACE_SEC = 5.0
+    STALE_DEVICE_CHECK_INTERVAL_SEC = 5
+    STALE_DEVICE_TIMEOUT_SEC = 12
     COMMAND_UNAVAILABLE_ERRORS = {
         "control_transport_not_started",
         "udp_control_not_started",
