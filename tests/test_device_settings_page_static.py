@@ -301,8 +301,37 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("if (!deviceUid || isDeviceOffline) return;", source)
         self.assertIn('disabled={isCommandBusy("status") || !deviceUid || isDeviceOffline}', source)
         self.assertIn('disabled={isCommandBusy("findme_discover") || !deviceUid || isDeviceOffline}', source)
-        self.assertIn('disabled={busyCommand === "storage_status" || !deviceUid || isDeviceOffline}', source)
+        self.assertIn('disabled={isCommandBusy("storage_status") || !deviceUid || isDeviceOffline}', source)
         self.assertIn('disabled={busyCommand === "calibration_status" || !deviceUid || isDeviceOffline}', source)
+
+    def test_device_group_settings_are_exposed_in_overview(self):
+        source = SETTINGS_PAGE.read_text()
+        api_source = (ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
+        i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("deviceCustomGroup", source)
+        self.assertIn("saveDeviceGroup", source)
+        self.assertIn("clearDeviceGroup", source)
+        self.assertIn("api.saveDeviceGroup(", source)
+        self.assertIn("deviceGroupSaved", i18n)
+        self.assertIn("deviceGroupCleared", i18n)
+        self.assertIn("saveDeviceGroup", api_source)
+
+    def test_device_normalization_tracks_reconnecting_and_live_seen_time(self):
+        source = DEVICE_LIB.read_text()
+        i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
+
+        self.assertIn('connectionState: "online" | "reconnecting" | "offline" | "booting"', source)
+        self.assertIn("isReconnecting: boolean", source)
+        self.assertIn("isControlUnavailable: boolean", source)
+        self.assertIn("const RECONNECTING_GRACE_MS = 15000;", source)
+        self.assertIn("device.last_live_seen_at", source)
+        self.assertIn('const connectionState = isBooting ? "booting"', source)
+        self.assertIn('? "reconnecting"', source)
+        self.assertIn('? "offline"', source)
+        self.assertIn("useState(0)", source)
+        self.assertIn("window.setInterval", source)
+        self.assertIn("reconnecting", i18n)
 
     def test_flash_tab_exposes_log_settings(self):
         source = SETTINGS_PAGE.read_text()

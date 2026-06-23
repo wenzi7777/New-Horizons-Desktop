@@ -1,18 +1,23 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { DeviceEntry } from "./api";
 import { valueToCsv } from "./valueFormat";
 import { useWsState } from "./wsClient";
 
 export type DeviceMode = "normal" | "maintenance" | "safe_maintenance" | "booting" | "offline" | string;
+export type DeviceConnectionState = "online" | "reconnecting" | "offline" | "booting";
 
 export type NormalizedDevice = {
   uid: string;
   name: string;
   nickname: string;
+  deviceGroup: string;
   displayName: string;
   mode: DeviceMode;
+  connectionState: "online" | "reconnecting" | "offline" | "booting";
+  isReconnecting: boolean;
   isOffline: boolean;
+  isControlUnavailable: boolean;
   firmwareVersion: string;
   protocol: string;
   hardwareModel: string;
@@ -53,6 +58,7 @@ const STATUS_SNAPSHOT_COMMANDS = new Set([
   "scan_health",
   "storage_status",
 ]);
+const RECONNECTING_GRACE_MS = 15000;
 
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -128,12 +134,21 @@ export function normalizeDevice(device: DeviceEntry): NormalizedDevice {
   const battery = objectValue(status.battery);
   const gatewayState = objectValue(device.gateway_state);
   const gatewayConnected = device.gateway_connected === true || gatewayState.connected === true;
-  const lastSeenAt = stringValue(device.last_seen_at ?? status.received_at ?? device.last_gateway_seen_at, "");
+  const eventSeenAt = stringValue(device.last_seen_at ?? status.received_at ?? device.last_gateway_seen_at, "");
+  const lastSeenAt = stringValue(device.last_live_seen_at ?? eventSeenAt, "");
   const isBooting = device.booting === true || status.booting === true;
-  const offline = Boolean(!isBooting && lastSeenAt && Date.now() - dateValue(lastSeenAt) > 45000 && !gatewayConnected);
-  const rawMode = stringValue(device.mode ?? status.mode ?? runtime.mode, gatewayConnected ? "normal" : "offline");
-  const mode = isBooting ? "booting" : offline ? "offline" : rawMode;
+  const isReconnecting = Boolean(
+    !isBooting
+      && !gatewayConnected
+      && eventSeenAt
+      && Date.now() - dateValue(eventSeenAt) <= RECONNECTING_GRACE_MS,
+  );
+  const offline = Boolean(!isBooting && !gatewayConnected && !isReconnecting);
+  const rawMode = stringValue(device.mode ?? status.mode ?? runtime.mode, "normal");
+  const mode = isBooting ? "booting" : rawMode;
+  const connectionState = isBooting ? "booting" : isReconnecting ? "reconnecting" : offline ? "offline" : "online";
   const nickname = stringValue(device.nickname, "");
+  const deviceGroup = stringValue(device.device_group, "");
   const name = stringValue(device.device_name ?? status.device_name ?? system.name, device.device_uid);
   const displayName = stringValue(device.display_name ?? nickname, name);
   const firmwareVersion = stringValue(system.firmware_version ?? runtime.firmware_version ?? status.firmware_version ?? device.firmware_version ?? systemSummary.firmware_version, "unknown");
@@ -153,9 +168,14 @@ export function normalizeDevice(device: DeviceEntry): NormalizedDevice {
     uid: device.device_uid,
     name,
     nickname,
+    deviceGroup,
     displayName,
     mode,
-    isOffline: !isBooting && (offline || (mode === "offline" && !gatewayConnected)),
+    connectionState,
+    isReconnecting,
+    // isOffline: !isBooting once reconnect grace expires and control is unavailable.
+    isOffline: connectionState === "offline",
+    isControlUnavailable: connectionState === "reconnecting" || connectionState === "offline",
     firmwareVersion,
     protocol,
     hardwareModel,
@@ -175,6 +195,16 @@ export function normalizeDevice(device: DeviceEntry): NormalizedDevice {
 export function useDevicesPolling(intervalMs = 1000) {
   void intervalMs;
   const { devices, errorMessage, requestDeviceSnapshot } = useWsState();
+  const [clockTick, setClockTick] = useState(0);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setClockTick((current) => current + 1);
+    }, 1000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -189,7 +219,10 @@ export function useDevicesPolling(intervalMs = 1000) {
     requestDeviceSnapshot();
   }, [requestDeviceSnapshot]);
 
-  const normalized = useMemo(() => devices.map(normalizeDevice), [devices]);
+  const normalized = useMemo(() => {
+    void clockTick;
+    return devices.map(normalizeDevice);
+  }, [clockTick, devices]);
   return { devices, normalized, errorMessage, refresh, boostPolling };
 }
 

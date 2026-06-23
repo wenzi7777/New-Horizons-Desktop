@@ -560,6 +560,11 @@ button:disabled {
   opacity: 0.72;
 }
 
+.device-card.reconnecting {
+  border-color: #c7a86b;
+  background: #fff8ed;
+}
+
 .device-main-link {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
@@ -656,11 +661,158 @@ button:disabled {
   background: #eeeeea;
 }
 
+.device-badge.reconnecting {
+  border-color: #d0b16f;
+  background: #fff6e8;
+  color: #8f5f00;
+}
+
 .device-card-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   padding-left: 70px;
+}
+
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.folder-preview-card {
+  display: grid;
+  gap: 14px;
+  min-height: 184px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 14px;
+  text-align: left;
+  color: inherit;
+}
+
+.folder-preview-card.online {
+  background: linear-gradient(180deg, #f3faf5 0%, var(--panel) 100%);
+}
+
+.folder-preview-card.offline {
+  background: linear-gradient(180deg, #f6f5f1 0%, var(--panel) 100%);
+}
+
+.folder-preview-card.custom {
+  background: linear-gradient(180deg, #f4f6fb 0%, var(--panel) 100%);
+}
+
+.folder-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.folder-preview-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.folder-preview-title strong {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+.folder-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.folder-device-chip {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-dim);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.folder-device-chip.offline {
+  opacity: 0.66;
+}
+
+.folder-device-chip.reconnecting {
+  border-color: #d0b16f;
+  color: #8f5f00;
+  background: #fff4df;
+}
+
+.folder-device-chip.maintenance {
+  border-color: #9aa8bd;
+  color: #49617e;
+}
+
+.folder-device-chip.booting {
+  border-color: #7aa9a0;
+  color: #3d756b;
+}
+
+.folder-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.folder-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 18, 28, 0.32);
+}
+
+.folder-overlay-panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 16px;
+  width: min(1120px, calc(100vw - 32px));
+  max-height: min(80vh, 920px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(250, 252, 255, 0.98);
+  padding: 20px;
+  box-shadow: 0 24px 80px rgba(17, 24, 39, 0.18);
+}
+
+.folder-overlay-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.folder-overlay-header h3,
+.folder-overlay-header p {
+  margin: 0;
+}
+
+.folder-overlay-grid {
+  align-items: start;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
 }
 
 .settings-shell {

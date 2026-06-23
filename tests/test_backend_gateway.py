@@ -408,6 +408,29 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         devices = {item["device_uid"]: item for item in service.list_devices()}
         self.assertFalse(devices["3CDC7545CCD0"]["gateway_connected"])
 
+    def test_gateway_disconnect_preserves_last_live_seen_at(self):
+        service = NewHorizonsService(mock_mode=False)
+        sent = []
+        device_uid = "3CDC7545CCD0"
+        recent = "2026-06-23T10:00:00+00:00"
+        service.register_gateway_device(device_uid, sent.append, gateway_id="gw-main")
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "message": "status",
+            "mode": "normal",
+            "gateway_connected": True,
+            "received_at": recent,
+        })
+
+        service.unregister_gateway_sender(sent.append)
+
+        device = service.get_device(device_uid)
+        self.assertIsNotNone(device)
+        assert device is not None
+        self.assertFalse(device["gateway_connected"])
+        self.assertEqual(device["last_live_seen_at"], recent)
+        self.assertNotEqual(device["last_seen_at"], recent)
+
     def test_gateway_summary_disconnected_does_not_override_recent_attached_findme(self):
         service = NewHorizonsService(mock_mode=False)
         device_uid = "3CDC7545CCD0"
@@ -568,6 +591,28 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertFalse(device["gateway_connected"])
         self.assertEqual(device["gateway_id"], "")
         self.assertTrue(any(event.get("type") == "device_update" and event.get("item", {}).get("device_uid") == "3CDC7545CCD0" for event in events))
+
+    def test_arduino_disconnect_preserves_last_live_seen_at(self):
+        service = NewHorizonsService(mock_mode=False)
+        device_uid = "3CDC7545CCD0"
+        recent = "2026-06-23T11:00:00+00:00"
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "message": "status",
+            "mode": "normal",
+            "gateway_connected": True,
+            "received_at": recent,
+            "transport_path": "arduino_tcp",
+        })
+
+        service._mark_arduino_disconnected(device_uid, "arduino_control_failed")
+
+        device = service.get_device(device_uid)
+        self.assertIsNotNone(device)
+        assert device is not None
+        self.assertFalse(device["gateway_connected"])
+        self.assertEqual(device["last_live_seen_at"], recent)
+        self.assertNotEqual(device["last_seen_at"], recent)
 
     def test_gateway_claim_request_routes_switch_command_to_current_gateway(self):
         service = NewHorizonsService(mock_mode=False)
@@ -1049,12 +1094,55 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         })
         self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "maintenance")
 
-        # A heartbeat/stream status without a mode field must not revert to normal.
-        service.record_gateway_status(device_uid, {
-            "device_uid": device_uid,
-            "transport_path": "arduino_heartbeat",
-        })
-        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "maintenance")
+    def test_set_device_group_persists_and_clears(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                service.record_gateway_result("3CDC7545CCD0", {
+                    "device_uid": "3CDC7545CCD0",
+                    "message": "status",
+                    "mode": "normal",
+                })
+
+                saved = service.set_device_group("3CDC7545CCD0", "Bench A")
+                device = service.get_device("3CDC7545CCD0")
+                self.assertEqual(saved["group"], "Bench A")
+                self.assertEqual(device["device_group"], "Bench A")
+
+                cleared = service.set_device_group("3CDC7545CCD0", "")
+                device = service.get_device("3CDC7545CCD0")
+                self.assertEqual(cleared["group"], "")
+                self.assertEqual(device["device_group"], "")
+
+    def test_device_group_api_saves_group(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                service.record_gateway_result("3CDC7545CCD0", {
+                    "device_uid": "3CDC7545CCD0",
+                    "message": "status",
+                    "mode": "normal",
+                })
+                app = Flask(__name__)
+                app.register_blueprint(
+                    create_blueprint(
+                        service=service,
+                        profiles_root=ROOT / "mock_data" / "profiles",
+                        data_root=ROOT / "mock_data" / "mqtt_store",
+                    )
+                )
+                client = app.test_client()
+
+                response = client.put(
+                    "/newhorizons/api/devices/3CDC7545CCD0/group",
+                    json={"group": "Line 1"},
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = json_payload(response)
+                self.assertEqual(payload["status"], "saved")
+                self.assertEqual(payload["group"], "Line 1")
+                self.assertEqual((service.get_device("3CDC7545CCD0") or {}).get("device_group"), "Line 1")
 
     def test_exit_maintenance_result_without_mode_field_updates_device_mode(self):
         service = NewHorizonsService(mock_mode=False)

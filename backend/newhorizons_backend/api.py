@@ -377,6 +377,17 @@ def create_blueprint(
             return json_response({"error": str(exc)}), 400
         return json_response(result)
 
+    @bp.put("/api/devices/<device_uid>/group")
+    @auth
+    @_require_roles("admin")
+    def device_group(device_uid: str) -> Response:
+        data = _request_json_data({})
+        try:
+            result = svc.set_device_group(device_uid, str(data.get("group") or ""))
+        except ValueError as exc:
+            return json_response({"error": str(exc)}), 400
+        return json_response(result)
+
     @bp.get("/api/visualization/latest")
     @auth
     @_require_roles("admin", "user")

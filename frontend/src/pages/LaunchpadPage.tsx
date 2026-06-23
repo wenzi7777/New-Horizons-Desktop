@@ -1,4 +1,6 @@
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { Folder, X } from "lucide-react";
 
 import { useI18n } from "../i18n";
 import { useDevicesPolling, type NormalizedDevice } from "../lib/device";
@@ -10,22 +12,131 @@ const GLOBAL_APPS = [
   { to: "/csv", icon: "CSV", titleKey: "csvExport" },
 ];
 
-function modeClass(device: NormalizedDevice) {
-  if (device.isOffline) return "offline";
+type LaunchpadFolder = {
+  id: string;
+  label: string;
+  devices: NormalizedDevice[];
+  tone: "online" | "offline" | "custom";
+};
+
+function deviceClassName(device: NormalizedDevice) {
+  if (device.connectionState === "reconnecting") return "reconnecting";
+  if (device.connectionState === "offline") return "offline";
   if (device.mode === "maintenance" || device.mode === "safe_maintenance") return "maintenance";
+  if (device.connectionState === "booting") return "booting";
   return "normal";
 }
 
-function batteryLabel(device: NormalizedDevice, t: (key: string, vars?: Record<string, string | number>) => string) {
+function deviceStateLabel(device: NormalizedDevice, t: (key: string) => string) {
+  if (device.connectionState === "reconnecting") return t("reconnecting");
+  if (device.connectionState === "offline") return t("offline");
+  return device.mode;
+}
+
+function batteryLabel(device: NormalizedDevice, t: (key: string) => string) {
   if (device.batteryState === "charging") return t("batteryChargingOrMissing");
   if (device.batteryState === "charge_done") return t("batteryChargeDone");
   if (device.batteryState === "not_charging") return t("batteryNotCharging");
   return "-";
 }
 
+function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) {
+  return (
+    <article key={device.uid} className={`device-card ${deviceClassName(device)}`}>
+      <Link className="device-main-link" to={`/device/${encodeURIComponent(device.uid)}/settings`}>
+        <div className="device-icon" aria-hidden="true">
+          NH
+        </div>
+        <div className="device-card-copy">
+          <div className="device-card-header">
+            <h3>{device.displayName}</h3>
+            <span className={`device-badge ${deviceClassName(device)}`}>
+              {deviceStateLabel(device, t)}
+            </span>
+          </div>
+          <div className="device-uid">{device.uid}</div>
+          <div className="device-meta-grid">
+            <span>{t("hardwareModel")}: {device.hardwareModel}</span>
+            <span>Firmware: {device.firmwareVersion}</span>
+            <span>Protocol: {device.protocol}</span>
+            <span>{t("battery")}: {batteryLabel(device, t)}</span>
+            <span>{t("transport")}: {device.transportMode}</span>
+            <span>{t("log")}: {device.logging}</span>
+            <span>{t("lastSeen")}: {device.lastSeen}</span>
+          </div>
+        </div>
+      </Link>
+      <div className="device-card-actions">
+        <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/settings`}>
+          {t("settingsApp")}
+        </Link>
+        <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/files`}>
+          {t("deviceFiles")}
+        </Link>
+        <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/commands`}>
+          {t("advancedCommands")}
+        </Link>
+        <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/wiki`}>
+          {t("deviceWiki")}
+        </Link>
+      </div>
+    </article>
+  );
+}
+
 export function LaunchpadPage() {
   const { t } = useI18n();
   const { normalized, errorMessage } = useDevicesPolling();
+  const [activeFolder, setActiveFolder] = useState<LaunchpadFolder | null>(null);
+
+  const folders = useMemo<LaunchpadFolder[]>(() => {
+    const online: NormalizedDevice[] = [];
+    const offline: NormalizedDevice[] = [];
+    const customGroups = new Map<string, NormalizedDevice[]>();
+
+    normalized.forEach((device) => {
+      if (device.connectionState === "online") {
+        online.push(device);
+      } else {
+        offline.push(device);
+      }
+      // device.device_group remains the backend payload source-of-truth for custom folders.
+      const customGroup = String(device.raw.device_group ?? device.deviceGroup ?? "");
+      if (customGroup) {
+        const current = customGroups.get(customGroup) ?? [];
+        current.push(device);
+        customGroups.set(customGroup, current);
+      }
+    });
+
+    const sortDevices = (items: NormalizedDevice[]) =>
+      items.slice().sort((left, right) => left.displayName.localeCompare(right.displayName));
+
+    return [
+      {
+        id: "default-online",
+        label: t("deviceGroupOnline"),
+        devices: sortDevices(online),
+        tone: "online",
+      },
+      {
+        id: "default-offline",
+        label: t("deviceGroupOffline"),
+        devices: sortDevices(offline),
+        tone: "offline",
+      },
+      ...Array.from(customGroups.entries())
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([label, devices]) => ({
+          id: `custom:${label}`,
+          label,
+          devices: sortDevices(devices),
+          tone: "custom" as const,
+        })),
+    ];
+  }, [normalized, t]);
+
+  const activeFolderSnapshot = activeFolder ? folders.find((folder) => folder.id === activeFolder.id) ?? activeFolder : null;
 
   return (
     <>
@@ -59,47 +170,29 @@ export function LaunchpadPage() {
             </div>
           </div>
         ) : null}
-        <div className="device-grid">
-          {normalized.map((device) => (
-            <article key={device.uid} className={`device-card ${modeClass(device)}`}>
-              <Link className="device-main-link" to={`/device/${encodeURIComponent(device.uid)}/settings`}>
-                <div className="device-icon" aria-hidden="true">
-                  NH
+        <div className="folder-grid">
+          {folders.map((folder) => (
+            <button
+              key={folder.id}
+              className={`folder-preview-card ${folder.tone}`}
+              type="button"
+              onClick={() => setActiveFolder(folder)}
+            >
+              <div className="folder-preview-header">
+                <div className="folder-preview-title">
+                  <Folder size={18} strokeWidth={1.8} />
+                  <strong>{folder.label}</strong>
                 </div>
-                <div className="device-card-copy">
-                  <div className="device-card-header">
-                    <h3>{device.displayName}</h3>
-                    <span className={`device-badge ${modeClass(device)}`}>
-                      {device.mode}
-                    </span>
-                  </div>
-                  <div className="device-uid">{device.uid}</div>
-                  <div className="device-meta-grid">
-                    <span>{t("hardwareModel")}: {device.hardwareModel}</span>
-                    <span>Firmware: {device.firmwareVersion}</span>
-                    <span>Protocol: {device.protocol}</span>
-                    <span>{t("battery")}: {batteryLabel(device, t)}</span>
-                    <span>{t("transport")}: {device.transportMode}</span>
-                    <span>{t("log")}: {device.logging}</span>
-                    <span>{t("lastSeen")}: {device.lastSeen}</span>
-                  </div>
-                </div>
-              </Link>
-              <div className="device-card-actions">
-                <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/settings`}>
-                  {t("settingsApp")}
-                </Link>
-                <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/files`}>
-                  {t("deviceFiles")}
-                </Link>
-                <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/commands`}>
-                  {t("advancedCommands")}
-                </Link>
-                <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/wiki`}>
-                  {t("deviceWiki")}
-                </Link>
+                <span>{folder.devices.length}</span>
               </div>
-            </article>
+              <div className="folder-preview-grid">
+                {folder.devices.slice(0, 4).map((device) => (
+                  <div key={device.uid} className={`folder-device-chip ${deviceClassName(device)}`}>
+                    <span>{device.displayName.slice(0, 2).toUpperCase()}</span>
+                  </div>
+                ))}
+              </div>
+            </button>
           ))}
         </div>
       </section>
@@ -117,6 +210,26 @@ export function LaunchpadPage() {
           ))}
         </div>
       </section>
+
+      {activeFolderSnapshot ? (
+        <div className="folder-overlay" role="dialog" aria-modal="true" aria-label={activeFolderSnapshot.label}>
+          <div className="folder-overlay-backdrop" onClick={() => setActiveFolder(null)} />
+          <div className="folder-overlay-panel">
+            <div className="folder-overlay-header">
+              <div>
+                <h3>{activeFolderSnapshot.label}</h3>
+                <p>{activeFolderSnapshot.devices.length} {t("discoveredDevices").toLowerCase()}</p>
+              </div>
+              <button className="button icon-button" type="button" aria-label={t("closeToast")} onClick={() => setActiveFolder(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="device-grid folder-overlay-grid">
+              {activeFolderSnapshot.devices.map((device) => renderDeviceCard(device, t))}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

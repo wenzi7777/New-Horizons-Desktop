@@ -73,6 +73,29 @@ class AppAuthStaticTest(unittest.TestCase):
         self.assertIn("deviceWiki", i18n_source)
         self.assertIn("navWiki", i18n_source)
 
+    def test_launchpad_groups_devices_into_default_and_custom_folders(self):
+        launchpad_source = LAUNCHPAD.read_text(encoding="utf-8")
+        api_source = API.read_text(encoding="utf-8")
+        i18n_source = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("device_group?: string", api_source)
+        self.assertIn("activeFolder", launchpad_source)
+        self.assertIn("deviceGroupOnline", launchpad_source)
+        self.assertIn("deviceGroupOffline", launchpad_source)
+        self.assertIn("folder-grid", launchpad_source)
+        self.assertIn("folder-preview-grid", launchpad_source)
+        self.assertIn("folder-overlay", launchpad_source)
+        self.assertIn("folder-preview-card", launchpad_source)
+        self.assertIn("device.device_group", launchpad_source)
+        self.assertIn("deviceGroupOnline", i18n_source)
+        self.assertIn("deviceGroupOffline", i18n_source)
+
+    def test_frontend_api_supports_saving_device_group(self):
+        api_source = API.read_text(encoding="utf-8")
+
+        self.assertIn("saveDeviceGroup", api_source)
+        self.assertIn("/devices/${encodeURIComponent(deviceUid)}/group", api_source)
+
 
 if __name__ == "__main__":
     unittest.main()

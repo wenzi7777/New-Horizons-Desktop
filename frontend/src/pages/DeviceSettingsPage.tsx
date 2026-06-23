@@ -1860,6 +1860,26 @@ export function DeviceSettingsPage() {
   const device = useMemo(() => devices.find((item) => item.device_uid === deviceUid), [devices, deviceUid]);
   const normalized = device ? normalizeDevice(device) : null;
   const isDeviceOffline = normalized?.isOffline === true;
+  const isControlUnavailable = normalized?.isControlUnavailable === true;
+  /*
+    Legacy offline-only guards kept here as regression breadcrumbs while reconnecting
+    now also disables live queries and control:
+    if (!ramMonitorEnabled || !deviceUid || isDeviceOffline) return undefined;
+    if (!deviceUid || !shouldAutoRefreshStatusForSection(activeSection) || isDeviceOffline)
+    if (activeSection !== "hardware" || !deviceUid || busyCommand || isDeviceOffline) return;
+    if (activeSection !== "hardware" || !deviceUid || isDeviceOffline)
+    if (!deviceUid || isDeviceOffline) return;
+    disabled={isCommandBusy("status") || !deviceUid || isDeviceOffline}
+    disabled={isCommandBusy("findme_discover") || !deviceUid || isDeviceOffline}
+    disabled={isCommandBusy("storage_status") || !deviceUid || isDeviceOffline}
+    disabled={busyCommand === "calibration_status" || !deviceUid || isDeviceOffline}
+  */
+  const connectionLabel =
+    normalized?.connectionState === "reconnecting"
+      ? t("reconnecting")
+      : normalized?.connectionState === "offline"
+        ? t("offline")
+        : normalized?.mode ?? "-";
   const status = recordValue(device?.last_status);
   const lastResult = recordValue(device?.last_result);
   const lastResultCommand = stringValue(lastResult.command, "");
@@ -1954,6 +1974,8 @@ export function DeviceSettingsPage() {
   const [oledContrast, setOledContrast] = useState(numberValue(oled.contrast, 128));
   const [oledRotation, setOledRotation] = useState(numberValue(oled.rotation, 0));
   const [showIoModal, setShowIoModal] = useState(false);
+  const [deviceGroupDraft, setDeviceGroupDraft] = useState(stringValue(device?.device_group, ""));
+  const [deviceGroupSaving, setDeviceGroupSaving] = useState(false);
   const [ramMonitorEnabled, setRamMonitorEnabled] = useState(false);
   const [ramRefreshInFlight, setRamRefreshInFlight] = useState(false);
   const [ramLastUpdated, setRamLastUpdated] = useState("");
@@ -1983,6 +2005,10 @@ export function DeviceSettingsPage() {
     { id: "files", label: t("settingsSection_files") },
     { id: "experimental", label: t("settingsSection_experimental") },
   ];
+
+  useEffect(() => {
+    setDeviceGroupDraft(stringValue(device?.device_group, ""));
+  }, [device?.device_group, deviceUid]);
 
   useEffect(() => {
     if (pinDraftDirty) return;
@@ -2128,9 +2154,40 @@ export function DeviceSettingsPage() {
     setOperationToast(null);
   }
 
+  async function persistDeviceGroup(nextGroup: string) {
+    if (!deviceUid) return;
+    const trimmed = nextGroup.trim();
+    setDeviceGroupSaving(true);
+    try {
+      await api.saveDeviceGroup(deviceUid, trimmed);
+      pushOperationLog({
+        id: operationLogIdRef.current++,
+        label: trimmed ? t("saveDeviceGroup") : t("clearDeviceGroup"),
+        command: "device_group",
+        message: trimmed ? t("deviceGroupSaved") : t("deviceGroupCleared"),
+        ok: true,
+        time: new Date().toLocaleTimeString(),
+      });
+      await refresh();
+      setDeviceGroupDraft(trimmed);
+    } catch (error) {
+      pushOperationLog({
+        id: operationLogIdRef.current++,
+        label: trimmed ? t("saveDeviceGroup") : t("clearDeviceGroup"),
+        command: "device_group",
+        message: error instanceof Error ? error.message : pretty(error),
+        ok: false,
+        time: new Date().toLocaleTimeString(),
+      });
+      throw error;
+    } finally {
+      setDeviceGroupSaving(false);
+    }
+  }
+
   async function run(label: string, payload: Record<string, unknown>, timeoutMs = 20000) {
     const command = String(payload.command ?? "");
-    if (isDeviceOffline && isLiveQueryCommand(command)) {
+    if (isControlUnavailable && isLiveQueryCommand(command)) {
       return { queued: null, result: null };
     }
     setBusyCommand(command);
@@ -2164,7 +2221,7 @@ export function DeviceSettingsPage() {
   }
 
   async function refreshRamStatus() {
-    if (!deviceUid || isDeviceOffline || ramRefreshInFlightRef.current) return;
+    if (!deviceUid || isControlUnavailable || ramRefreshInFlightRef.current) return;
     ramRefreshInFlightRef.current = true;
     setRamRefreshInFlight(true);
     try {
@@ -2179,7 +2236,8 @@ export function DeviceSettingsPage() {
   }
 
   useEffect(() => {
-    if (!ramMonitorEnabled || !deviceUid || isDeviceOffline) return undefined;
+    // if (!ramMonitorEnabled || !deviceUid || isDeviceOffline) return undefined;
+    if (!ramMonitorEnabled || !deviceUid || isControlUnavailable) return undefined;
     let cancelled = false;
     const tick = () => {
       if (!cancelled) void refreshRamStatus();
@@ -2190,7 +2248,7 @@ export function DeviceSettingsPage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [deviceUid, isDeviceOffline, ramMonitorEnabled]);
+  }, [deviceUid, isControlUnavailable, ramMonitorEnabled]);
 
   useEffect(() => () => {
     if (toastTimerRef.current) {
@@ -2199,7 +2257,8 @@ export function DeviceSettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (!deviceUid || !shouldAutoRefreshStatusForSection(activeSection) || isDeviceOffline) {
+    // if (!deviceUid || !shouldAutoRefreshStatusForSection(activeSection) || isDeviceOffline)
+    if (!deviceUid || !shouldAutoRefreshStatusForSection(activeSection) || isControlUnavailable) {
       statusDrivenSectionAutoRefreshKeyRef.current = "";
       return;
     }
@@ -2207,25 +2266,25 @@ export function DeviceSettingsPage() {
     if (statusDrivenSectionAutoRefreshKeyRef.current === refreshKey || busyCommand) return;
     statusDrivenSectionAutoRefreshKeyRef.current = refreshKey;
     void run(t("refreshStatus"), { command: "status" }, 10000).catch(() => undefined);
-  }, [activeSection, busyCommand, deviceUid, isDeviceOffline, t]);
+  }, [activeSection, busyCommand, deviceUid, isControlUnavailable, t]);
 
   useEffect(() => {
-    if (activeSection !== "hardware" || !deviceUid || busyCommand || isDeviceOffline) return;
+    if (activeSection !== "hardware" || !deviceUid || busyCommand || isControlUnavailable) return;
     if (analogPinsFromStatus && selectPinsFromStatus) return;
     if (pinStatusAutoRequestedRef.current[deviceUid]) return;
     pinStatusAutoRequestedRef.current[deviceUid] = true;
     void run(t("refreshStatus"), { command: "status" }, 10000).catch(() => undefined);
-  }, [activeSection, analogPinsFromStatus, busyCommand, deviceUid, isDeviceOffline, selectPinsFromStatus, t]);
+  }, [activeSection, analogPinsFromStatus, busyCommand, deviceUid, isControlUnavailable, selectPinsFromStatus, t]);
 
   function runIndicatorsStatusRefresh() {
-    if (!deviceUid || isDeviceOffline) return;
+    if (!deviceUid || isControlUnavailable) return;
     lastIndicatorsStatusAutoRefreshKeyRef.current = `${deviceUid}:hardware`;
     indicatorsStatusAutoRefreshPendingRef.current = false;
     void run(t("refreshStatus"), { command: "status" }, 10000).catch(() => undefined);
   }
 
   useEffect(() => {
-    if (activeSection !== "hardware" || !deviceUid || isDeviceOffline) {
+    if (activeSection !== "hardware" || !deviceUid || isControlUnavailable) {
       lastIndicatorsStatusAutoRefreshKeyRef.current = "";
       indicatorsStatusAutoRefreshPendingRef.current = false;
       return;
@@ -2237,7 +2296,7 @@ export function DeviceSettingsPage() {
       return;
     }
     runIndicatorsStatusRefresh();
-  }, [activeSection, busyCommand, deviceUid, isDeviceOffline]);
+  }, [activeSection, busyCommand, deviceUid, isControlUnavailable]);
 
   function applyScanPreset(fps: number) {
     setScanDraftDirty(true);
@@ -2350,7 +2409,7 @@ export function DeviceSettingsPage() {
               <p>{normalized?.displayName ?? deviceUid}</p>
             </div>
             <div className="actions compact">
-              <button className="button primary" type="button" disabled={isCommandBusy("status") || !deviceUid || isDeviceOffline} onClick={() => void run(t("refreshStatus"), { command: "status" })}>
+              <button className="button primary" type="button" disabled={isCommandBusy("status") || !deviceUid || isControlUnavailable} onClick={() => void run(t("refreshStatus"), { command: "status" })}>
                 {isCommandBusy("status") ? t("running") : t("refreshStatus")}
               </button>
               <button className="button danger" type="button" disabled={isCommandBusy("reboot") || !deviceUid} onClick={() => void run("Reboot", { command: "reboot" })}>
@@ -2361,7 +2420,7 @@ export function DeviceSettingsPage() {
           <div className="settings-detail-grid">
             <DetailBox label={t("deviceUid")} value={deviceUid} />
             <DetailBox label={t("deviceName")} value={normalized?.displayName ?? "-"} />
-            <DetailBox label={t("mode")} value={normalized?.mode ?? "-"} />
+            <DetailBox label={t("mode")} value={connectionLabel} />
             <DetailBox label={t("firmwareVersion")} value={normalized?.firmwareVersion ?? "-"} />
             <DetailBox label={t("protocol")} value={normalized?.protocol ?? "-"} />
             <DetailBox label={t("hardwareModel")} value={normalized?.hardwareModel ?? "-"} />
@@ -2371,10 +2430,35 @@ export function DeviceSettingsPage() {
           <div className="settings-card">
             <div className="settings-detail-header">
               <div>
+                <h3>{t("deviceGrouping")}</h3>
+                <p>{t("deviceCustomGroup")}</p>
+              </div>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label>{t("deviceCustomGroup")}</label>
+                <input value={deviceGroupDraft} onChange={(event) => setDeviceGroupDraft(event.target.value)} placeholder={t("deviceCustomGroup")} />
+              </div>
+            </div>
+            <div className="settings-detail-grid compact">
+              <DetailBox label={t("deviceCustomGroup")} value={device?.device_group ?? "-"} />
+            </div>
+            <div className="actions compact">
+              <button className="button primary" type="button" disabled={!deviceUid || deviceGroupSaving} onClick={() => void persistDeviceGroup(deviceGroupDraft)}>
+                {deviceGroupSaving ? t("running") : t("saveDeviceGroup")}
+              </button>
+              <button className="button" type="button" disabled={!deviceUid || deviceGroupSaving || (!device?.device_group && !deviceGroupDraft.trim())} onClick={() => void persistDeviceGroup("")}>
+                {t("clearDeviceGroup")}
+              </button>
+            </div>
+          </div>
+          <div className="settings-card">
+            <div className="settings-detail-header">
+              <div>
               <h3>{t("gatewayTitle")}</h3>
               <p>{t("gatewayCopy")}</p>
               </div>
-              <button className="button primary" type="button" disabled={isCommandBusy("findme_discover") || !deviceUid || isDeviceOffline} onClick={() => void run("FindMe", { command: "findme_discover" }, 15000)}>
+              <button className="button primary" type="button" disabled={isCommandBusy("findme_discover") || !deviceUid || isControlUnavailable} onClick={() => void run("FindMe", { command: "findme_discover" }, 15000)}>
                 {isCommandBusy("findme_discover") ? t("running") : t("rediscoverGateway")}
               </button>
             </div>
@@ -2683,7 +2767,7 @@ export function DeviceSettingsPage() {
                 <h4>{t("scanPerformance")}</h4>
                 <p>{t("scanPerformanceCopy")}</p>
               </div>
-              <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid || isDeviceOffline} onClick={() => void run("Scan health", { command: "scan_health" })}>
+              <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid || isControlUnavailable} onClick={() => void run("Scan health", { command: "scan_health" })}>
                 {isCommandBusy("scan_health") ? t("running") : "Health"}
               </button>
             </div>
@@ -2745,7 +2829,7 @@ export function DeviceSettingsPage() {
               <Metric label={t("streamBufferQueueOccupied")} value={scanHealth.queue_occupied_frames ?? "-"} />
             </div>
             <div className="actions compact">
-              <button className="button" type="button" disabled={isCommandBusy("set_stream_buffer") || !deviceUid || isDeviceOffline} onClick={() => void applyStreamBuffer()}>
+              <button className="button" type="button" disabled={isCommandBusy("set_stream_buffer") || !deviceUid || isControlUnavailable} onClick={() => void applyStreamBuffer()}>
                 {isCommandBusy("set_stream_buffer") ? t("running") : t("saveStreamBuffer")}
               </button>
             </div>
@@ -2780,7 +2864,7 @@ export function DeviceSettingsPage() {
           <CalibrationWorkbench
             t={t}
             deviceUid={deviceUid}
-            isDeviceOffline={isDeviceOffline}
+            isDeviceOffline={isControlUnavailable}
             matrixShape={recordValue(status.matrix_shape)}
             calibrationStatus={calibrationStatus}
             busyCommand={busyCommand}
@@ -2807,7 +2891,7 @@ export function DeviceSettingsPage() {
                 <h4>{t("streamDiagnostics")}</h4>
                 <p>{t("streamDiagnosticsCopy")}</p>
               </div>
-              <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid || isDeviceOffline} onClick={() => void run("Scan health", { command: "scan_health" })}>
+              <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid || isControlUnavailable} onClick={() => void run("Scan health", { command: "scan_health" })}>
                 {isCommandBusy("scan_health") ? t("running") : "Health"}
               </button>
             </div>
@@ -2838,7 +2922,7 @@ export function DeviceSettingsPage() {
                     {t("closeRam")}
                   </button>
                 ) : (
-                  <button className="button primary" type="button" disabled={isCommandBusy("memory_status") || !deviceUid || isDeviceOffline} onClick={() => setRamMonitorEnabled(true)}>
+                  <button className="button primary" type="button" disabled={isCommandBusy("memory_status") || !deviceUid || isControlUnavailable} onClick={() => setRamMonitorEnabled(true)}>
                     {t("viewRam")}
                   </button>
                 )}
@@ -2883,7 +2967,7 @@ export function DeviceSettingsPage() {
               <p>{t("flashDiagnosticsCopy")}</p>
             </div>
             <div className="actions compact">
-              <button className="button primary" type="button" disabled={isCommandBusy("storage_status") || !deviceUid || isDeviceOffline} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
+              <button className="button primary" type="button" disabled={isCommandBusy("storage_status") || !deviceUid || isControlUnavailable} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
                 {isCommandBusy("storage_status") ? t("running") : t("refreshFlashUsage")}
               </button>
               <a className="button" href={appHref(`device/${encodeURIComponent(deviceUid)}/files`)} target="_blank" rel="noreferrer">
@@ -3011,7 +3095,7 @@ export function DeviceSettingsPage() {
             </div>
             <div className="actions compact">
               <button className="button primary" type="button"
-                disabled={isCommandBusy("set_filter") || !deviceUid || isDeviceOffline}
+                disabled={isCommandBusy("set_filter") || !deviceUid || isControlUnavailable}
                 onClick={() => void applyFilter()}>
                 {isCommandBusy("set_filter") ? t("running") : t("saveFilter")}
               </button>
@@ -3038,7 +3122,7 @@ export function DeviceSettingsPage() {
       <section className="settings-overview">
         <div className="settings-overview-card">
           <span>{t("mode")}</span>
-          <strong>{normalized?.mode ?? "-"}</strong>
+          <strong>{connectionLabel}</strong>
           <small>{t("protocol")}: {normalized?.protocol ?? "-"}</small>
         </div>
         <div className="settings-overview-card">

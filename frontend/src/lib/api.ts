@@ -4,6 +4,7 @@ export type DeviceEntry = {
   device_uid: string;
   device_name?: string;
   nickname?: string;
+  device_group?: string;
   display_name?: string;
   channel?: string;
   mode?: "normal" | "maintenance" | "safe_maintenance" | string;
@@ -26,6 +27,7 @@ export type DeviceEntry = {
   last_gateway_seen_at?: string;
   gateway_state?: Record<string, unknown> | null;
   last_seen_at?: string;
+  last_live_seen_at?: string;
   last_heartbeat_at?: string;
   last_status?: Record<string, unknown> | null;
   last_result?: Record<string, unknown> | null;
@@ -386,6 +388,11 @@ export const api = {
     request<{ status: string; device_uid: string; nickname: string }>(`/devices/${encodeURIComponent(deviceUid)}/nickname`, {
       method: "PUT",
       body: { nickname },
+    }),
+  saveDeviceGroup: (deviceUid: string, group: string) =>
+    request<{ status: string; device_uid: string; group: string }>(`/devices/${encodeURIComponent(deviceUid)}/group`, {
+      method: "PUT",
+      body: { group },
     }),
   profiles: () => request<{ items: ProfileListEntry[] }>("/profiles"),
   profile: (name: string) => request<Record<string, unknown>>(`/profiles/${encodeURIComponent(name)}`),

@@ -144,7 +144,9 @@ class NewHorizonsService:
         configured_data_root = os.getenv("NEWHORIZONS_DATA_ROOT")
         self._data_root = Path(configured_data_root) if configured_data_root else default_data_root
         self._nicknames_path = self._data_root / "_newhorizons_device_nicknames.json"
+        self._device_groups_path = self._data_root / "_newhorizons_device_groups.json"
         self._nicknames = self._load_nicknames()
+        self._device_groups = self._load_device_groups()
         if self._mock_mode:
             self._seed_mock_state()
         if autostart:
@@ -478,6 +480,29 @@ class NewHorizonsService:
                 "nickname": nickname,
             }
 
+    def set_device_group(self, device_uid: str, group: str) -> dict[str, Any]:
+        device_uid = self._resolve_known_device_uid(device_uid)
+        group = str(group or "").strip()
+        if len(group) > 64:
+            raise ValueError("device_group_too_long")
+        event_item: dict[str, Any] | None = None
+        with self._lock:
+            if group:
+                self._device_groups[device_uid] = group
+            else:
+                self._device_groups.pop(device_uid, None)
+            self._save_device_groups()
+            if device_uid in self._devices:
+                self._devices[device_uid] = self._decorate_device_entry(self._devices[device_uid])
+                event_item = dict(self._devices[device_uid])
+        if event_item is not None:
+            self._emit_event({"type": "device_update", "item": event_item})
+        return {
+            "status": "saved",
+            "device_uid": device_uid,
+            "group": group,
+        }
+
     def publish_command(self, device_uid: str, payload: dict[str, Any]) -> dict[str, Any]:
         device_uid = self._resolve_known_device_uid(device_uid)
         payload = self._with_command_expiry(payload)
@@ -602,6 +627,7 @@ class NewHorizonsService:
                 "device_uid": device_uid,
                 "protocol": "NHO/Arduino/1",
                 "gateway_connected": False,
+                "live_seen": False,
                 "transport_path": "arduino_tcp",
                 "findme": {
                     "state": "disconnected",
@@ -1085,8 +1111,9 @@ class NewHorizonsService:
             mode = "booting"
         if mode:
             incoming["mode"] = mode
+        incoming["last_seen_at"] = seen_at
         if connected:
-            incoming["last_seen_at"] = seen_at
+            incoming["last_live_seen_at"] = seen_at
             incoming["last_kind"] = "gateway"
         elif existing and (existing.get("gateway_connected") is not False or existing.get("gateway_id") == gateway_id):
             incoming["last_kind"] = existing.get("last_kind") or "gateway"
@@ -2132,6 +2159,7 @@ class NewHorizonsService:
             "system_summary": system_summary,
             "scan_stopped": payload.get("scan_stopped"),
             "last_seen_at": received_at,
+            "last_live_seen_at": received_at if payload.get("live_seen", kind in ("status", "result", "parsed")) else None,
             "last_kind": kind,
             "last_status": self._latest_status.get(device_uid),
             "last_result": self._latest_result.get(device_uid),
@@ -2590,18 +2618,27 @@ class NewHorizonsService:
             result.pop("boot_target_mode", None)
             result.pop("boot_command", None)
         nickname = self._nicknames.get(str(result.get("device_uid") or ""), "")
+        device_group = self._device_groups.get(str(result.get("device_uid") or ""), "")
         device_name = str(result.get("device_name") or result.get("device_uid") or "")
         result["nickname"] = nickname
         result["display_name"] = nickname or device_name
+        result["device_group"] = device_group
         result["recording_enabled"] = str(result.get("device_uid") or "") in self._recording_enabled
         result["recording_error"] = self._recording_errors.get(str(result.get("device_uid") or ""), "")
         return result
 
     def _load_nicknames(self) -> dict[str, str]:
+        return self._load_string_map(self._nicknames_path)
+
+    def _load_device_groups(self) -> dict[str, str]:
+        return self._load_string_map(self._device_groups_path)
+
+    @staticmethod
+    def _load_string_map(path: Path) -> dict[str, str]:
         try:
-            if not self._nicknames_path.exists():
+            if not path.exists():
                 return {}
-            data = json.loads(self._nicknames_path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return {}
         if not isinstance(data, dict):
@@ -2613,8 +2650,15 @@ class NewHorizonsService:
         }
 
     def _save_nicknames(self) -> None:
-        self._nicknames_path.parent.mkdir(parents=True, exist_ok=True)
-        self._nicknames_path.write_text(json.dumps(dict(sorted(self._nicknames.items())), indent=2, sort_keys=True), encoding="utf-8")
+        self._save_string_map(self._nicknames_path, self._nicknames)
+
+    def _save_device_groups(self) -> None:
+        self._save_string_map(self._device_groups_path, self._device_groups)
+
+    @staticmethod
+    def _save_string_map(path: Path, values: dict[str, str]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(dict(sorted(values.items())), indent=2, sort_keys=True), encoding="utf-8")
 
     @staticmethod
     def _system_summary(device_uid: str, payload: dict[str, Any], received_at: str) -> dict[str, Any]:
