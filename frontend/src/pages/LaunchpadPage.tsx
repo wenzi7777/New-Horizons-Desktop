@@ -11,7 +11,7 @@ const GLOBAL_APPS = [
   { to: "/profiles", icon: "PF", titleKey: "profileEditor" },
   { to: "/csv", icon: "CSV", titleKey: "csvExport" },
 ];
-const FOLDER_PREVIEW_SLOTS = 4;
+const FOLDER_PREVIEW_MAX_ITEMS = 6;
 
 type LaunchpadFolder = {
   id: string;
@@ -26,6 +26,13 @@ function deviceClassName(device: NormalizedDevice) {
   if (device.mode === "maintenance" || device.mode === "safe_maintenance") return "maintenance";
   if (device.connectionState === "booting") return "booting";
   return "normal";
+}
+
+function statusDot(device: NormalizedDevice) {
+  if (device.connectionState === "booting") return "status-dot booting";
+  if (device.connectionState === "reconnecting") return "status-dot reconnecting";
+  if (device.connectionState === "offline") return "status-dot offline";
+  return "status-dot online";
 }
 
 function deviceStateLabel(device: NormalizedDevice, t: (key: string) => string) {
@@ -53,13 +60,6 @@ function renderDeviceCode(uid: string) {
       <span>{suffix.slice(2, 4)}</span>
     </span>
   );
-}
-
-function folderPreviewCaption(devices: NormalizedDevice[]) {
-  if (devices.length === 0) return "";
-  if (devices.length === 1) return devices[0].displayName;
-  const visible = devices.slice(0, 2).map((device) => device.displayName);
-  return devices.length > 2 ? `${visible.join(" · ")} · +${devices.length - 2}` : visible.join(" · ");
 }
 
 function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) {
@@ -194,7 +194,7 @@ export function LaunchpadPage() {
           {folders.map((folder) => (
             <button
               key={folder.id}
-              className={`folder-preview-card ${folder.tone}${folder.devices.length === 0 ? " is-empty" : ""}`}
+              className={`folder-preview-card ${folder.tone}`}
               type="button"
               disabled={folder.devices.length === 0}
               onClick={() => setActiveFolder(folder)}
@@ -208,20 +208,20 @@ export function LaunchpadPage() {
               </div>
               {folder.devices.length > 0 ? (
                 <>
-                  <div className="folder-preview-grid">
-                    {Array.from({ length: FOLDER_PREVIEW_SLOTS }).map((_, index) => {
-                      const device = folder.devices[index];
-                      if (!device) {
-                        return <div key={`${folder.id}-placeholder-${index}`} className="folder-device-chip placeholder" aria-hidden="true" />;
-                      }
-                      return (
-                        <div key={device.uid} className={`folder-device-chip ${deviceClassName(device)}`}>
-                          {renderDeviceCode(device.uid)}
-                        </div>
-                      );
-                    })}
+                  <div className="folder-preview-devices">
+                    {folder.devices.slice(0, FOLDER_PREVIEW_MAX_ITEMS).map((device) => (
+                      <div key={device.uid} className={`folder-device-item ${deviceClassName(device)}`}>
+                        <span className={statusDot(device)} />
+                        <span className="folder-device-name">{device.displayName}</span>
+                        <span className="folder-device-mode">{device.mode}</span>
+                      </div>
+                    ))}
+                    {folder.devices.length > FOLDER_PREVIEW_MAX_ITEMS ? (
+                      <div className="folder-device-overflow">
+                        <span>+{folder.devices.length - FOLDER_PREVIEW_MAX_ITEMS} more</span>
+                      </div>
+                    ) : null}
                   </div>
-                  <p className="folder-preview-caption">{folderPreviewCaption(folder.devices)}</p>
                 </>
               ) : (
                 <div className="folder-preview-empty" aria-hidden="true">

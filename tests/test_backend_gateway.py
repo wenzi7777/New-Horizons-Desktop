@@ -1258,6 +1258,108 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal",
                          "gateway_status with mode='normal' must be accepted after exit_maintenance")
 
+    def _seed_gateway_connected_device(self, service, device_uid, gateway_id, transport_path="gateway"):
+        """Seed a gateway-relayed device that the frontend regards as connected."""
+        service.record_gateway_summary(gateway_id, {
+            "gateway_name": "test-gw",
+            "gateway_id": gateway_id,
+            "enabled": True,
+            "version": "v0.2.2",
+            "state": {
+                "devices": [{
+                    "device_uid": device_uid,
+                    "device_name": "New Horizons OS-" + device_uid,
+                    "mode": "normal",
+                    "connected": True,
+                    "findme_state": "attached",
+                }],
+                "denied_devices": [],
+                "claims": [],
+            },
+        })
+        device = service.get_device(device_uid)
+        self.assertIsNotNone(device)
+        self.assertTrue(device.get("gateway_connected"))
+        self.assertTrue((device.get("gateway_state") or {}).get("connected"))
+        # Stale check keys off received_at/last_seen_at; override the transport_path so
+        # the gateway_status snapshot entry is treated as a live (non-snapshot) device.
+        with service._lock:
+            entry = service._devices.get(device_uid)
+            entry["transport_path"] = transport_path
+            service._devices[device_uid] = entry
+
+    def test_stale_gateway_device_marked_offline(self):
+        service = NewHorizonsService(mock_mode=False)
+        with service._lock:
+            service._stopped = False  # stale check only runs while the service is started
+        device_uid = "3CDC7545CCD0"
+        gateway_id = "gw-stale-1"
+        self._seed_gateway_connected_device(service, device_uid, gateway_id)
+
+        events = []
+        service.add_event_listener(events.append)
+
+        # Push the presence timestamp past STALE_DEVICE_TIMEOUT_SEC (30s).
+        stale = (datetime.now(timezone.utc).timestamp() - 40)
+        stale_iso = datetime.fromtimestamp(stale, tz=timezone.utc).isoformat()
+        with service._lock:
+            entry = service._devices.get(device_uid)
+            entry["last_seen_at"] = stale_iso
+            entry["received_at"] = stale_iso
+            service._devices[device_uid] = entry
+
+        service._check_stale_devices()
+
+        device = service.get_device(device_uid)
+        self.assertFalse(device.get("gateway_connected"),
+                         "top-level gateway_connected must be cleared once stale")
+        self.assertFalse((device.get("gateway_state") or {}).get("connected"),
+                         "embedded gateway_state.connected must be cleared too, else "
+                         "the frontend's gatewayState.connected check overrides it")
+        self.assertTrue(any(e.get("type") == "device_update" for e in events),
+                        "a device_update event must be emitted when a device goes stale")
+
+    def test_fresh_gateway_device_not_marked_offline(self):
+        service = NewHorizonsService(mock_mode=False)
+        with service._lock:
+            service._stopped = False
+        device_uid = "3CDC7545CCD0"
+        gateway_id = "gw-fresh-1"
+        self._seed_gateway_connected_device(service, device_uid, gateway_id)
+
+        events = []
+        service.add_event_listener(events.append)
+
+        service._check_stale_devices()
+
+        device = service.get_device(device_uid)
+        self.assertTrue(device.get("gateway_connected"))
+        self.assertTrue((device.get("gateway_state") or {}).get("connected"))
+        self.assertFalse(any(e.get("type") == "device_update" for e in events))
+
+    def test_stop_prevents_stale_rescheduling(self):
+        service = NewHorizonsService(mock_mode=False)
+        with service._lock:
+            service._stopped = False
+            service._stale_timer = None  # simulate a just-fired timer in stop() ordering
+        self.assertFalse(service._stopped)
+        service.stop()  # flips _stopped=True; _schedule_stale_check must refuse to arm
+        self.assertTrue(service._stopped)
+        service._schedule_stale_check()
+        self.assertIsNone(service._stale_timer,
+                          "after stop(), no new timer must be armed")
+
+        # And _check_stale_devices must bail out without touching state or emitting.
+        device_uid = "3CDC7545CCD0"
+        self._seed_gateway_connected_device(service, device_uid, "gw-post-stop")
+        events = []
+        service.add_event_listener(events.append)
+        service._check_stale_devices()
+        device = service.get_device(device_uid)
+        self.assertTrue(device.get("gateway_connected"),
+                        "post-stop stale check must not mark devices offline")
+        self.assertFalse(any(e.get("type") == "device_update" for e in events))
+
 
 if __name__ == "__main__":
     unittest.main()

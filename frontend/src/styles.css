@@ -701,8 +701,7 @@ button:disabled {
 
 .folder-preview-card {
   display: grid;
-  gap: 12px;
-  min-height: 204px;
+  gap: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -728,11 +727,6 @@ button:disabled {
   background: #f4f7fb;
 }
 
-.folder-preview-card.is-empty {
-  min-height: 132px;
-  gap: 10px;
-}
-
 .folder-preview-card:not(:disabled) {
   cursor: pointer;
 }
@@ -751,6 +745,7 @@ button:disabled {
 .folder-preview-card:disabled {
   cursor: default;
   box-shadow: none;
+  opacity: 0.55;
 }
 
 .folder-preview-header {
@@ -787,63 +782,99 @@ button:disabled {
   font-weight: 700;
 }
 
-.folder-preview-grid {
+.folder-preview-devices {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  min-height: 124px;
+  grid-template-columns: 1fr;
+  gap: 4px;
 }
 
-.folder-device-chip {
+.folder-device-item {
   display: grid;
-  place-items: center;
-  aspect-ratio: 1;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.84);
-  color: var(--text-dim);
-  font-size: 15px;
-  font-weight: 700;
+  min-width: 0;
 }
 
-.folder-device-chip .device-code-mark {
-  font-size: 14px;
-}
-
-.folder-device-chip.placeholder {
-  border-style: dashed;
-  background: rgba(255, 255, 255, 0.34);
-  color: transparent;
-}
-
-.folder-device-chip.offline {
+.folder-device-item.offline {
   opacity: 0.66;
 }
 
-.folder-device-chip.reconnecting {
+.folder-device-item.reconnecting {
   border-color: #d0b16f;
-  color: #8f5f00;
   background: #fff4df;
 }
 
-.folder-device-chip.maintenance {
+.folder-device-item.maintenance {
   border-color: #9aa8bd;
-  color: #49617e;
+  background: #eef3fb;
 }
 
-.folder-device-chip.booting {
+.folder-device-item.booting {
   border-color: #7aa9a0;
-  color: #3d756b;
+  background: #eef8f5;
 }
 
-.folder-preview-caption {
-  margin: 0;
-  min-height: 18px;
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.online {
+  background: #2f7150;
+}
+
+.status-dot.offline {
+  background: #9ca3af;
+}
+
+.status-dot.reconnecting {
+  background: #d97706;
+}
+
+.status-dot.booting {
+  background: #3d756b;
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.folder-device-name {
   overflow: hidden;
-  color: var(--text-dim);
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+}
+
+.folder-device-mode {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+
+.folder-device-overflow {
+  padding: 6px 8px;
+  text-align: center;
   font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 600;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.4);
 }
 
 .folder-preview-empty {
@@ -4455,10 +4486,6 @@ button:disabled {
   .folder-preview-card {
     min-height: 168px;
     padding: 12px;
-  }
-
-  .folder-preview-card.is-empty {
-    min-height: 116px;
   }
 
   .folder-overlay {

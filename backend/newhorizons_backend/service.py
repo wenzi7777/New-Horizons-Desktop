@@ -36,6 +36,8 @@ class NewHorizonsService:
     BOOT_GRACE_SEC = 90.0
     ARDUINO_STREAM_STATUS_INTERVAL_SEC = 5.0
     FINDME_DISCONNECT_GRACE_SEC = 15.0
+    STALE_DEVICE_CHECK_INTERVAL_SEC = 15
+    STALE_DEVICE_TIMEOUT_SEC = 30
     COMMAND_UNAVAILABLE_ERRORS = {
         "control_transport_not_started",
         "udp_control_not_started",
@@ -138,6 +140,8 @@ class NewHorizonsService:
         self._gateways: dict[str, dict[str, Any]] = {}
         self._gateway_claims: dict[str, dict[str, Any]] = {}
         self._boot_transitions: dict[str, dict[str, Any]] = {}
+        self._stale_timer: threading.Timer | None = None
+        self._stopped = True
         self._profiles_root = Path(os.getenv("NEWHORIZONS_PROFILES_DIR", ""))
         project_root = Path(__file__).resolve().parents[2]
         default_data_root = project_root / "mock_data" / "mqtt_store" if self._mock_mode else project_root / "data" / "mqtt_store"
@@ -179,6 +183,7 @@ class NewHorizonsService:
                     )
                     self._discovery.start()
                 self._transport_error = ""
+                self._stopped = False
             except Exception as exc:
                 if self._discovery is not None:
                     self._discovery.stop()
@@ -187,17 +192,75 @@ class NewHorizonsService:
                 self._discovery = None
                 self._udp_ingest = None
                 self._transport_error = str(exc)
+        self._schedule_stale_check()
 
     def stop(self) -> None:
         with self._lock:
+            self._stopped = True
+            stale_timer = self._stale_timer
+            self._stale_timer = None
             udp_ingest = self._udp_ingest
             discovery = self._discovery
             self._udp_ingest = None
             self._discovery = None
+        if stale_timer is not None:
+            stale_timer.cancel()
         if discovery is not None:
             discovery.stop()
         if udp_ingest is not None:
             udp_ingest.stop()
+
+    def _schedule_stale_check(self) -> None:
+        with self._lock:
+            if self._stopped or self._stale_timer is not None:
+                return
+            timer = threading.Timer(self.STALE_DEVICE_CHECK_INTERVAL_SEC, self._check_stale_devices)
+            timer.daemon = True
+            self._stale_timer = timer
+        timer.start()
+
+    def _check_stale_devices(self) -> None:
+        now = time.time()
+        events: list[dict[str, Any]] = []
+        with self._lock:
+            # Clear our reference to the timer that just fired so _schedule_stale_check
+            # can arm the next one; stop() may have flipped _stopped concurrently.
+            self._stale_timer = None
+            if self._stopped:
+                return
+            for uid in list(self._devices.keys()):
+                entry = self._devices.get(uid)
+                if entry is None:
+                    continue
+                if entry.get("gateway_connected") is not True:
+                    continue
+                transport_path = str(entry.get("transport_path") or "")
+                if transport_path == "gateway_status":
+                    continue
+                received_at = str(entry.get("received_at") or entry.get("last_seen_at") or "")
+                if not received_at:
+                    continue
+                parsed = self._parse_iso_datetime(received_at)
+                if parsed is None:
+                    continue
+                if now - parsed.timestamp() <= self.STALE_DEVICE_TIMEOUT_SEC:
+                    continue
+                entry["gateway_connected"] = False
+                # Keep the embedded gateway_state in sync so the frontend's
+                # `gatewayState.connected === true` check (device.ts) does not
+                # override the top-level flag we just cleared — otherwise a
+                # gateway-relayed device would never appear offline.
+                gateway_state = entry.get("gateway_state")
+                if isinstance(gateway_state, dict):
+                    gateway_state = dict(gateway_state)
+                    gateway_state["connected"] = False
+                    entry["gateway_state"] = gateway_state
+                event_item = self._decorate_device_entry(entry)
+                self._devices[uid] = entry
+                events.append({"type": "device_update", "item": event_item})
+        for event in events:
+            self._emit_event(event)
+        self._schedule_stale_check()
 
     def health(self) -> dict[str, Any]:
         with self._lock:
