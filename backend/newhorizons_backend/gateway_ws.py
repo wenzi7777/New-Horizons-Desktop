@@ -34,7 +34,7 @@ def latest_gateway_version() -> str:
             return version
     except Exception:
         pass
-    return "v0.3.0"
+    return "v0.3.1"
 
 
 def _token_from_request() -> str:
