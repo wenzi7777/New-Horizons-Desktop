@@ -1969,7 +1969,8 @@ export function DeviceSettingsPage() {
   const [logMode, setLogMode] = useState(stringValue(logging.mode, "standard"));
   const [externalLedMode, setExternalLedMode] = useState(stringValue(externalLed.mode, "off"));
   const [brightness, setBrightness] = useState(externalLedBrightnessValue(externalLed.brightness));
-  const [externalPreset, setExternalPreset] = useState(stringValue(externalLed.preset, "stream_health"));
+  const [externalPreset, setExternalPreset] = useState(stringValue(externalLed.preset, "system_status"));
+  const [externalColor, setExternalColor] = useState(stringValue(externalLed.color, "teal"));
   const [oledMode, setOledMode] = useState(stringValue(oled.mode, "off"));
   const [oledPage, setOledPage] = useState(stringValue(oled.page, "live_status"));
   const [oledUpdateHz, setOledUpdateHz] = useState(numberValue(oled.update_hz, 1));
@@ -2123,8 +2124,10 @@ export function DeviceSettingsPage() {
     if (nextExternalMode) setExternalLedMode(nextExternalMode);
     const nextPreset = stringValue(externalLed.preset, "");
     if (nextPreset) setExternalPreset(nextPreset);
+    const nextColor = stringValue(externalLed.color, "");
+    if (nextColor) setExternalColor(nextColor);
     if (externalLed.brightness !== undefined) setBrightness(externalLedBrightnessValue(externalLed.brightness));
-  }, [externalLed.brightness, externalLed.mode, externalLed.preset]);
+  }, [externalLed.brightness, externalLed.mode, externalLed.preset, externalLed.color]);
 
   useEffect(() => {
     const nextOledMode = stringValue(oled.mode, "");
@@ -2542,11 +2545,14 @@ export function DeviceSettingsPage() {
                   <div className="field">
                     <label>{t("externalLedPreset")}</label>
                     <select value={externalPreset} onChange={(event) => setExternalPreset(event.target.value)}>
-                      <option value="stream_health">{t("indicatorPreset_stream_health")}</option>
-                      <option value="pressure_activity">{t("indicatorPreset_pressure_activity")}</option>
-                      <option value="recording_focus">{t("indicatorPreset_recording_focus")}</option>
-                      <option value="calibration_focus">{t("indicatorPreset_calibration_focus")}</option>
+                      <option value="system_status">{t("indicatorPreset_system_status")}</option>
+                      <option value="connectivity">{t("indicatorPreset_connectivity")}</option>
+                      <option value="pressure_meter">{t("indicatorPreset_pressure_meter")}</option>
+                      <option value="stream_heartbeat">{t("indicatorPreset_stream_heartbeat")}</option>
+                      <option value="calibration_auto">{t("indicatorPreset_calibration_auto")}</option>
+                      <option value="solid_marker">{t("indicatorPreset_solid_marker")}</option>
                       <option value="identify">{t("indicatorPreset_identify")}</option>
+                      <option value="off">{t("indicatorPreset_off")}</option>
                     </select>
                   </div>
                   <div className="field">
@@ -2559,6 +2565,20 @@ export function DeviceSettingsPage() {
                       ))}
                     </select>
                   </div>
+                  {externalPreset === "solid_marker" ? (
+                    <div className="field">
+                      <label>{t("externalLedColor")}</label>
+                      <select value={externalColor} onChange={(event) => setExternalColor(event.target.value)}>
+                        <option value="teal">{t("indicatorColor_teal")}</option>
+                        <option value="green">{t("indicatorColor_green")}</option>
+                        <option value="blue">{t("indicatorColor_blue")}</option>
+                        <option value="purple">{t("indicatorColor_purple")}</option>
+                        <option value="amber">{t("indicatorColor_amber")}</option>
+                        <option value="red">{t("indicatorColor_red")}</option>
+                        <option value="white">{t("indicatorColor_white")}</option>
+                      </select>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="metric-row">
                   <Metric label={t("externalLedPin")} value={externalLed.pin ?? "-"} />
@@ -2569,7 +2589,7 @@ export function DeviceSettingsPage() {
                   <Metric label={t("externalLedLastError")} value={externalLed.last_error ?? "-"} />
                 </div>
                 <div className="actions">
-                  <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveExternalLed"), { command: "set_indicators", external_led: { mode: externalLedMode, preset: externalPreset, brightness } })}>
+                  <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveExternalLed"), { command: "set_indicators", external_led: { mode: externalLedMode, preset: externalPreset, brightness, color: externalColor } })}>
                     {isCommandBusy("set_indicators") ? t("running") : t("saveExternalLed")}
                   </button>
                   <button className="button" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("testExternalLed"), { command: "set_indicators", external_led: { mode: "enabled", preset: "identify", brightness } })}>
