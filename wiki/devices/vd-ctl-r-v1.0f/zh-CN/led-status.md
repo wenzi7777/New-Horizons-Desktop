@@ -61,4 +61,35 @@
 
 ## 外部 LED 灯带
 
-外部 WS2812B 灯带（3 像素，GPIO 12）独立运行，可通过 `set_indicators` 命令设置为 `off`、`on` 或 `auto` 模式。在 `auto` 模式下，`stream_health` 预设使用相同的 Online / Warning / Error 颜色语义反映 UDP 流健康状态。
+外部 WS2812B 灯带（3 像素，GPIO 12）与板载 SK6812 状态灯独立工作。它通过 `set_indicators.external_led` 配置，模式只有 `off` / `enabled`。
+
+| 字段 | 默认值 | 选项 / 范围 | 说明 |
+|------|--------|-------------|------|
+| `mode` | `"off"` | `off`, `enabled` | 彻底关闭灯带，或让所选预设运行 |
+| `preset` | `"system_status"` | `system_status`, `connectivity`, `pressure_meter`, `stream_heartbeat`, `calibration_auto`, `solid_marker`, `identify`, `off` | 选择灯带行为 |
+| `color` | `"teal"` | `teal`, `green`, `blue`, `purple`, `amber`, `red`, `white` | `solid_marker` 使用的标记颜色 |
+| `brightness` | `0.35` | `0.0`–`1.0` | 灯带全局亮度 |
+
+### 预设参考
+
+| 预设 | 行为 | 说明 |
+|------|------|------|
+| `system_status` | 3 个像素作为一个整体状态灯工作。`Error` / `OtaError` / `RamDanger` 使用红色双闪脉冲，`Maintenance` / `SafeMode` 使用橙色脉冲，`WifiSetup` / `WifiConnecting` / `FindMePending` / `ChargeDone` / `ChargingOrMissing` 则使用对应调色板颜色常亮。 | `Online` 默认为绿色常亮；如果最近出现 UDP 发送失败或扫描超限，会暂时切换为 Warning 黄橙色。 |
+| `connectivity` | 像素 0 显示 Wi-Fi 状态，像素 1 显示网关连接，像素 2 显示实时串流活动。 | Wi-Fi 忙碌显示 Warning，未连接显示 Error；串流像素只有在已连到网关但当前空闲时才显示 Warning。 |
+| `pressure_meter` | 按当前归一化压力点亮 0–3 个像素。 | 点亮部分会从 Online 绿色逐步过渡到 Error 红色。 |
+| `stream_heartbeat` | 最近有帧发送时短暂显示青色心跳。 | 串流空闲时完全熄灭。 |
+| `calibration_auto` | 仅在自动校准进行中缓慢橙色脉冲。 | 校准停止后熄灭。 |
+| `solid_marker` | 3 个像素全部保持所选 `color` 的纯色常亮。 | 可选颜色为 `teal`, `green`, `blue`, `purple`, `amber`, `red`, `white`。 |
+| `identify` | 3 个像素依次显示白色追逐效果。 | 既可作为常驻预设，也可被一次性 identify/test 触发使用。 |
+| `off` | 灯带保持熄灭。 | 即使 `mode` 仍为 `enabled`，该预设也会被保存在配置中。 |
+
+### 高优先级覆盖
+
+- 软关机休眠时，灯带会被强制关闭，直到主板再次唤醒。
+- 电源切换动画优先于当前预设：关机时播放白色步进/淡出，唤醒时播放青色填充交接。
+- 一次性 `identify` 触发会暂时覆盖当前预设，追逐动画结束后再回到原始预设。
+
+### 设计说明
+
+- 严重错误和维护警告被刻意集中在 `system_status` 中，其他预设各自只承担单一职责。
+- 板载 SK6812 状态灯仍会作为后备继续显示核心错误，因此板载 LED 与外部灯带是分离的两套状态界面。

@@ -1601,7 +1601,8 @@ class NewHorizonsService:
                 if isinstance(payload.get("oled"), dict):
                     oled.update(payload.get("oled") or {})
                 external.setdefault("mode", "off")
-                external.setdefault("preset", "stream_health")
+                external.setdefault("preset", "system_status")
+                external.setdefault("color", "teal")
                 external.setdefault("brightness", 0.35)
                 external.setdefault("last_show_ms", 0)
                 external.setdefault("last_error", "")
@@ -1629,7 +1630,7 @@ class NewHorizonsService:
                 status["indicators"] = {
                     "external_led": {
                         **external,
-                        "active_preset": external.get("preset", "stream_health") if external.get("mode") == "enabled" and profile.get("supports_external_led") else "off",
+                        "active_preset": external.get("preset", "system_status") if external.get("mode") == "enabled" and profile.get("supports_external_led") else "off",
                     },
                     "oled": {
                         **oled,
@@ -2906,7 +2907,8 @@ class NewHorizonsService:
         indicators = {
             "external_led": {
                 "mode": "off",
-                "preset": "stream_health",
+                "preset": "system_status",
+                "color": "teal",
                 "brightness": 0.35,
                 "last_show_ms": 0,
                 "last_error": "",

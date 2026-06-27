@@ -48,15 +48,18 @@ v1.0.F 主板包含 BMI270 加速度计 + 陀螺仪。`imu.enabled` 标志控制
 
 | 参数 | 默认值 | 选项 | 说明 |
 |-----------|---------|---------|-------------|
-| `mode` | `"off"` | `off`、`on`、`auto` | LED 灯带运行模式 |
-| `preset` | `"stream_health"` | `stream_health` | `auto` 模式下的视觉预设 |
+| `mode` | `"off"` | `off`, `enabled` | LED 灯带运行模式 |
+| `preset` | `"system_status"` | `system_status`, `connectivity`, `pressure_meter`, `stream_heartbeat`, `calibration_auto`, `solid_marker`, `identify`, `off` | 灯带启用时运行的视觉预设 |
+| `color` | `"teal"` | `teal`, `green`, `blue`, `purple`, `amber`, `red`, `white` | `solid_marker` 使用的标记颜色 |
 | `brightness` | 0.35 | 0.0–1.0 | 灯带亮度 |
+
+完整预设行为请参见 `led-status.md`。该灯带是连接在 GPIO 12 上的 3 像素 WS2812B。
 
 ```json
 {
   "command": "set_indicators",
   "protocol": "NHO/Arduino/1",
-  "external_led": {"mode": "auto", "preset": "stream_health", "brightness": 0.35}
+  "external_led": {"mode": "enabled", "preset": "system_status", "color": "teal", "brightness": 0.35}
 }
 ```
 

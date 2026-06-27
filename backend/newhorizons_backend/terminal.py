@@ -213,7 +213,7 @@ def terminal_help_items() -> list[dict[str, str]]:
         {
             "command": "set-indicators",
             "description": "Configure supported indicator hardware. Brightness expects decimal values such as 0.10, 0.35, 0.50, or 1.00.",
-            "example": "set-indicators --external-led-mode enabled --preset stream_health --brightness 0.35 --oled-mode auto --oled-page live_status",
+            "example": "set-indicators --external-led-mode enabled --preset solid_marker --external-led-color teal --brightness 0.35 --oled-mode auto --oled-page live_status",
         },
         {
             "command": "set-imu",
@@ -461,6 +461,8 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
             external["mode"] = mode
         if "preset" in parsed:
             external["preset"] = parsed["preset"]
+        if "external_led_color" in parsed:
+            external["color"] = parsed["external_led_color"]
         if "brightness" in parsed:
             external["brightness"] = float(parsed["brightness"])
         if "oled_mode" in parsed:

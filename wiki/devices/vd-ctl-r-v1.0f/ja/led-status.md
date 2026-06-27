@@ -61,4 +61,35 @@
 
 ## 外部 LED ストリップ
 
-外部 WS2812B ストリップ（3 ピクセル、GPIO 12）は独立して動作し、`set_indicators` コマンドでモード（`off`、`on`、`auto`）を設定できます。`auto` モードでは `stream_health` プリセットが UDP ストリームの健全性を Online / Warning / Error の色で表現します。
+外部 WS2812B ストリップ（3 ピクセル、GPIO 12）はオンボード SK6812 ステータス LED とは独立して動作します。設定は `set_indicators.external_led` で行い、モードは `off` / `enabled` のみです。
+
+| 項目 | デフォルト | オプション / 範囲 | 説明 |
+|------|-----------|-------------------|------|
+| `mode` | `"off"` | `off`, `enabled` | ストリップを消灯するか、選択したプリセットを動かします |
+| `preset` | `"system_status"` | `system_status`, `connectivity`, `pressure_meter`, `stream_heartbeat`, `calibration_auto`, `solid_marker`, `identify`, `off` | ストリップの表示動作を選びます |
+| `color` | `"teal"` | `teal`, `green`, `blue`, `purple`, `amber`, `red`, `white` | `solid_marker` で使うマーカー色です |
+| `brightness` | `0.35` | `0.0`–`1.0` | ストリップ全体の輝度です |
+
+### プリセット一覧
+
+| プリセット | 動作 | 補足 |
+|-----------|------|------|
+| `system_status` | 3 ピクセル全体を 1 つの状態灯として使います。`Error` / `OtaError` / `RamDanger` は赤の 2 連パルス、`Maintenance` / `SafeMode` はオレンジのパルス、`WifiSetup` / `WifiConnecting` / `FindMePending` / `ChargeDone` / `ChargingOrMissing` は対応するパレット色で点灯します。 | `Online` は通常は緑の常灯ですが、直近の UDP 送信失敗やスキャンオーバーランがある間だけ Warning の黄橙に切り替わります。 |
+| `connectivity` | ピクセル 0 が Wi-Fi 状態、ピクセル 1 がゲートウェイ接続、ピクセル 2 がストリーム活動を示します。 | Wi-Fi 接続中は Warning、未接続は Error、ストリーム側はゲートウェイ接続済みでアイドル時のみ Warning になります。 |
+| `pressure_meter` | 現在の正規化圧力に応じて 0〜3 ピクセルが点灯します。 | 点灯部分は Online の緑から Error の赤へ段階的に変化します。 |
+| `stream_heartbeat` | 最近フレーム送信があったときだけシアンのハートビートを短く出します。 | ストリームが止まっている間は消灯します。 |
+| `calibration_auto` | 自動キャリブレーション中だけオレンジのゆっくりしたパルスを出します。 | キャリブレーションが止まると消灯します。 |
+| `solid_marker` | 選択した `color` で 3 ピクセルすべてを常灯させます。 | 色は `teal`, `green`, `blue`, `purple`, `amber`, `red`, `white` です。 |
+| `identify` | 3 ピクセルを白で追いかけるチェイス表示です。 | 固定プリセットとしても、一回だけの identify/test 表示としても使われます。 |
+| `off` | ストリップを常に消灯します。 | `mode` が `enabled` のままでもこのプリセットは保持されます。 |
+
+### 優先度の高い上書き
+
+- ソフトオフ中はストリップが強制的に消灯し、復帰するまで戻りません。
+- 電源遷移アニメーションはプリセットより優先されます。シャットダウン時は白のステップ/フェード、ウェイク時はシアンのフィル表示です。
+- 一回だけの `identify` トリガーは現在のプリセットを一時的に上書きし、終了後に元のプリセットへ戻ります。
+
+### 設計メモ
+
+- 深刻なエラーやメンテナンス警告は `system_status` に集約し、その他のプリセットは役割を分離しています。
+- オンボード SK6812 ステータス LED はフォールバックとして引き続き主要エラーを表示するため、基板 LED と外部ストリップは別々の役割です。

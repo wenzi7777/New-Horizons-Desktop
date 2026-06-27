@@ -48,15 +48,18 @@ The v1.0.F board includes a BMI270 accelerometer + gyroscope. The `imu.enabled` 
 
 | Parameter | Default | Options | Description |
 |-----------|---------|---------|-------------|
-| `mode` | `"off"` | `off`, `on`, `auto` | LED strip operating mode |
-| `preset` | `"stream_health"` | `stream_health` | Visual preset in `auto` mode |
+| `mode` | `"off"` | `off`, `enabled` | LED strip operating mode |
+| `preset` | `"system_status"` | `system_status`, `connectivity`, `pressure_meter`, `stream_heartbeat`, `calibration_auto`, `solid_marker`, `identify`, `off` | Visual preset to run while the strip is enabled |
+| `color` | `"teal"` | `teal`, `green`, `blue`, `purple`, `amber`, `red`, `white` | Marker color used by `solid_marker` |
 | `brightness` | 0.35 | 0.0–1.0 | Strip brightness |
+
+See `led-status.md` for the full preset behavior reference. The strip is a 3-pixel WS2812B chain on GPIO 12.
 
 ```json
 {
   "command": "set_indicators",
   "protocol": "NHO/Arduino/1",
-  "external_led": {"mode": "auto", "preset": "stream_health", "brightness": 0.35}
+  "external_led": {"mode": "enabled", "preset": "system_status", "color": "teal", "brightness": 0.35}
 }
 ```
 

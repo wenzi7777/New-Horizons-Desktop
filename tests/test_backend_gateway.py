@@ -1047,6 +1047,24 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(result["message"], "stream_buffer_updated")
         self.assertEqual(result["stream_buffer"]["mode"], "extended")
 
+    def test_mock_set_indicators_defaults_external_led_preset_and_color(self):
+        service = NewHorizonsService(mock_mode=True)
+        device_uid = "NH-MOCK-001"
+
+        queued = service.publish_command(
+            device_uid,
+            {"command": "set_indicators", "external_led": {"mode": "enabled"}, "request_id": "req-indicators"},
+        )
+        devices = {item["device_uid"]: item for item in service.list_devices()}
+        latest = devices[device_uid]
+        external_led = latest["last_status"]["indicators"]["external_led"]
+
+        self.assertEqual(queued["status"], "queued")
+        self.assertEqual(external_led["mode"], "enabled")
+        self.assertEqual(external_led["preset"], "system_status")
+        self.assertEqual(external_led["color"], "teal")
+        self.assertEqual(external_led["active_preset"], "system_status")
+
     def test_mock_set_log_updates_logging_runtime(self):
         service = NewHorizonsService(mock_mode=True)
         device_uid = "NH-MOCK-002"

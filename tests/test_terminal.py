@@ -211,30 +211,62 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertEqual(compiled["payload"]["command"], "power_set_state")
         self.assertEqual(compiled["payload"]["state"], "normal")
 
-    def test_set_indicators_compiles_external_led_and_oled_modes(self):
+    def test_set_indicators_compiles_external_led_color_and_oled_modes(self):
         compiled = compile_terminal_command(
-            "set-indicators --external-led-mode enabled --preset stream_health --brightness 0.35 "
+            "set-indicators --external-led-mode enabled --preset solid_marker --external-led-color teal --brightness 0.35 "
             "--oled-mode auto --oled-page live_status --oled-update-hz 1 --oled-contrast 128"
         )
         payload = validate_device_command_payload(compiled["payload"])
 
         self.assertEqual(payload["command"], "set_indicators")
         self.assertEqual(payload["external_led"]["mode"], "enabled")
-        self.assertEqual(payload["external_led"]["preset"], "stream_health")
+        self.assertEqual(payload["external_led"]["preset"], "solid_marker")
+        self.assertEqual(payload["external_led"]["color"], "teal")
         self.assertEqual(payload["oled"]["mode"], "auto")
         self.assertEqual(payload["oled"]["page"], "live_status")
 
-        identify = compile_terminal_command("set-indicators --external-led-mode enabled --preset identify")
-        identify_payload = validate_device_command_payload(identify["payload"])
-        self.assertEqual(identify_payload["external_led"]["preset"], "identify")
+        system_status = compile_terminal_command("set-indicators --external-led-mode enabled --preset system_status")
+        system_status_payload = validate_device_command_payload(system_status["payload"])
+        self.assertEqual(system_status_payload["external_led"]["preset"], "system_status")
 
     def test_set_indicators_terminal_help_and_prompt_call_out_decimal_brightness(self):
         item = next(entry for entry in terminal_help_items() if entry["command"] == "set-indicators")
         source = TERMINAL_PAGE.read_text(encoding="utf-8")
 
         self.assertIn("0.10", item["description"])
+        self.assertIn("--preset solid_marker", item["example"])
+        self.assertIn("--external-led-color teal", item["example"])
         self.assertIn("--brightness 0.35", item["example"])
         self.assertIn('placeholder: "0.10, 0.20, 0.35, 0.50, 1.00"', source)
+
+    def test_terminal_page_uses_v011_external_led_presets_and_color_picker(self):
+        source = TERMINAL_PAGE.read_text(encoding="utf-8")
+
+        self.assertIn('key: "external-led-color"', source)
+        self.assertIn('labelKey: "externalLedColor"', source)
+        for label_key in (
+            "indicatorPreset_system_status",
+            "indicatorPreset_connectivity",
+            "indicatorPreset_pressure_meter",
+            "indicatorPreset_stream_heartbeat",
+            "indicatorPreset_calibration_auto",
+            "indicatorPreset_solid_marker",
+            "indicatorPreset_identify",
+            "indicatorPreset_off",
+            "indicatorColor_teal",
+            "indicatorColor_green",
+            "indicatorColor_blue",
+            "indicatorColor_purple",
+            "indicatorColor_amber",
+            "indicatorColor_red",
+            "indicatorColor_white",
+        ):
+            with self.subTest(label_key=label_key):
+                self.assertIn(label_key, source)
+        self.assertNotIn("indicatorPreset_stream_health", source)
+        self.assertNotIn("indicatorPreset_pressure_activity", source)
+        self.assertNotIn("indicatorPreset_recording_focus", source)
+        self.assertNotIn("indicatorPreset_calibration_focus", source)
 
     def test_terminal_uses_board_capability_profile_for_gcu_overview_and_command_availability(self):
         source = TERMINAL_PAGE.read_text(encoding="utf-8")

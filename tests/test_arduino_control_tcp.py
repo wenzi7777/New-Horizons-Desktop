@@ -373,7 +373,7 @@ class ArduinoControlTcpTest(unittest.TestCase):
             {
                 "command": "set_indicators",
                 "request_id": "req-indicators",
-                "external_led": {"mode": "enabled", "preset": "stream_health", "brightness": 0.4},
+                "external_led": {"mode": "enabled", "preset": "system_status", "color": "teal", "brightness": 0.4},
                 "oled": {"mode": "auto", "page": "live_status", "update_hz": 1, "contrast": 128},
             },
             {
@@ -384,7 +384,8 @@ class ArduinoControlTcpTest(unittest.TestCase):
                     "indicators": {
                         "external_led": {
                             "mode": "enabled",
-                            "preset": "stream_health",
+                            "preset": "system_status",
+                            "color": "teal",
                             "brightness": 0.4,
                             "count": 3,
                             "pin": 12,
@@ -409,6 +410,8 @@ class ArduinoControlTcpTest(unittest.TestCase):
 
         device = service.get_device("3CDC7545CCD0")
         self.assertEqual(device["last_status"]["indicators"]["external_led"]["mode"], "enabled")
+        self.assertEqual(device["last_status"]["indicators"]["external_led"]["preset"], "system_status")
+        self.assertEqual(device["last_status"]["indicators"]["external_led"]["color"], "teal")
         self.assertEqual(device["last_status"]["indicators"]["external_led"]["count"], 3)
         self.assertEqual(device["last_status"]["indicators"]["external_led"]["pin"], 12)
         self.assertEqual(device["last_status"]["indicators"]["external_led"]["initialized"], True)
@@ -496,7 +499,8 @@ class ArduinoControlTcpTest(unittest.TestCase):
                     "indicators": {
                         "external_led": {
                             "mode": "enabled",
-                            "preset": "stream_health",
+                            "preset": "system_status",
+                            "color": "teal",
                             "brightness": 0.35,
                             "count": 3,
                             "pin": 12,
@@ -520,6 +524,8 @@ class ArduinoControlTcpTest(unittest.TestCase):
 
         device = service.get_device("3CDC7545CCD0")
         self.assertEqual(device["last_status"]["transport_path"], "arduino_heartbeat")
+        self.assertEqual(device["last_status"]["indicators"]["external_led"]["preset"], "system_status")
+        self.assertEqual(device["last_status"]["indicators"]["external_led"]["color"], "teal")
         self.assertEqual(device["last_status"]["indicators"]["external_led"]["pin"], 12)
         self.assertEqual(device["last_status"]["indicators"]["external_led"]["count"], 3)
         self.assertEqual(device["last_status"]["indicators"]["external_led"]["initialized"], True)
