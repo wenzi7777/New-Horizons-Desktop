@@ -228,6 +228,7 @@ const PRESSURE_CAL_PRESETS: Record<string, number[]> = {
   standard: [5, 10, 20, 35, 45],
   detailed: [5, 10, 20, 30, 40, 45],
   fine:     [5, 10, 15, 20, 25, 30, 38, 45],
+  experiment: [4.5, 6, 8, 11, 14, 18, 23, 28, 34, 40],
 };
 const PRESSURE_MAX_KPA = 45;
 // 無加壓狀態下氣壓本就約 3.5 kPa（tare/0 點基準）。低於此值的校準點不可達。
