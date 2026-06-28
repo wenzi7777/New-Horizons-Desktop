@@ -79,6 +79,7 @@ class NewHorizonsService:
         "set_indicators",
         "set_imu",
         "set_filter",
+        "set_raw_adc",
         "calibration_status",
         "calibration_enable",
         "calibration_disable",

@@ -624,6 +624,18 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(queued["transport"], "gateway_wss")
         self.assertEqual(sent[-1]["payload"]["command"], "calibration_capture_tare")
 
+    def test_set_raw_adc_allowed_in_normal_mode(self):
+        service = NewHorizonsService(mock_mode=False)
+        sent = []
+        device_uid = "3CDC7545CCD0"
+        service.register_gateway_device(device_uid, sent.append)
+        service.record_gateway_result(device_uid, {"device_uid": device_uid, "message": "status", "mode": "normal"})
+
+        queued = service.publish_command(device_uid, {"command": "set_raw_adc", "enabled": True, "request_id": "req-raw-adc"})
+
+        self.assertEqual(queued["transport"], "gateway_wss")
+        self.assertEqual(sent[-1]["payload"]["command"], "set_raw_adc")
+
     def test_reboot_command_is_plain_arduino_command_without_boot_transition(self):
         service = NewHorizonsService(mock_mode=False)
         sent = []
