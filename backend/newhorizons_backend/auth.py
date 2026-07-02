@@ -26,7 +26,7 @@ class AuthUser:
 class AuthManager:
     DEFAULT_USERS: Final[dict[str, dict[str, object]]] = {
         "admin": {"role": "admin", "passwords": ("admin", "uoacnlab2026")},
-        "user": {"role": "user", "passwords": ("nedo", "uoacnlab2026")},
+        "user": {"role": "user", "passwords": ("9227f4f37950df", "uoacnlab2026")},
     }
 
     def __init__(self, db_path: Path) -> None:
