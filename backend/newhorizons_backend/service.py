@@ -1507,6 +1507,11 @@ class NewHorizonsService:
                 if payload.get("send_every_n_frames") is not None:
                     scan_timing["send_every_n_frames"] = int(payload.get("send_every_n_frames"))
                 runtime["scan_timing"] = scan_timing
+                # IMU sample rate mirrors the matrix scan rate, matching real firmware behavior.
+                imu = dict(runtime.get("imu") or {})
+                imu["sample_rate_hz"] = scan_timing.get("target_fps", 60)
+                runtime["imu"] = imu
+                status["imu"] = imu
             elif command == "set_stream_buffer":
                 enabled = bool(payload.get("enabled", True))
                 mode = str(payload.get("mode") or "standard")
@@ -1563,6 +1568,7 @@ class NewHorizonsService:
                         "runtime_enabled": enabled,
                         "state": "ready" if enabled else "disabled",
                         "last_error": "",
+                        "sample_rate_hz": runtime.get("scan_timing", {}).get("target_fps", 60),
                     }
                 )
                 runtime["imu"] = imu
@@ -3030,6 +3036,7 @@ class NewHorizonsService:
                     "last_error": "",
                     "heap_before": 0,
                     "heap_after": 0,
+                    "sample_rate_hz": 60,
                 },
                 "indicators": indicators,
             },
@@ -3040,6 +3047,7 @@ class NewHorizonsService:
                 "last_error": "",
                 "heap_before": 0,
                 "heap_after": 0,
+                "sample_rate_hz": 60,
             },
             "wifi": {
                 "ssid": "Lab-Mock",

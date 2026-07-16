@@ -2878,6 +2878,7 @@ export function DeviceSettingsPage() {
               <Metric label={t("imuLastReadUs")} value={imu.last_read_duration_us ?? "-"} />
               <Metric label={t("imuLastError")} value={imu.last_error ?? "-"} small />
             </div>
+            <p className="service-muted">{t("imuSampleRateFollowsScan")}</p>
             <div className="control-row">
               <label className="switch-row">
                 <input type="checkbox" checked={imuEnabled} onChange={(event) => setImuEnabled(event.target.checked)} />
