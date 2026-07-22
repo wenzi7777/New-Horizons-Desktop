@@ -2172,6 +2172,9 @@ class NewHorizonsService:
 
     @staticmethod
     def _csv_timestamp_ms(payload: dict[str, Any], fallback: datetime) -> int:
+        device_epoch_ms = payload.get("device_epoch_ms")
+        if isinstance(device_epoch_ms, int):
+            return device_epoch_ms
         received_at = payload.get("received_at")
         if isinstance(received_at, str) and received_at.strip():
             text = received_at.strip()

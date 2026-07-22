@@ -7,9 +7,12 @@ from typing import Any
 HEADER_LEN = 20
 HEADER_PREFIX_STRUCT = struct.Struct("<HBB")
 HEADER_TAIL_STRUCT = struct.Struct("<IIH")
+HEADER_LEN_V4 = 24
+HEADER_TAIL_STRUCT_V4 = struct.Struct("<IQH")
 MAGIC = 0xA55A
 PACKET_VERSION = 2
 ARDUINO_PACKET_VERSION = 3
+ARDUINO_PACKET_VERSION_V4 = 4
 IMU_BYTES = 7 * 4
 MAG_BYTES = 3 * 4
 BATTERY_BYTES = 4
@@ -17,6 +20,7 @@ FLAG_IMU = 0x01
 FLAG_BATTERY = 0x02
 FLAG_MAG = 0x04
 FLAG_RAWADC = 0x08
+FLAG_EPOCH_VALID = 0x10
 
 
 class PacketParseError(ValueError):
@@ -46,25 +50,37 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
     magic, version, flags = HEADER_PREFIX_STRUCT.unpack_from(payload, 0)
     if magic != MAGIC:
         raise PacketParseError("invalid_magic")
-    if version not in {PACKET_VERSION, ARDUINO_PACKET_VERSION}:
+    if version not in {PACKET_VERSION, ARDUINO_PACKET_VERSION, ARDUINO_PACKET_VERSION_V4}:
         raise PacketParseError("unsupported_version")
     packet_device_uid = payload[4:10].hex().upper()
     if len(packet_device_uid) != 12:
         raise PacketParseError("invalid_device_uid")
-    frame_id, timestamp_ms, payload_len = HEADER_TAIL_STRUCT.unpack_from(payload, 10)
 
-    expected_len = HEADER_LEN + payload_len
+    epoch_ms: int | None = None
+    if version == ARDUINO_PACKET_VERSION_V4:
+        if len(payload) < HEADER_LEN_V4:
+            raise PacketParseError("packet_too_short")
+        header_len = HEADER_LEN_V4
+        frame_id, raw_timestamp, payload_len = HEADER_TAIL_STRUCT_V4.unpack_from(payload, 10)
+        if flags & FLAG_EPOCH_VALID:
+            epoch_ms = int(raw_timestamp)
+        timestamp_ms = raw_timestamp
+    else:
+        header_len = HEADER_LEN
+        frame_id, timestamp_ms, payload_len = HEADER_TAIL_STRUCT.unpack_from(payload, 10)
+
+    expected_len = header_len + payload_len
     if len(payload) < expected_len:
         raise PacketParseError("truncated_payload")
 
     if sensor_count is None:
         sensor_count = infer_sensor_count(flags, payload_len)
 
-    matrix_end = HEADER_LEN + (sensor_count * 4)
+    matrix_end = header_len + (sensor_count * 4)
     if matrix_end > expected_len:
         raise PacketParseError("sensor_count_out_of_range")
 
-    matrix = _round_list(struct.unpack("<" + ("f" * sensor_count), payload[HEADER_LEN:matrix_end])) if sensor_count else []
+    matrix = _round_list(struct.unpack("<" + ("f" * sensor_count), payload[header_len:matrix_end])) if sensor_count else []
     offset = matrix_end
 
     raw_adc = None
@@ -108,8 +124,8 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
         }
 
     dn = device_uid or packet_device_uid
-    return {
-        "protocol": "NHO/Arduino/1" if version == ARDUINO_PACKET_VERSION else "NewHorizons/Binary/2",
+    result = {
+        "protocol": "NHO/Arduino/1" if version in (ARDUINO_PACKET_VERSION, ARDUINO_PACKET_VERSION_V4) else "NewHorizons/Binary/2",
         "dn": dn,
         "device_uid": dn,
         "device_id": dn,
@@ -128,6 +144,9 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
         "battery": battery_payload,
         "flags": int(flags),
     }
+    if epoch_ms is not None:
+        result["device_epoch_ms"] = epoch_ms
+    return result
 
 
 def _round_list(values: Any) -> list[float]:
