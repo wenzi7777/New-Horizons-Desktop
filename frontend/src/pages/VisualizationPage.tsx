@@ -10,7 +10,7 @@ import { useWsState } from "../lib/wsClient";
 
 const COP_OFFSET = 250;
 const VIEW_STORAGE_KEY = "newhorizons.visualization.views.v1";
-const DEFAULT_RANGE = { min: 300, max: 1000 };
+const DEFAULT_RANGE = { min: 300, max: 3150 };
 const SURFACE_INTERPOLATION_STEPS = 3;
 const VISUAL_SURFACE_MAX_INTERPOLATED_POINTS = 1800;
 const kVisualizationStaleMs = 1500;

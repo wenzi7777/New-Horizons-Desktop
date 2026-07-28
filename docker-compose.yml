@@ -12,8 +12,5 @@ services:
     ports:
       - "5051:5051"
     volumes:
-      - newhorizons_data:/data
+      - ./data:/data
     restart: unless-stopped
-
-volumes:
-  newhorizons_data:
