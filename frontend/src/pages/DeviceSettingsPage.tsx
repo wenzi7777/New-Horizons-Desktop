@@ -20,10 +20,12 @@ import { BoardIoModal } from "./TerminalPage";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { TriangleAlert } from "lucide-react";
 
-// Spike-validated (firmware/spikes/README.md's "Direct Stability Mode"
-// candidate: raw ADC off + 24fps ran clean at 0% loss over ESP-NOW), not an
-// arbitrary UI choice.
-const DIRECT_STABILITY_FPS = 24;
+// Spike-validated (firmware/spikes/README.md's "PHY rate config" section,
+// 2026-08-06: raw ADC off + 40fps ran clean at 0% loss over ESP-NOW once
+// the link was configured to WIFI_PHY_RATE_MCS3_LGI in NewHorizonsOS-OTA
+// v0.12.1 / New-Horizons-Hub v0.1.1 -- the earlier default-rate ceiling
+// topped out around 24fps), not an arbitrary UI choice.
+const DIRECT_STABILITY_FPS = 40;
 
 const STANDARD_LOG_BYTES = 12 * 1024;
 const EXTENDED_LOG_BYTES = 24 * 1024;
