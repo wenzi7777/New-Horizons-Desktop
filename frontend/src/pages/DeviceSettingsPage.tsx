@@ -12,13 +12,18 @@ import {
   type CalibrationFlowSnapshot,
   type CalibrationPrimaryStepId,
 } from "../lib/calibrationFlow";
-import { normalizeDevice, useDevicesPolling } from "../lib/device";
+import { isHubRelayed, normalizeDevice, useDevicesPolling } from "../lib/device";
 import { useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
 import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { BoardIoModal } from "./TerminalPage";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { TriangleAlert } from "lucide-react";
+
+// Spike-validated (firmware/spikes/README.md's "Direct Stability Mode"
+// candidate: raw ADC off + 24fps ran clean at 0% loss over ESP-NOW), not an
+// arbitrary UI choice.
+const DIRECT_STABILITY_FPS = 24;
 
 const STANDARD_LOG_BYTES = 12 * 1024;
 const EXTENDED_LOG_BYTES = 24 * 1024;
@@ -2315,6 +2320,19 @@ export function DeviceSettingsPage() {
     setSendEveryNFrames(1);
   }
 
+  // Unlike the plain presets above, this one also has to guarantee the
+  // reduced-bandwidth payload it promises -- lowering fps alone doesn't
+  // shrink the frame if raw ADC streaming was left on, so this fires
+  // set_raw_adc(false) immediately rather than waiting for the user to
+  // notice and fix it in a separate card.
+  async function applyDirectStabilityPreset() {
+    applyScanPreset(DIRECT_STABILITY_FPS);
+    setRawAdcEnabled(false);
+    if (rawAdcEnabled) {
+      await run(t("saveRawAdc"), { command: "set_raw_adc", enabled: false });
+    }
+  }
+
   async function applyIoPins(nextAnalogPins: number[], nextSelectPins: number[]) {
     setPinDraftDirty(true);
     setAnalogPins(nextAnalogPins.join(","));
@@ -2485,6 +2503,16 @@ export function DeviceSettingsPage() {
               <DetailBox label={t("gatewayHost")} value={findme.host ?? "-"} />
               <DetailBox label={t("gatewayUdpPort")} value={findme.udp_port ?? "-"} />
               <DetailBox label={t("transport")} value={device?.transport_path ?? status.transport_path ?? "-"} />
+              <DetailBox
+                label={t("connectedVia")}
+                value={
+                  device?.client_type === "hub"
+                    ? t("deviceViaHubLong")
+                    : device?.client_type === "gateway"
+                      ? t("deviceViaGatewayLong")
+                      : "-"
+                }
+              />
               <DetailBox label={t("heartbeat")} value={findme.last_heartbeat_at ?? device?.last_heartbeat_at ?? status.last_heartbeat_at ?? "-"} />
               <DetailBox label={t("heartbeatInterval")} value={findme.heartbeat_interval_ms ?? "-"} />
               <DetailBox label={t("gatewayLastSuccess")} value={findme.last_success_ms ?? "-"} />
@@ -2813,6 +2841,14 @@ export function DeviceSettingsPage() {
                 <button className={targetFps === 90 ? "active" : ""} type="button" onClick={() => applyScanPreset(90)}>
                   {t("extendedFps")}
                 </button>
+                <button
+                  className={`${targetFps === DIRECT_STABILITY_FPS ? "active" : ""}${isHubRelayed(device) ? " recommended" : ""}`}
+                  type="button"
+                  onClick={() => void applyDirectStabilityPreset()}
+                >
+                  {t("directStabilityMode")}
+                  {isHubRelayed(device) ? <small>{t("directStabilityModeRecommended")}</small> : null}
+                </button>
               </div>
               <div className="field-grid">
                 <div className="field">
@@ -2826,6 +2862,9 @@ export function DeviceSettingsPage() {
                 <div className="field">
                   <label>{t("sendEveryNFrames")}</label>
                   <input type="number" value={sendEveryNFrames} onChange={(event) => { setScanDraftDirty(true); setSendEveryNFrames(Number(event.target.value) || 1); }} />
+                  <small className="field-hint">
+                    {t("effectiveSendFps")}: ≈ {Math.round(targetFps / Math.max(1, sendEveryNFrames))} fps
+                  </small>
                 </div>
                 <div className="field settings-field-action">
                   <label>{t("currentScanTiming")}</label>

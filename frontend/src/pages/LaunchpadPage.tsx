@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Folder, X } from "lucide-react";
 
 import { useI18n } from "../i18n";
-import { useDevicesPolling, type NormalizedDevice } from "../lib/device";
+import { isHubRelayed, useDevicesPolling, type NormalizedDevice } from "../lib/device";
 
 const GLOBAL_APPS = [
   { to: "/visualization", icon: "VIS", titleKey: "visualization" },
@@ -73,6 +73,7 @@ function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) 
             <span className={`device-badge ${deviceClassName(device)}`}>
               {deviceStateLabel(device, t)}
             </span>
+            {isHubRelayed(device.raw) ? <span className="device-badge hub-relay">{t("deviceViaHub")}</span> : null}
           </div>
           <div className="device-uid">{device.uid}</div>
           <div className="device-meta-grid">

@@ -8,6 +8,12 @@ import { useWsState } from "./wsClient";
 export type DeviceMode = "normal" | "maintenance" | "safe_maintenance" | "booting" | "offline" | string;
 export type { DeviceConnectionState } from "./connectionState";
 
+// True when this device is currently relayed through a New Horizons Hub
+// (ESP-NOW) rather than a New Horizons Gateway or a direct connection.
+export function isHubRelayed(device: DeviceEntry | null | undefined): boolean {
+  return device?.client_type === "hub";
+}
+
 export type NormalizedDevice = {
   uid: string;
   name: string;

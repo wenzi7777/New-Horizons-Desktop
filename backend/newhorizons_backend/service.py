@@ -5,6 +5,7 @@ import csv
 import json
 import threading
 import time
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,7 @@ from .arduino_protocol import CONTROL_PORT, is_arduino_heartbeat_packet, is_ardu
 from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_for_hardware_model
 from .packet_parser import PacketParseError, parse_binary_packet
 from .discovery import DiscoveryResponder
+from .hub_channel_watch import HubChannelWatcher
 from .udp_ingest import UDPIngestServer
 
 
@@ -21,6 +23,8 @@ DEVICE_CONTROL_UNAVAILABLE = "device_control_unavailable"
 DEVICE_CONTROL_UNAVAILABLE_MESSAGE = "Device control is reconnecting; try again in a few seconds."
 DEVICE_BOOTING = "device_booting"
 DEVICE_BOOTING_MESSAGE = "Device is rebooting; control will resume when it comes back online."
+GATEWAY_CONTROL_UNAVAILABLE = "gateway_control_unavailable"
+GATEWAY_CONTROL_UNAVAILABLE_MESSAGE = "This Hub/Gateway isn't connected right now; try again once it's online."
 
 
 def command_error_message(code: str) -> str:
@@ -28,6 +32,8 @@ def command_error_message(code: str) -> str:
         return DEVICE_BOOTING_MESSAGE
     if code == DEVICE_CONTROL_UNAVAILABLE:
         return DEVICE_CONTROL_UNAVAILABLE_MESSAGE
+    if code == GATEWAY_CONTROL_UNAVAILABLE:
+        return GATEWAY_CONTROL_UNAVAILABLE_MESSAGE
     return code
 
 
@@ -68,6 +74,7 @@ class NewHorizonsService:
         "check_update",
         "apply_update",
         "reboot",
+        "set_transport",
     }
     NORMAL_COMMANDS = SHARED_COMMANDS | {
         "enter_maintenance",
@@ -108,6 +115,11 @@ class NewHorizonsService:
         "safe_maintenance": MAINTENANCE_COMMANDS,
         "safemaintenance": MAINTENANCE_COMMANDS,
     }
+    # Commands that target a Hub/Gateway process itself (via
+    # publish_gateway_command()) rather than a downstream device_uid. Small
+    # and flat on purpose -- unlike device commands, Hubs have no "mode"
+    # concept to gate against.
+    HUB_COMMANDS = {"set_config", "factory_reset"}
 
     def __init__(self, autostart: bool = False, mock_mode: bool | None = None) -> None:
         self._lock = threading.RLock()
@@ -154,8 +166,10 @@ class NewHorizonsService:
         self._data_root = Path(configured_data_root) if configured_data_root else default_data_root
         self._nicknames_path = self._data_root / "_newhorizons_device_nicknames.json"
         self._device_groups_path = self._data_root / "_newhorizons_device_groups.json"
+        self._hub_environments_path = self._data_root / "_newhorizons_hub_environments.json"
         self._nicknames = self._load_nicknames()
         self._device_groups = self._load_device_groups()
+        self._hub_channel_watcher = HubChannelWatcher(path=self._hub_environments_path)
         if self._mock_mode:
             self._seed_mock_state()
         if autostart:
@@ -573,6 +587,132 @@ class NewHorizonsService:
             "group": group,
         }
 
+    def list_hub_environments(self) -> list[dict[str, Any]]:
+        # Enriches each environment with its members' self-reported
+        # channels and whether any two *online* members currently share
+        # one -- see hub_channel_watch.py's header comment for why this is
+        # detection-only (no channel assignment is attempted).
+        with self._lock:
+            environments = self._hub_channel_watcher.list_environments()
+            result: list[dict[str, Any]] = []
+            for env in environments:
+                hub_ids = env.get("hub_ids") or []
+                hubs: list[dict[str, Any]] = []
+                channel_members: dict[int, list[str]] = {}
+                for gateway_id in hub_ids:
+                    channel = self._hub_channel_watcher.channel_for(gateway_id)
+                    online = str(self._gateways.get(gateway_id, {}).get("status") or "") == "online"
+                    hubs.append({"gateway_id": gateway_id, "channel": channel, "online": online})
+                    if online and channel:
+                        channel_members.setdefault(channel, []).append(gateway_id)
+                conflicting_channels = sorted(ch for ch, members in channel_members.items() if len(members) > 1)
+                result.append({
+                    **env,
+                    "hubs": hubs,
+                    "conflict": bool(conflicting_channels),
+                    "conflicting_channels": conflicting_channels,
+                })
+            return result
+
+    def create_hub_environment(self, name: str) -> dict[str, Any]:
+        return self._hub_channel_watcher.create_environment(name)
+
+    def delete_hub_environment(self, environment_id: str) -> bool:
+        deleted = self._hub_channel_watcher.delete_environment(environment_id)
+        if deleted:
+            self._resync_hub_environment_fields_locked()
+        return deleted
+
+    def set_hub_environment(self, gateway_id: str, environment_id: str | None) -> None:
+        self._hub_channel_watcher.set_hub_environment(gateway_id, environment_id)
+        self._resync_hub_environment_fields_locked()
+
+    def _resync_hub_environment_fields_locked(self) -> None:
+        # Keeps gateway_snapshot()'s "channel_environment_id" field in sync
+        # for any Hub that's currently connected -- admin-facing UI reads
+        # gateway state from there, not from a separate environments call.
+        updated: list[dict[str, Any]] = []
+        with self._lock:
+            for gateway_id, entry in self._gateways.items():
+                environment_id = self._hub_channel_watcher.hub_environment(gateway_id) or ""
+                if entry.get("channel_environment_id") != environment_id:
+                    entry["channel_environment_id"] = environment_id
+                    updated.append(dict(entry))
+        for item in updated:
+            self._emit_event({"type": "gateway_update", "item": item})
+
+    def report_hub_channel(self, gateway_id: str, channel: int) -> None:
+        self._hub_channel_watcher.report_channel(gateway_id, channel)
+
+    def list_hub_lan_devices(self, gateway_id: str) -> list[dict[str, Any]]:
+        # Real-hardware finding (see the plan's Step 5b section): a Hub
+        # trying to discover nearby devices via its own local UDP
+        # findme_probe broadcast got nothing back on a network with client
+        # isolation between WiFi STA clients -- but every device already
+        # reports its presence to this Backend via its own (device-
+        # initiated, unaffected by that isolation) attach flow. So instead
+        # of the Hub scanning the LAN itself, it asks the Backend for the
+        # same device list `/api/devices` already exposes, filtered to
+        # devices not already on this Hub's own gateway_id.
+        gateway_id = str(gateway_id or "").strip()
+        with self._lock:
+            items = [self._decorate_device_entry(self._devices[key]) for key in sorted(self._devices.keys())]
+        result: list[dict[str, Any]] = []
+        for item in items:
+            device_uid = str(item.get("device_uid") or "").strip()
+            if not device_uid:
+                continue
+            # "Already on this Hub" only counts while the device is
+            # actually routed through it (transport_path=="gateway_wss").
+            # gateway_id alone isn't enough to exclude on: it's left over
+            # from the last gateway_wss attach and doesn't get cleared
+            # when a device later switches to a direct transport (arduino_udp/
+            # udp) -- found on real hardware testing "取消" then rescanning,
+            # which would otherwise wrongly hide the very device the scan
+            # is supposed to surface.
+            if (
+                gateway_id
+                and str(item.get("gateway_id") or "") == gateway_id
+                and str(item.get("transport_path") or "") == "gateway_wss"
+            ):
+                continue
+            result.append({
+                "device_uid": device_uid,
+                "device_name": str(item.get("display_name") or item.get("device_name") or ""),
+                "transport_path": str(item.get("transport_path") or ""),
+                "gateway_id": str(item.get("gateway_id") or ""),
+                "mode": str(item.get("mode") or ""),
+            })
+        return result
+
+    def migrate_device_to_hub(self, device_uid: str, hub_mac: str) -> dict[str, Any]:
+        # Counterpart to list_hub_lan_devices(): relays the migration
+        # commands through this Backend's already-working command-dispatch
+        # path (publish_command(), the same one the REST device-command
+        # API uses) instead of having the Hub send them directly to the
+        # device over WiFi/UDP -- that direction is the one found blocked
+        # on real hardware.
+        device_uid = self._resolve_known_device_uid(device_uid)
+        hub_mac = str(hub_mac or "").strip()
+        if not hub_mac:
+            raise ValueError("hub_mac_required")
+        self.publish_command(device_uid, {
+            "command": "set_transport",
+            "request_id": uuid.uuid4().hex,
+            "mode": "espnow",
+            "hub_mac": hub_mac,
+        })
+        # Give the device a moment to apply + persist the transport change
+        # before telling it to reboot into it -- mirrors the same
+        # set_transport-then-delay-then-reboot sequencing the Hub's own
+        # (now-removed) direct UDP migration code used.
+        time.sleep(0.2)
+        self.publish_command(device_uid, {
+            "command": "reboot",
+            "request_id": uuid.uuid4().hex,
+        })
+        return {"status": "queued", "device_uid": device_uid}
+
     def publish_command(self, device_uid: str, payload: dict[str, Any]) -> dict[str, Any]:
         device_uid = self._resolve_known_device_uid(device_uid)
         payload = self._with_command_expiry(payload)
@@ -655,6 +795,62 @@ class NewHorizonsService:
                     raise RuntimeError(DEVICE_CONTROL_UNAVAILABLE) from exc
             self._forget_pending_command(device_uid, payload)
             raise RuntimeError(DEVICE_CONTROL_UNAVAILABLE)
+
+    def publish_gateway_command(self, gateway_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        # Counterpart to publish_command() above, but targets a Hub/Gateway
+        # process itself rather than a downstream device_uid -- much
+        # simpler since there's exactly one transport (the Hub/Gateway's
+        # own WS session, already tracked in _gateway_session_senders for
+        # gateway_claim_update/etc.) and no per-mode command gating.
+        gateway_id = str(gateway_id or "").strip()
+        if not gateway_id:
+            raise ValueError("gateway_id_required")
+        command = str(payload.get("command") or "")
+        if command not in self.HUB_COMMANDS:
+            raise ValueError("unknown_command")
+        request_id = str(payload.get("request_id") or uuid.uuid4().hex)
+        payload = dict(payload)
+        payload["request_id"] = request_id
+        with self._lock:
+            sender = self._gateway_session_senders.get(gateway_id)
+            if sender is None:
+                raise RuntimeError(GATEWAY_CONTROL_UNAVAILABLE)
+            message = {
+                "type": "gateway_command",
+                "request_id": request_id,
+                "payload": payload,
+            }
+            try:
+                sender(message)
+            except Exception:
+                self._gateway_session_senders.pop(gateway_id, None)
+                raise RuntimeError(GATEWAY_CONTROL_UNAVAILABLE)
+        return {
+            "status": "queued",
+            "transport": "gateway_wss",
+            "gateway_id": gateway_id,
+            "payload": payload,
+            "request_id": request_id,
+        }
+
+    def record_gateway_command_result(self, gateway_id: str, payload: dict[str, Any]) -> None:
+        # Inbound gateway_command_result -- much simpler than
+        # _record_result() below since there's no device entry to merge
+        # into, just a broadcast so the Desktop UI waiting on this
+        # request_id can resolve it. ws.py's generic event listener
+        # forwards any _emit_event() call to every connected browser
+        # verbatim, so no new subscription plumbing is needed here.
+        if not isinstance(payload, dict):
+            return
+        request_id = str(payload.get("request_id") or "")
+        self._emit_event(
+            {
+                "type": "gateway_command_result",
+                "gateway_id": str(gateway_id or ""),
+                "request_id": request_id,
+                "result": payload.get("result") if isinstance(payload.get("result"), dict) else {},
+            }
+        )
 
     def _send_udp_command(self, device_uid: str, payload: dict[str, Any], addr: tuple[str, int]) -> dict[str, Any]:
         if self._udp_ingest is None:
@@ -975,9 +1171,20 @@ class NewHorizonsService:
         with self._lock:
             self._gateway_session_senders[gateway_id] = sender
             existing = dict(self._gateways.get(gateway_id, {}))
+            # Sticky -- only the initial `hello` carries this (see
+            # HubUplinkClient.cpp's hello construction); a real Gateway's
+            # hello never sends it, so absence defaults to "gateway" for
+            # backward compatibility. Previously there was no wire-level
+            # self-identification at all, so every entry (Hub included)
+            # silently defaulted to the "New Horizons Gateway" name below.
+            client_type = payload.get("client_type") or existing.get("client_type") or "gateway"
+            default_name = "New Horizons Hub" if client_type == "hub" else "New Horizons Gateway"
             existing.update({
                 "gateway_id": gateway_id,
-                "gateway_name": payload.get("gateway_name") or payload.get("name") or existing.get("gateway_name") or "New Horizons Gateway",
+                "gateway_name": payload.get("gateway_name") or payload.get("name") or existing.get("gateway_name") or default_name,
+                "client_type": client_type,
+                "mac": payload.get("mac", existing.get("mac", "")),
+                "ip": payload.get("ip", existing.get("ip", "")),
                 "version": payload.get("version") or existing.get("version", ""),
                 "enabled": bool(payload.get("enabled", existing.get("enabled", True))),
                 "status": "online",
@@ -996,6 +1203,9 @@ class NewHorizonsService:
                 "udp_dropped": int(payload.get("udp_dropped", existing.get("udp_dropped", 0)) or 0),
                 "last_error": payload.get("last_error", existing.get("last_error", "")),
                 "claims": [dict(item) for item in self._gateway_claims.values() if item.get("gateway_id") == gateway_id],
+                "channel_environment_id": self._hub_channel_watcher.hub_environment(gateway_id) or "",
+                "channel": self._hub_channel_watcher.channel_for(gateway_id),
+                "paired_devices": payload.get("paired_devices", existing.get("paired_devices", [])),
             })
             self._gateways[gateway_id] = existing
             event_item = dict(existing)
@@ -1052,12 +1262,18 @@ class NewHorizonsService:
                 self._gateway_claims[claim_id] = claim
                 if previous.get("state") != claim.get("state") or previous.get("last_error") != claim.get("last_error"):
                     claim_events.append({"type": "gateway_claim_update", **claim})
+        # New Horizons Hub only (a Gateway never sends this) -- piggybacked
+        # on this same heartbeat rather than a separate request/response,
+        # see hub_channel_watch.py's header comment.
+        self._hub_channel_watcher.report_channel(gateway_id, payload.get("channel") or 0)
         self.register_gateway(
             gateway_id,
             self._gateway_session_senders.get(gateway_id, lambda _payload: None),
             {
                 "gateway_name": payload.get("gateway_name"),
                 "version": payload.get("version", ""),
+                "mac": payload.get("mac", ""),
+                "ip": payload.get("ip", ""),
                 "enabled": bool(payload.get("enabled", True)),
                 "target_mode": payload.get("target_mode"),
                 "server_url": payload.get("server_url"),
@@ -1067,6 +1283,7 @@ class NewHorizonsService:
                 "udp_forwarded": forwarded,
                 "udp_dropped": dropped,
                 "last_error": payload.get("last_error", ""),
+                "paired_devices": payload.get("paired_devices", []),
             },
         )
         for event_item in device_events:
@@ -1152,6 +1369,12 @@ class NewHorizonsService:
             "nickname": self._nicknames.get(device_uid, ""),
             "display_name": self._nicknames.get(device_uid, "") or device_name,
             "gateway_id": gateway_id,
+            # Which kind of client is currently relaying this device --
+            # "hub" (New Horizons Hub, ESP-NOW) or "gateway" (New Horizons
+            # Gateway software). Resolved from the serving gateway_id's own
+            # entry rather than anything the device itself reports, since a
+            # device has no notion of what's relaying it.
+            "client_type": self._gateways.get(gateway_id, {}).get("client_type", ""),
             "gateway_connected": bool(connected),
             "last_gateway_seen_at": seen_at,
             "gateway_state": gateway_state,
@@ -1266,6 +1489,9 @@ class NewHorizonsService:
             stale_gateways = [gateway_id for gateway_id, existing in self._gateway_session_senders.items() if existing is sender or existing == sender]
             for gateway_id in stale_gateways:
                 self._gateway_session_senders.pop(gateway_id, None)
+                # Clear its reported channel immediately -- an offline Hub
+                # can't be holding a live collision against anyone.
+                self._hub_channel_watcher.clear_channel(gateway_id)
                 gateway = dict(self._gateways.get(gateway_id, {"gateway_id": gateway_id}))
                 gateway["status"] = "offline"
                 gateway["last_seen"] = now

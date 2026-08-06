@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { api } from "./api";
 import type { DeviceEntry, GatewayClaimEntry, GatewayEntry, QueuedCommandResponse, VisualizationEntry } from "./api";
 import { wsHref } from "./runtime";
 import { shouldPublishGlobalWsError } from "./wsErrorPolicy";
@@ -22,8 +23,14 @@ type PendingCommand = {
   timer: number;
 };
 
+type PendingGatewayCommand = {
+  resolve: (value: { result: Record<string, unknown> | null }) => void;
+  timer: number;
+};
+
 const subscribers = new Set<(state: WsState) => void>();
 const pendingCommands = new Map<string, PendingCommand>();
+const pendingGatewayCommands = new Map<string, PendingGatewayCommand>();
 const subscribedVisualizations = new Set<string>();
 const pendingVisualizationFrames = new Map<string, VisualizationEntry>();
 const VISUALIZATION_UI_TARGET_FPS = 60;
@@ -298,6 +305,17 @@ function handleMessage(message: Record<string, unknown>) {
     }
     return;
   }
+  if (type === "gateway_command_result") {
+    const requestId = String(message.request_id ?? "");
+    const pending = pendingGatewayCommands.get(requestId);
+    if (pending) {
+      window.clearTimeout(pending.timer);
+      pendingGatewayCommands.delete(requestId);
+      pending.resolve({ result: (message.result as Record<string, unknown>) ?? null });
+      publish({ errorMessage: "" });
+    }
+    return;
+  }
   if (type === "error") {
     const requestId = String(message.request_id ?? "");
     const messageText = String(message.message ?? message.code ?? "websocket_error");
@@ -417,6 +435,30 @@ export function sendDeviceCommand(deviceUid: string, payload: Record<string, unk
   return promise;
 }
 
+// Hub-itself counterpart to sendDeviceCommand() above. Unlike that one,
+// the "queue" step goes over REST (api.queueGatewayCommand()) rather than
+// a WS round-trip -- this is a rare, admin-only, two-verb surface
+// (set_config/factory_reset), so there's no real benefit to a symmetrical
+// browser->backend WS message type just to submit it. The async result
+// still arrives over WS (gateway_command_result, broadcast by
+// service.py::record_gateway_command_result() the same way command_result
+// is), matched by request_id with the same timeout-falls-back-to-null
+// behavior as sendDeviceCommand().
+export function sendGatewayCommand(gatewayId: string, payload: Record<string, unknown>, timeoutMs = 20000) {
+  if (!gatewayId) return Promise.reject(new Error("gateway_id_required"));
+  return api.queueGatewayCommand(gatewayId, payload).then((queued) => {
+    const requestId = String(queued.request_id ?? "");
+    if (!requestId) return { result: null };
+    return new Promise<{ result: Record<string, unknown> | null }>((resolve) => {
+      const timer = window.setTimeout(() => {
+        pendingGatewayCommands.delete(requestId);
+        resolve({ result: null });
+      }, timeoutMs);
+      pendingGatewayCommands.set(requestId, { resolve, timer });
+    });
+  });
+}
+
 export function useWsState() {
   const [snapshot, setSnapshot] = useState(state);
   useEffect(() => {
@@ -434,5 +476,6 @@ export function useWsState() {
     unsubscribeVisualization,
     setRecording,
     sendDeviceCommand,
+    sendGatewayCommand,
   };
 }

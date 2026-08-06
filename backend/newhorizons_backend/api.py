@@ -16,7 +16,7 @@ from .auth import AuthManager, DEFAULT_TOKEN_EXPIRY_SEC, user_payload
 from .gateway_auth import gateway_expected_token
 from .pressure_cal_client import PressureCalError, PressureCalNotConfigured, get_client
 from .pressure_cal_settings import BUILTIN_PRESETS, load_settings, save_settings
-from .service import DEVICE_BOOTING, DEVICE_CONTROL_UNAVAILABLE, NewHorizonsService, command_error_message, get_service
+from .service import DEVICE_BOOTING, DEVICE_CONTROL_UNAVAILABLE, GATEWAY_CONTROL_UNAVAILABLE, NewHorizonsService, command_error_message, get_service
 from .terminal import compile_terminal_command, terminal_help_items, validate_device_command_payload
 
 
@@ -254,7 +254,7 @@ def create_blueprint(
             "code": code,
             "error": message,
             "message": message,
-            "retryable": code in (DEVICE_CONTROL_UNAVAILABLE, DEVICE_BOOTING),
+            "retryable": code in (DEVICE_CONTROL_UNAVAILABLE, DEVICE_BOOTING, GATEWAY_CONTROL_UNAVAILABLE),
         }
         body.update(extra)
         return json_response(body), 503 if body["retryable"] else 409
@@ -365,6 +365,95 @@ def create_blueprint(
         if not svc.delete_gateway(gateway_id):
             return json_response({"error": "gateway_not_found"}), 404
         return json_response({"status": "deleted", "gateway_id": gateway_id})
+
+    @bp.get("/api/hub-environments")
+    @auth
+    @_require_roles("admin")
+    def hub_environments() -> Response:
+        return json_response({"items": svc.list_hub_environments()})
+
+    @bp.post("/api/hub-environments")
+    @auth
+    @_require_roles("admin")
+    def hub_environment_create() -> tuple[Response, int] | Response:
+        data = _request_json_data({})
+        try:
+            result = svc.create_hub_environment(str(data.get("name") or ""))
+        except ValueError as exc:
+            return json_response({"error": str(exc)}), 400
+        return json_response(result)
+
+    @bp.delete("/api/hub-environments/<environment_id>")
+    @auth
+    @_require_roles("admin")
+    def hub_environment_delete(environment_id: str) -> tuple[Response, int] | Response:
+        if not svc.delete_hub_environment(environment_id):
+            return json_response({"error": "environment_not_found"}), 404
+        return json_response({"status": "deleted", "environment_id": environment_id})
+
+    @bp.put("/api/gateways/<gateway_id>/environment")
+    @auth
+    @_require_roles("admin")
+    def gateway_environment(gateway_id: str) -> tuple[Response, int] | Response:
+        data = _request_json_data({})
+        environment_id = str(data.get("environment_id") or "").strip() or None
+        try:
+            svc.set_hub_environment(gateway_id, environment_id)
+        except ValueError as exc:
+            return json_response({"error": str(exc)}), 400
+        return json_response({"status": "saved", "gateway_id": gateway_id, "environment_id": environment_id or ""})
+
+    @bp.post("/api/gateway-command")
+    @auth
+    @_require_roles("admin")
+    def gateway_command() -> tuple[Response, int] | Response:
+        # Hub-itself counterpart to /api/device-command below -- targets a
+        # gateway_id (the Hub/Gateway process itself) rather than a
+        # device_uid. Only Hub commands (set_config/factory_reset) are
+        # meaningful here today; a real Gateway process has no equivalent
+        # remote-command surface.
+        data = _request_json_data({})
+        gateway_id = str(data.get("gateway_id") or "").strip()
+        if not gateway_id:
+            return json_response({"error": "gateway_id_required"}), 400
+        raw_payload = data.get("payload")
+        if not isinstance(raw_payload, dict):
+            return json_response({"error": "payload_required"}), 400
+        payload = dict(raw_payload)
+        request_id = str(payload.get("request_id") or uuid.uuid4().hex)
+        payload["request_id"] = request_id
+        try:
+            queued = svc.publish_gateway_command(gateway_id, payload)
+        except ValueError as exc:
+            return json_response({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return _command_error_response(exc, gateway_id=gateway_id, payload=payload)
+        return json_response({"status": "queued", "request_id": request_id, "items": [queued]})
+
+    @bp.get("/api/gateways/<gateway_id>/lan-devices")
+    @auth
+    @_require_roles("admin")
+    def gateway_lan_devices(gateway_id: str) -> Response:
+        return json_response({"items": svc.list_hub_lan_devices(gateway_id)})
+
+    @bp.post("/api/gateways/<gateway_id>/migrate-device")
+    @auth
+    @_require_roles("admin")
+    def gateway_migrate_device(gateway_id: str) -> tuple[Response, int] | Response:
+        data = _request_json_data({})
+        device_uid = str(data.get("device_uid") or "").strip()
+        if not device_uid:
+            return json_response({"error": "device_uid_required"}), 400
+        hub_mac = str(next((item.get("mac") for item in svc.gateway_snapshot() if item.get("gateway_id") == gateway_id), "") or "")
+        if not hub_mac:
+            return json_response({"error": "hub_mac_unknown"}), 400
+        try:
+            result = svc.migrate_device_to_hub(device_uid, hub_mac)
+        except ValueError as exc:
+            return json_response({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return _command_error_response(exc, device_uid=device_uid)
+        return json_response(result)
 
     @bp.put("/api/devices/<device_uid>/nickname")
     @auth

@@ -1495,6 +1495,422 @@ class IndependentNewHorizonsTest(unittest.TestCase):
                         "post-stop stale check must not mark devices offline")
         self.assertFalse(any(e.get("type") == "device_update" for e in events))
 
+    def test_hub_hello_client_type_tags_gateway_entry_as_hub(self):
+        # Previously there was no wire-level self-identification at all --
+        # a Hub and a real Gateway looked identical to register_gateway().
+        # HubUplinkClient.cpp's hello now sends client_type="hub".
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                ws = FakeGatewayWebSocket([
+                    json_text({"type": "hello", "gateway_id": "hub-a", "client_type": "hub", "version": "v0.1.0"}),
+                ])
+                GatewaySocketSession(service, ws).handle()
+
+                gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "hub-a")
+                self.assertEqual(gateway["client_type"], "hub")
+                self.assertEqual(gateway["gateway_name"], "New Horizons Hub")
+                self.assertEqual(gateway["version"], "v0.1.0")
+
+    def test_gateway_hello_without_client_type_defaults_to_gateway(self):
+        # A real Gateway's hello (upstream_wss.py) never sends client_type
+        # -- must default to "gateway" for backward compatibility.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                ws = FakeGatewayWebSocket([
+                    json_text({"type": "hello", "gateway_id": "gw-a", "version": "v1.2.3"}),
+                ])
+                GatewaySocketSession(service, ws).handle()
+
+                gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "gw-a")
+                self.assertEqual(gateway["client_type"], "gateway")
+                self.assertEqual(gateway["gateway_name"], "New Horizons Gateway")
+
+    def test_hub_mac_reported_via_gateway_status_is_visible_on_gateway(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+                session._handle_json(json_text({"type": "hello", "gateway_id": "hub-a", "client_type": "hub"}))
+                session._handle_json(json_text({
+                    "type": "gateway_status",
+                    "gateway_id": "hub-a",
+                    "payload": {"channel": 9, "mac": "AA:BB:CC:DD:EE:FF", "paired_device_count": 0},
+                }))
+
+                gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "hub-a")
+                self.assertEqual(gateway["mac"], "AA:BB:CC:DD:EE:FF")
+
+    def test_device_relayed_via_hub_is_stamped_with_client_type_hub(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+                session._handle_json(json_text({"type": "hello", "gateway_id": "hub-a", "client_type": "hub"}))
+                session._handle_json(json_text({
+                    "type": "device_hello",
+                    "gateway_id": "hub-a",
+                    "device_uid": "3CDC75413DC0",
+                    "payload": {"device_uid": "3CDC75413DC0", "connected": True},
+                }))
+
+                device = service.get_device("3CDC75413DC0")
+                self.assertEqual(device.get("client_type"), "hub")
+
+    def test_device_relayed_via_real_gateway_is_stamped_with_client_type_gateway(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+                session._handle_json(json_text({"type": "hello", "gateway_id": "gw-a"}))
+                session._handle_json(json_text({
+                    "type": "device_hello",
+                    "gateway_id": "gw-a",
+                    "device_uid": "3CDC75413DC1",
+                    "payload": {"device_uid": "3CDC75413DC1", "connected": True},
+                }))
+
+                device = service.get_device("3CDC75413DC1")
+                self.assertEqual(device.get("client_type"), "gateway")
+
+    def test_gateway_status_channel_reported_and_visible_on_gateway(self):
+        # Channel reporting piggybacks on the existing gateway_status
+        # heartbeat -- no separate request/response round trip anymore,
+        # see hub_channel_watch.py's header comment.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                # _handle_json() directly, not handle() -- handle()'s
+                # finally-block disconnect cleanup would immediately clear
+                # the just-reported channel again (see
+                # unregister_gateway_sender()), defeating this test.
+                session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+                session._handle_json(json_text({"type": "hello", "gateway_id": "hub-a"}))
+                session._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {"channel": 9, "paired_device_count": 0}}))
+
+                self.assertEqual(service._hub_channel_watcher.channel_for("hub-a"), 9)
+                gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "hub-a")
+                self.assertEqual(gateway["channel"], 9)
+
+    def test_hub_environment_conflict_detection(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                env = service.create_hub_environment("Room 1")
+                service.set_hub_environment("hub-a", env["environment_id"])
+                service.set_hub_environment("hub-b", env["environment_id"])
+
+                # Two concurrently-connected Hub sessions -- calling
+                # _handle_json() directly (rather than the full handle()
+                # receive loop) keeps both sessions "open" (online) at
+                # once, since handle() would otherwise run each session's
+                # disconnect cleanup before the next session's messages.
+                session_a = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+                session_a._handle_json(json_text({"type": "hello", "gateway_id": "hub-a"}))
+                session_a._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {"channel": 9}}))
+
+                session_b = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+                session_b._handle_json(json_text({"type": "hello", "gateway_id": "hub-b"}))
+                session_b._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-b", "payload": {"channel": 9}}))
+
+                environments = service.list_hub_environments()
+                self.assertEqual(len(environments), 1)
+                self.assertTrue(environments[0]["conflict"])
+                self.assertEqual(environments[0]["conflicting_channels"], [9])
+                self.assertEqual(
+                    {hub["gateway_id"]: hub["channel"] for hub in environments[0]["hubs"]},
+                    {"hub-a": 9, "hub-b": 9},
+                )
+
+                # Different channels -> no conflict.
+                session_b._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-b", "payload": {"channel": 6}}))
+                environments = service.list_hub_environments()
+                self.assertFalse(environments[0]["conflict"])
+                self.assertEqual(environments[0]["conflicting_channels"], [])
+
+    def test_hub_environment_conflict_ignores_offline_hub(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                env = service.create_hub_environment("Room 1")
+                service.set_hub_environment("hub-a", env["environment_id"])
+                service.set_hub_environment("hub-b", env["environment_id"])
+
+                session_a = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+                session_a._handle_json(json_text({"type": "hello", "gateway_id": "hub-a"}))
+                session_a._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {"channel": 9}}))
+                # hub-b reported the same channel once but is not currently
+                # connected -- it must not count toward a conflict.
+                service._hub_channel_watcher.report_channel("hub-b", 9)
+
+                environments = service.list_hub_environments()
+                self.assertFalse(environments[0]["conflict"])
+
+    def test_hub_environment_different_environments_same_channel_no_conflict(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                env1 = service.create_hub_environment("Room 1")
+                env2 = service.create_hub_environment("Room 2")
+                service.set_hub_environment("hub-a", env1["environment_id"])
+                service.set_hub_environment("hub-b", env2["environment_id"])
+
+                session_a = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+                session_a._handle_json(json_text({"type": "hello", "gateway_id": "hub-a"}))
+                session_a._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {"channel": 9}}))
+
+                session_b = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+                session_b._handle_json(json_text({"type": "hello", "gateway_id": "hub-b"}))
+                session_b._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-b", "payload": {"channel": 9}}))
+
+                for environment in service.list_hub_environments():
+                    self.assertFalse(environment["conflict"])
+
+    def test_gateway_disconnect_clears_reported_channel(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                env = service.create_hub_environment("Room 1")
+                service.set_hub_environment("hub-a", env["environment_id"])
+                service.report_hub_channel("hub-a", 9)
+                self.assertEqual(service._hub_channel_watcher.channel_for("hub-a"), 9)
+
+                sender = object()
+                service._gateway_session_senders["hub-a"] = sender
+                service.unregister_gateway_sender(sender)
+
+                self.assertEqual(service._hub_channel_watcher.channel_for("hub-a"), 0)
+
+    def test_hub_environment_api_crud(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                service = NewHorizonsService(mock_mode=False)
+                app = Flask(__name__)
+                app.register_blueprint(create_blueprint(service=service, profiles_root=ROOT / "mock_data" / "profiles", data_root=ROOT / "mock_data" / "mqtt_store"))
+                client = app.test_client()
+
+                created = client.post("/newhorizons/api/hub-environments", json={"name": "Room 1"})
+                self.assertEqual(created.status_code, 200)
+                environment_id = json_payload(created)["environment_id"]
+
+                assigned = client.put(f"/newhorizons/api/gateways/hub-a/environment", json={"environment_id": environment_id})
+                self.assertEqual(assigned.status_code, 200)
+
+                listed = client.get("/newhorizons/api/hub-environments")
+                items = json_payload(listed)["items"]
+                self.assertEqual(len(items), 1)
+                self.assertEqual(items[0]["hub_ids"], ["hub-a"])
+
+                deleted = client.delete(f"/newhorizons/api/hub-environments/{environment_id}")
+                self.assertEqual(deleted.status_code, 200)
+                self.assertEqual(json_payload(client.get("/newhorizons/api/hub-environments"))["items"], [])
+
+    def test_list_hub_lan_devices_excludes_devices_already_on_this_hub(self):
+        service = NewHorizonsService(mock_mode=False)
+        service.register_gateway_device("3CDC7545CCD0", lambda _msg: None, gateway_id="hub-other")
+        service.register_gateway_device("3CDC7545CCD1", lambda _msg: None, gateway_id="TestHub")
+        # Only a transport_path=="gateway_wss" device counts as "on this
+        # Hub" -- see list_hub_lan_devices()'s comment for why gateway_id
+        # alone isn't enough (it doesn't get cleared when a device later
+        # switches to a direct transport).
+        with service._lock:
+            service._devices["3CDC7545CCD1"]["transport_path"] = "gateway_wss"
+
+        items = service.list_hub_lan_devices("TestHub")
+
+        device_uids = {item["device_uid"] for item in items}
+        self.assertIn("3CDC7545CCD0", device_uids)
+        self.assertNotIn("3CDC7545CCD1", device_uids)
+        other = next(item for item in items if item["device_uid"] == "3CDC7545CCD0")
+        self.assertEqual(other["gateway_id"], "hub-other")
+
+    def test_list_hub_lan_devices_includes_stale_gateway_id_on_direct_transport(self):
+        # Real-hardware finding: after "取消" (device migrates off a Hub
+        # back to a direct transport), its gateway_id field is left over
+        # from the old attachment but transport_path is no longer
+        # gateway_wss -- the device must still show up as "nearby".
+        service = NewHorizonsService(mock_mode=False)
+        service.register_gateway_device("3CDC7545CCD0", lambda _msg: None, gateway_id="TestHub")
+        with service._lock:
+            service._devices["3CDC7545CCD0"]["transport_path"] = "arduino_udp"
+
+        items = service.list_hub_lan_devices("TestHub")
+
+        self.assertTrue(any(item["device_uid"] == "3CDC7545CCD0" for item in items))
+
+    def test_list_hub_lan_devices_with_no_gateway_id_returns_everything(self):
+        service = NewHorizonsService(mock_mode=False)
+        service.register_gateway_device("3CDC7545CCD0", lambda _msg: None, gateway_id="hub-a")
+
+        items = service.list_hub_lan_devices("")
+
+        self.assertTrue(any(item["device_uid"] == "3CDC7545CCD0" for item in items))
+
+    def test_migrate_device_to_hub_relays_set_transport_then_reboot(self):
+        service = NewHorizonsService(mock_mode=False)
+        sent = []
+        service.register_gateway_device("3CDC7545CCD0", sent.append, gateway_id="hub-other")
+
+        result = service.migrate_device_to_hub("3CDC7545CCD0", "AA:BB:CC:DD:EE:FF")
+
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(sent[0]["payload"]["command"], "set_transport")
+        self.assertEqual(sent[0]["payload"]["mode"], "espnow")
+        self.assertEqual(sent[0]["payload"]["hub_mac"], "AA:BB:CC:DD:EE:FF")
+        self.assertEqual(sent[1]["payload"]["command"], "reboot")
+
+    def test_migrate_device_to_hub_requires_hub_mac(self):
+        service = NewHorizonsService(mock_mode=False)
+        service.register_gateway_device("3CDC7545CCD0", lambda _msg: None, gateway_id="hub-other")
+
+        with self.assertRaisesRegex(ValueError, "hub_mac_required"):
+            service.migrate_device_to_hub("3CDC7545CCD0", "")
+
+    def test_migrate_device_to_hub_reports_unavailable_device(self):
+        service = NewHorizonsService(mock_mode=False)
+
+        with self.assertRaisesRegex(RuntimeError, "device_control_unavailable"):
+            service.migrate_device_to_hub("3CDC7545CCD0", "AA:BB:CC:DD:EE:FF")
+
+    def test_gateway_lan_devices_endpoint_lists_devices(self):
+        # Replaces the old hub_lan_devices_request/update WS round-trip
+        # (removed along with DirectWebUI): Desktop now calls this REST
+        # endpoint directly since Backend already owns the full device
+        # list -- no reason to bounce the query through the Hub itself.
+        service = NewHorizonsService(mock_mode=False)
+        service.register_gateway_device("3CDC7545CCD0", lambda _payload: None, gateway_id="hub-other")
+        app = Flask(__name__)
+        app.register_blueprint(create_blueprint(service=service, profiles_root=ROOT / "mock_data" / "profiles", data_root=ROOT / "mock_data" / "mqtt_store"))
+        client = app.test_client()
+
+        response = client.get("/newhorizons/api/gateways/TestHub/lan-devices")
+
+        self.assertEqual(response.status_code, 200)
+        items = json_payload(response)["items"]
+        self.assertTrue(any(item["device_uid"] == "3CDC7545CCD0" for item in items))
+
+    def test_gateway_migrate_device_endpoint_queues_commands(self):
+        service = NewHorizonsService(mock_mode=False)
+        sent = []
+        service.register_gateway_device("3CDC7545CCD0", sent.append)
+        service.register_gateway("TestHub", lambda _payload: None, {"client_type": "hub", "mac": "AA:BB:CC:DD:EE:FF"})
+        app = Flask(__name__)
+        app.register_blueprint(create_blueprint(service=service, profiles_root=ROOT / "mock_data" / "profiles", data_root=ROOT / "mock_data" / "mqtt_store"))
+        client = app.test_client()
+
+        response = client.post(
+            "/newhorizons/api/gateways/TestHub/migrate-device",
+            json={"device_uid": "3CDC7545CCD0"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json_payload(response)["status"], "queued")
+        self.assertEqual(sent[0]["payload"]["command"], "set_transport")
+        self.assertEqual(sent[0]["payload"]["hub_mac"], "AA:BB:CC:DD:EE:FF")
+        self.assertEqual(sent[1]["payload"]["command"], "reboot")
+
+    def test_gateway_migrate_device_endpoint_requires_known_hub_mac(self):
+        service = NewHorizonsService(mock_mode=False)
+        app = Flask(__name__)
+        app.register_blueprint(create_blueprint(service=service, profiles_root=ROOT / "mock_data" / "profiles", data_root=ROOT / "mock_data" / "mqtt_store"))
+        client = app.test_client()
+
+        response = client.post(
+            "/newhorizons/api/gateways/unknown-hub/migrate-device",
+            json={"device_uid": "3CDC7545CCD0"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(json_payload(response)["error"], "hub_mac_unknown")
+
+    def test_publish_gateway_command_sends_set_config_to_hub_session(self):
+        service = NewHorizonsService(mock_mode=False)
+        ws = FakeGatewayWebSocket([])
+        session = GatewaySocketSession(service, ws)
+        session._handle_json(json_text({"type": "hello", "gateway_id": "TestHub", "client_type": "hub"}))
+
+        queued = service.publish_gateway_command("TestHub", {
+            "command": "set_config",
+            "gateway_id": "TestHub",
+            "target_mode": "manual",
+            "manual_url": "ws://192.168.1.50:5051/newhorizons/gateway/ws",
+        })
+
+        self.assertEqual(queued["status"], "queued")
+        message = next(json.loads(m) for m in ws.sent if json.loads(m).get("type") == "gateway_command")
+        self.assertEqual(message["request_id"], queued["request_id"])
+        self.assertEqual(message["payload"]["command"], "set_config")
+
+    def test_publish_gateway_command_rejects_command_outside_allowlist(self):
+        service = NewHorizonsService(mock_mode=False)
+        session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+        session._handle_json(json_text({"type": "hello", "gateway_id": "TestHub", "client_type": "hub"}))
+
+        with self.assertRaisesRegex(ValueError, "unknown_command"):
+            service.publish_gateway_command("TestHub", {"command": "reboot"})
+
+    def test_publish_gateway_command_offline_hub_raises_unavailable(self):
+        service = NewHorizonsService(mock_mode=False)
+
+        with self.assertRaisesRegex(RuntimeError, "gateway_control_unavailable"):
+            service.publish_gateway_command("NeverConnectedHub", {"command": "factory_reset"})
+
+    def test_gateway_command_endpoint_reports_retryable_when_hub_offline(self):
+        service = NewHorizonsService(mock_mode=False)
+        app = Flask(__name__)
+        app.register_blueprint(create_blueprint(service=service, profiles_root=ROOT / "mock_data" / "profiles", data_root=ROOT / "mock_data" / "mqtt_store"))
+        client = app.test_client()
+
+        response = client.post(
+            "/newhorizons/api/gateway-command",
+            json={"gateway_id": "NeverConnectedHub", "payload": {"command": "factory_reset"}},
+        )
+
+        self.assertEqual(response.status_code, 503)
+        payload = json_payload(response)
+        self.assertEqual(payload["code"], "gateway_control_unavailable")
+        self.assertTrue(payload["retryable"])
+
+    def test_gateway_command_result_broadcasts_event_by_request_id(self):
+        service = NewHorizonsService(mock_mode=False)
+        events = []
+        service.add_event_listener(events.append)
+        session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+        session._handle_json(json_text({"type": "hello", "gateway_id": "TestHub", "client_type": "hub"}))
+
+        session._handle_json(json_text({
+            "type": "gateway_command_result",
+            "gateway_id": "TestHub",
+            "request_id": "req-set-config-1",
+            "result": {"ok": True, "message": "Applied, rebooting"},
+        }))
+
+        event = next(e for e in events if e.get("type") == "gateway_command_result")
+        self.assertEqual(event["request_id"], "req-set-config-1")
+        self.assertEqual(event["gateway_id"], "TestHub")
+        self.assertTrue(event["result"]["ok"])
+
+    def test_gateway_status_paired_devices_visible_on_gateway_snapshot(self):
+        # paired_devices rides the existing gateway_status heartbeat, the
+        # same piggyback pattern already used for channel/mac/ip -- see
+        # HubUplinkClient::sendGatewayStatus()'s header comment.
+        service = NewHorizonsService(mock_mode=False)
+        session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+        session._handle_json(json_text({"type": "hello", "gateway_id": "TestHub", "client_type": "hub"}))
+        session._handle_json(json_text({
+            "type": "gateway_status",
+            "gateway_id": "TestHub",
+            "payload": {
+                "paired_device_count": 1,
+                "paired_devices": [{"device_uid": "3CDC75413DC0", "mac": "3C:DC:75:41:3D:C0", "status": "paired"}],
+            },
+        }))
+
+        gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "TestHub")
+        self.assertEqual(gateway["paired_devices"], [{"device_uid": "3CDC75413DC0", "mac": "3C:DC:75:41:3D:C0", "status": "paired"}])
+
 
 if __name__ == "__main__":
     unittest.main()

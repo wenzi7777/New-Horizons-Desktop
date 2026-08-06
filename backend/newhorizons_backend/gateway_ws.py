@@ -177,6 +177,15 @@ class GatewaySocketSession:
             self.service.record_gateway_status(device_uid, payload)
             return
 
+        if msg_type == "gateway_command_result":
+            # Reply to a Backend-initiated gateway_command (Desktop's
+            # Manage Hub panel -> service.py::publish_gateway_command()) --
+            # see service.py::record_gateway_command_result()'s docstring
+            # for why this is just a broadcast, not a device-entry merge.
+            gateway_id = str(message.get("gateway_id") or self.gateway_id or "")
+            self.service.record_gateway_command_result(gateway_id, message)
+            return
+
         if msg_type == "device_result":
             payload = _payload_from_message(message)
             device_uid = str(message.get("device_uid") or payload.get("device_uid") or "").strip()

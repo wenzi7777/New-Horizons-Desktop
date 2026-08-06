@@ -24,6 +24,11 @@ export type DeviceEntry = {
   booting?: boolean;
   gateway_connected?: boolean;
   gateway_id?: string;
+  // Which kind of client is currently relaying this device -- "hub" (New
+  // Horizons Hub, ESP-NOW) or "gateway" (New Horizons Gateway software).
+  // Empty/absent when the device isn't relayed through either (e.g. direct
+  // UDP ingest with no gateway_wss hop at all).
+  client_type?: "hub" | "gateway" | string;
   last_gateway_seen_at?: string;
   gateway_state?: Record<string, unknown> | null;
   last_seen_at?: string;
@@ -111,6 +116,48 @@ export type GatewayEntry = {
   udp_dropped?: number;
   last_error?: string;
   claims?: GatewayClaimEntry[];
+  channel?: number;
+  channel_environment_id?: string;
+  // "hub" (New Horizons Hub) or "gateway" (New Horizons Gateway software) --
+  // absent/unknown gateway_ids default to "gateway" server-side.
+  client_type?: "hub" | "gateway" | string;
+  mac?: string;
+  ip?: string;
+  // Rides the Hub's existing gateway_status heartbeat (piggyback, like
+  // channel/mac/ip above) -- unregistered/UID-unknown ESP-NOW slots are
+  // included too (status "pending"), unlike serving_devices above which
+  // is a routing table, not a display list.
+  paired_devices?: HubPairedDeviceEntry[];
+};
+
+export type HubPairedDeviceEntry = {
+  device_uid: string;
+  mac: string;
+  status: "paired" | "pending" | string;
+};
+
+export type HubLanDeviceEntry = {
+  device_uid: string;
+  device_name: string;
+  transport_path: string;
+  gateway_id: string;
+  mode: string;
+};
+
+export type HubEnvironmentHub = {
+  gateway_id: string;
+  channel: number;
+  online: boolean;
+};
+
+export type HubEnvironmentEntry = {
+  environment_id: string;
+  name: string;
+  created_at?: string;
+  hub_ids?: string[];
+  hubs?: HubEnvironmentHub[];
+  conflict?: boolean;
+  conflicting_channels?: number[];
 };
 
 export type ProfileListEntry = {
@@ -369,6 +416,7 @@ export const api = {
   health: () => request<BackendHealth>("/health"),
   devices: () => request<{ items: DeviceEntry[] }>("/devices"),
   gateways: () => request<{ items: GatewayEntry[] }>("/gateways"),
+  hubEnvironments: () => request<{ items: HubEnvironmentEntry[] }>("/hub-environments"),
   deleteGateway: (gatewayId: string) =>
     request<{ status: string; gateway_id: string }>(`/gateways/${encodeURIComponent(gatewayId)}`, {
       method: "DELETE",
@@ -379,6 +427,23 @@ export const api = {
     request<QueuedCommandResponse>("/device-command", {
       method: "POST",
       body: { device_uid: deviceUid, payload },
+    }),
+  // Hub-itself counterpart to queueDeviceCommand above -- targets a
+  // gateway_id (the Hub process, e.g. set_config/factory_reset) rather
+  // than a downstream device_uid. See lib/wsClient.ts's
+  // sendGatewayCommand() for the WS-first/REST-fallback wrapper most UI
+  // code should call instead of this directly.
+  queueGatewayCommand: (gatewayId: string, payload: Record<string, unknown>) =>
+    request<{ status: string; request_id?: string; items: { status: string; transport?: string; gateway_id: string; payload: Record<string, unknown> }[] }>("/gateway-command", {
+      method: "POST",
+      body: { gateway_id: gatewayId, payload },
+    }),
+  listHubLanDevices: (gatewayId: string) =>
+    request<{ items: HubLanDeviceEntry[] }>(`/gateways/${encodeURIComponent(gatewayId)}/lan-devices`),
+  migrateDeviceToHub: (gatewayId: string, deviceUid: string) =>
+    request<{ status: string; device_uid: string }>(`/gateways/${encodeURIComponent(gatewayId)}/migrate-device`, {
+      method: "POST",
+      body: { device_uid: deviceUid },
     }),
   executeTerminal: (deviceUid: string, commandLine: string) =>
     request<TerminalExecuteResponse>("/terminal/execute", {

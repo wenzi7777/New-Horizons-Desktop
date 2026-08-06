@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { api, type DeviceEntry, type ProfileListEntry, type VisualizationEntry } from "../lib/api";
-import { normalizeDevice } from "../lib/device";
+import { isHubRelayed, normalizeDevice } from "../lib/device";
 import { fitProfileRect, profilePointToScreen, profilePointToWorld, type FittedProfileRect } from "../lib/profileLayout";
 import { useI18n } from "../i18n";
 import { useWsState } from "../lib/wsClient";
@@ -1332,6 +1332,7 @@ export function VisualizationPage() {
                 </label>
                 <div className="actions compact-actions">
                   <div className={`status-pill ${badgeState}`}>{badgeLabel}</div>
+                  {isHubRelayed(device) ? <span className="device-badge hub-relay">{t("deviceViaHub")}</span> : null}
                   <button
                     className={`button ${isRecording ? "danger" : "primary"}`}
                     type="button"
@@ -1518,6 +1519,7 @@ export function VisualizationPage() {
                     <div className="device-card-header">
                       <h3>{safeDisplayName(device, deviceUid)}</h3>
                       <span className={`device-badge ${device.mode ?? ""}`}>{device.mode ?? "-"}</span>
+                      {isHubRelayed(device) ? <span className="device-badge hub-relay">{t("deviceViaHub")}</span> : null}
                     </div>
                     <div className="device-uid">{deviceUid}</div>
                     <div className="device-meta-grid">

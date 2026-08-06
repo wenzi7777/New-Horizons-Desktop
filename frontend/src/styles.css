@@ -684,6 +684,12 @@ button:disabled {
   color: #8f5f00;
 }
 
+.device-badge.hub-relay {
+  border-color: #7c9fd0;
+  background: #eaf1fc;
+  color: #34568f;
+}
+
 .device-card-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1906,7 +1912,7 @@ button:disabled {
 
 .segmented-control {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   align-self: stretch;
   border: 1px solid var(--line);
@@ -1921,11 +1927,32 @@ button:disabled {
   background: transparent;
   color: var(--text-dim);
   padding: 9px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 
 .segmented-control button.active {
   background: var(--accent);
   color: #fff;
+}
+
+.segmented-control button.recommended {
+  border: 1px solid var(--accent);
+}
+
+.segmented-control button small {
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.field-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 4px;
+  display: block;
 }
 
 .metric {
@@ -2315,6 +2342,10 @@ button:disabled {
 
 .add-device-modal {
   width: min(1040px, 100%);
+}
+
+.hub-manage-modal {
+  width: min(640px, 100%);
 }
 
 .add-device-card {
@@ -3419,6 +3450,30 @@ button:disabled {
 .gateway-claim-list small {
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.gateways-section {
+  margin-top: 8px;
+}
+
+.gateways-section > h2 {
+  margin: 0 0 12px;
+}
+
+.hub-environment-group {
+  margin-bottom: 20px;
+}
+
+.hub-environment-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
 .empty-gateway-state {
