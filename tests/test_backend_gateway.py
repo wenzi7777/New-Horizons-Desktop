@@ -6,7 +6,7 @@ import struct
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1393,6 +1393,99 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         })
         self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal",
                          "gateway_status with mode='normal' must be accepted after exit_maintenance")
+
+    def test_gateway_status_stale_safe_maintenance_does_not_override_fresh_direct_normal(self):
+        # Regression for the Desktop UI mode-flicker bug: a device that is
+        # actually normal, but still (or again) shows up in some Gateway/Hub's
+        # own relayed heartbeat with a stale mode="safe_maintenance", must not
+        # have its authoritative, freshly-reported direct mode overwritten.
+        # The pre-fix guard only protected the exact string "maintenance" and
+        # only against being downgraded to "normal" -- it did nothing for
+        # "safe_maintenance"/"safemaintenance" or for the reverse direction,
+        # so this exact case flickered.
+        service = NewHorizonsService(mock_mode=False)
+        gateway_id = "gw-001"
+        device_uid = "3CDC7545CCD0"
+        service.register_gateway_device(device_uid, lambda _msg: None, gateway_id=gateway_id)
+
+        # A direct status result reports the device's real, current mode.
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "ok": True,
+            "cmd": "status",
+            "message": "status",
+            "mode": "normal",
+            "request_id": "req-s1",
+            "data": {},
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal")
+
+        # A Gateway/Hub heartbeat relays a stale cached "safe_maintenance"
+        # for the same device, arriving right after the fresh direct report.
+        service.record_gateway_summary(gateway_id, {
+            "gateway_name": "test-gw",
+            "gateway_id": gateway_id,
+            "enabled": True,
+            "version": "v0.2.2",
+            "state": {
+                "devices": [{
+                    "device_uid": device_uid,
+                    "device_name": "New Horizons OS-3CDC7545CCD0",
+                    "mode": "safe_maintenance",
+                    "connected": True,
+                    "findme_state": "attached",
+                }],
+                "denied_devices": [],
+                "claims": [],
+            },
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal",
+                         "a stale relayed safe_maintenance must not override a fresh direct normal")
+
+    def test_gateway_status_relay_mode_accepted_after_direct_mode_goes_stale(self):
+        # Counterpart to the test above: the freshness guard must not freeze
+        # mode forever -- once the last direct report is older than
+        # DIRECT_MODE_FRESH_SEC, a relayed snapshot should be accepted again.
+        service = NewHorizonsService(mock_mode=False)
+        gateway_id = "gw-001"
+        device_uid = "3CDC7545CCD0"
+        service.register_gateway_device(device_uid, lambda _msg: None, gateway_id=gateway_id)
+
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "ok": True,
+            "cmd": "status",
+            "message": "status",
+            "mode": "normal",
+            "request_id": "req-s1",
+            "data": {},
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "normal")
+
+        # Back-date the direct-mode freshness marker without a real sleep.
+        stale_at = (datetime.now(timezone.utc) - timedelta(seconds=service.DIRECT_MODE_FRESH_SEC + 5)).isoformat()
+        with service._lock:
+            service._devices[device_uid]["last_direct_mode_at"] = stale_at
+
+        service.record_gateway_summary(gateway_id, {
+            "gateway_name": "test-gw",
+            "gateway_id": gateway_id,
+            "enabled": True,
+            "version": "v0.2.2",
+            "state": {
+                "devices": [{
+                    "device_uid": device_uid,
+                    "device_name": "New Horizons OS-3CDC7545CCD0",
+                    "mode": "safe_maintenance",
+                    "connected": True,
+                    "findme_state": "attached",
+                }],
+                "denied_devices": [],
+                "claims": [],
+            },
+        })
+        self.assertEqual((service.get_device(device_uid) or {}).get("mode"), "safe_maintenance",
+                         "once the direct mode is stale, a relayed snapshot should be accepted again")
 
     def _seed_gateway_connected_device(self, service, device_uid, gateway_id):
         """Seed a gateway-relayed device that the frontend regards as connected."""

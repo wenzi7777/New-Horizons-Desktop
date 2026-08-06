@@ -48,6 +48,14 @@ class NewHorizonsService:
     FINDME_DISCONNECT_GRACE_SEC = 5.0
     STALE_DEVICE_CHECK_INTERVAL_SEC = 5
     STALE_DEVICE_TIMEOUT_SEC = 12
+    # A Gateway/Hub heartbeat only relays its own cached view of a device's
+    # mode, on its own independent cadence -- it can never be fresher than
+    # the device's own direct status/result reports. Without this, the two
+    # independently-cadenced writers (direct vs. relayed) kept re-asserting
+    # their own value for the same device and the merged mode (and the
+    # Desktop UI) flickered continuously between them. ~3x the ~5s cadence
+    # both direct heartbeats and Gateway/Hub summaries use in practice.
+    DIRECT_MODE_FRESH_SEC = 15
     COMMAND_UNAVAILABLE_ERRORS = {
         "control_transport_not_started",
         "udp_control_not_started",
@@ -1389,13 +1397,18 @@ class NewHorizonsService:
         }
         runtime = device.get("runtime") if isinstance(device.get("runtime"), dict) else {}
         mode = device.get("mode") or runtime.get("mode")
-        # Don't let a stale gateway snapshot silently downgrade a maintenance mode
-        # that the backend already knows about from an authoritative device result.
-        # _known_mode_from_status_locked reads _latest_status under the same lock.
-        if mode == "normal":
-            known_mode = self._known_mode_from_status_locked(device_uid)
-            if known_mode == "maintenance":
-                mode = "maintenance"
+        # A Gateway/Hub heartbeat only relays its own cached view of this
+        # device's mode, on its own independent cadence -- it is never
+        # fresher than the device's own direct status/result reports. If we
+        # already have a recent-enough direct-sourced mode, keep it instead
+        # of taking whatever this relayed snapshot says (regardless of
+        # which of normal/maintenance/safe_maintenance/safemaintenance
+        # either side is asserting) -- otherwise the two independently-
+        # cadenced writers keep re-asserting their own value for the same
+        # device and the merged mode (and the Desktop UI) flickers
+        # continuously between them. See _has_fresh_direct_mode_locked().
+        if mode and self._has_fresh_direct_mode_locked(existing, seen_at):
+            mode = existing.get("mode")
         if boot_transition is not None:
             incoming["mode"] = "booting"
             incoming["booting"] = True
@@ -2172,6 +2185,8 @@ class NewHorizonsService:
             merged = self._merge_device_entry(existing, entry)
             merged["last_status"] = payload
             self._clear_incompatible_visualization_locked(device_uid, merged)
+            if merged.get("mode"):
+                merged["last_direct_mode_at"] = payload.get("received_at")
             self._devices[device_uid] = merged
             self._clear_boot_pending_if_mode_changed_locked(device_uid, previous_mode, self._mode_from_payload(payload))
             event_item = self._decorate_device_entry(merged)
@@ -2292,6 +2307,8 @@ class NewHorizonsService:
                 if maintenance_mode is not None:
                     merged["mode"] = maintenance_mode
             self._clear_incompatible_visualization_locked(device_uid, merged)
+            if merged.get("mode"):
+                merged["last_direct_mode_at"] = payload.get("received_at")
             self._devices[device_uid] = merged
             if self._is_status_snapshot_result(payload):
                 self._clear_boot_pending_if_mode_changed_locked(device_uid, previous_mode, self._mode_from_payload(payload))
@@ -2365,6 +2382,11 @@ class NewHorizonsService:
             merged["recording_enabled"] = device_uid in self._recording_enabled
             if device_uid in self._recording_errors:
                 merged["recording_error"] = self._recording_errors[device_uid]
+            if merged.get("mode"):
+                # This payload only carries received_at_ms (epoch ms), not
+                # the ISO string the other two direct paths use -- stamp
+                # with "now" directly instead.
+                merged["last_direct_mode_at"] = datetime.now(timezone.utc).isoformat()
             self._devices[device_uid] = merged
             is_new_device = not bool(existing)
             event_item = self._decorate_device_entry(merged)
@@ -2619,6 +2641,20 @@ class NewHorizonsService:
     def _known_mode_from_status_locked(self, device_uid: str) -> str:
         status = self._latest_status.get(device_uid) or {}
         return self._mode_from_payload(status)
+
+    def _has_fresh_direct_mode_locked(self, existing: dict[str, Any], now_iso: str) -> bool:
+        # `last_direct_mode_at` is only ever stamped by the direct
+        # status/result/parsed write paths (never by the Gateway/Hub relay
+        # path) -- see _record_status()/_record_result()/_record_parsed().
+        direct_at = existing.get("last_direct_mode_at")
+        if not direct_at or not existing.get("mode"):
+            return False
+        direct_dt = self._parse_iso_datetime(str(direct_at))
+        if direct_dt is None:
+            return False
+        now_dt = self._parse_iso_datetime(now_iso) or datetime.now(timezone.utc)
+        age = now_dt.timestamp() - direct_dt.timestamp()
+        return 0 <= age <= self.DIRECT_MODE_FRESH_SEC
 
     def _clear_boot_pending_if_mode_changed_locked(self, device_uid: str, previous_mode: str, current_mode: str) -> None:
         transition = self._boot_transitions.get(device_uid)
