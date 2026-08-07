@@ -2210,7 +2210,11 @@ export function DeviceSettingsPage() {
     setBusyCommand(command);
     try {
       const response = await queue(payload, timeoutMs);
-      const ok = response.result?.status !== "error" && response.result?.ok !== false;
+      // response.result is null when the client-side timeout fired before
+      // any command_result arrived (see wsClient.ts's sendDeviceCommand())
+      // -- must be treated as a failure, not defaulted to true just
+      // because neither "error" condition below happens to match null.
+      const ok = response.result !== null && response.result?.status !== "error" && response.result?.ok !== false;
       const resultMessage = response.result?.message ?? response.result?.status ?? t("terminalNoResponse");
       pushOperationLog({
         id: operationLogIdRef.current++,
@@ -2238,11 +2242,17 @@ export function DeviceSettingsPage() {
   }
 
   async function refreshRamStatus() {
-    if (!deviceUid || isControlUnavailable || ramRefreshInFlightRef.current) return;
+    // busyCommand check added so this doesn't collide with a manual
+    // command in flight -- unlike the other auto-refresh effects below,
+    // this one is a repeating interval rather than a one-shot, so the
+    // check lives here (checked fresh on every call) instead of an effect
+    // dependency array, to avoid tearing down/recreating the interval
+    // every time busyCommand changes.
+    if (!deviceUid || isControlUnavailable || ramRefreshInFlightRef.current || busyCommand) return;
     ramRefreshInFlightRef.current = true;
     setRamRefreshInFlight(true);
     try {
-      await run(t("ramRefresh"), { command: "memory_status" }, 10000);
+      await run(t("ramRefresh"), { command: "memory_status" }, 18000);
       setRamLastUpdated(new Date().toLocaleTimeString());
     } catch (error) {
       void error;
@@ -2282,7 +2292,7 @@ export function DeviceSettingsPage() {
     const refreshKey = `${deviceUid}:${activeSection}`;
     if (statusDrivenSectionAutoRefreshKeyRef.current === refreshKey || busyCommand) return;
     statusDrivenSectionAutoRefreshKeyRef.current = refreshKey;
-    void run(t("refreshStatus"), { command: "status" }, 10000).catch(() => undefined);
+    void run(t("refreshStatus"), { command: "status" }, 18000).catch(() => undefined);
   }, [activeSection, busyCommand, deviceUid, isControlUnavailable, t]);
 
   useEffect(() => {
@@ -2290,14 +2300,14 @@ export function DeviceSettingsPage() {
     if (analogPinsFromStatus && selectPinsFromStatus) return;
     if (pinStatusAutoRequestedRef.current[deviceUid]) return;
     pinStatusAutoRequestedRef.current[deviceUid] = true;
-    void run(t("refreshStatus"), { command: "status" }, 10000).catch(() => undefined);
+    void run(t("refreshStatus"), { command: "status" }, 18000).catch(() => undefined);
   }, [activeSection, analogPinsFromStatus, busyCommand, deviceUid, isControlUnavailable, selectPinsFromStatus, t]);
 
   function runIndicatorsStatusRefresh() {
     if (!deviceUid || isControlUnavailable) return;
     lastIndicatorsStatusAutoRefreshKeyRef.current = `${deviceUid}:hardware`;
     indicatorsStatusAutoRefreshPendingRef.current = false;
-    void run(t("refreshStatus"), { command: "status" }, 10000).catch(() => undefined);
+    void run(t("refreshStatus"), { command: "status" }, 18000).catch(() => undefined);
   }
 
   useEffect(() => {
