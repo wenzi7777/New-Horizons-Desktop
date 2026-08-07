@@ -1202,6 +1202,10 @@ function CalibrationWorkbench({
   const [calibrationLevelPreview, setCalibrationLevelPreview] = useState<CalibrationLevelPreview | null>(null);
   const [tarePreviewError, setTarePreviewError] = useState("");
   const [calibrationPreviewError, setCalibrationPreviewError] = useState("");
+  // One-shot guard for the mount-time calibration_status fetch below, in
+  // the same style as the page's other auto-refresh effects
+  // (statusDrivenSectionAutoRefreshKeyRef / pinStatusAutoRequestedRef).
+  const calibrationSyncedKeyRef = useRef("");
 
   useEffect(() => {
     setCalibrationState(parseCalibrationState(calibrationStatus));
@@ -1244,9 +1248,27 @@ function CalibrationWorkbench({
   }
 
   useEffect(() => {
-    if (!deviceUid || isDeviceOffline || busyCommand) return;
+    // Deliberately does NOT depend on busyCommand. Guarding on it *and*
+    // depending on it makes this effect self-retriggering: run() sets
+    // busyCommand, which re-runs the effect (guard skips), then clearing
+    // it on completion re-runs the effect again -- which now passes the
+    // guard and fires another calibration_status. That looped forever the
+    // moment the Maintenance tab opened: a continuous command stream, the
+    // device's LED flashing on every one, and the panel never settling on
+    // a result.
+    //
+    // Collision safety doesn't need busyCommand here anyway -- run() is
+    // itself a synchronous single-flight mutex (commandInFlightRef). All
+    // this effect needs is to fire once per device, which is what the ref
+    // key below does; it re-arms if the device goes offline and back.
+    if (!deviceUid || isDeviceOffline) {
+      calibrationSyncedKeyRef.current = "";
+      return;
+    }
+    if (calibrationSyncedKeyRef.current === deviceUid) return;
+    calibrationSyncedKeyRef.current = deviceUid;
     void syncCalibrationStatus().catch(() => undefined);
-  }, [deviceUid, isDeviceOffline, busyCommand]);
+  }, [deviceUid, isDeviceOffline]);
 
   const totalSensors = rows * cols;
   const savedTareLookup = calibrationCellLookup(tarePreview?.saved ?? null);
