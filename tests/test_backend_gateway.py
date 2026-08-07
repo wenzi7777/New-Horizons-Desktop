@@ -446,6 +446,40 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         devices = {item["device_uid"]: item for item in service.list_devices()}
         self.assertFalse(devices["3CDC7545CCD0"]["gateway_connected"])
 
+    def test_gateway_summary_stale_non_owner_report_does_not_flip_display(self):
+        service = NewHorizonsService(mock_mode=False)
+        device_uid = "3CDC7545CCD0"
+        sent_a = []
+        sent_b = []
+        service.register_gateway("gw-A", sent_a.append, {"gateway_name": "Gateway A"})
+        service.register_gateway("gw-B", sent_b.append, {"gateway_name": "Gateway B"})
+
+        # gw-A is the original owner.
+        service.record_gateway_summary("gw-A", {
+            "gateway_name": "Gateway A",
+            "state": {"devices": [{"device_uid": device_uid, "connected": True}]},
+        })
+        device = {item["device_uid"]: item for item in service.list_devices()}[device_uid]
+        self.assertEqual(device["gateway_id"], "gw-A")
+
+        # Device migrates to gw-B; ownership legitimately transfers.
+        service.record_gateway_summary("gw-B", {
+            "gateway_name": "Gateway B",
+            "state": {"devices": [{"device_uid": device_uid, "connected": True}]},
+        })
+        device = {item["device_uid"]: item for item in service.list_devices()}[device_uid]
+        self.assertEqual(device["gateway_id"], "gw-B")
+
+        # gw-A, unaware the device left, keeps re-reporting its own (now
+        # stale) view -- this must NOT flip the display back to gw-A.
+        service.record_gateway_summary("gw-A", {
+            "gateway_name": "Gateway A",
+            "state": {"devices": [{"device_uid": device_uid, "connected": False}]},
+        })
+        device = {item["device_uid"]: item for item in service.list_devices()}[device_uid]
+        self.assertEqual(device["gateway_id"], "gw-B")
+        self.assertTrue(device["gateway_connected"])
+
     def test_gateway_disconnect_preserves_last_live_seen_at(self):
         service = NewHorizonsService(mock_mode=False)
         sent = []

@@ -1430,7 +1430,25 @@ class NewHorizonsService:
         if actually_connected:
             incoming["last_live_seen_at"] = seen_at
             incoming["last_kind"] = "gateway"
-        elif existing and (existing.get("gateway_connected") is not False or existing.get("gateway_id") == gateway_id):
+        elif existing and (
+            not existing.get("gateway_id")
+            or not gateway_id
+            or existing.get("gateway_id") == gateway_id
+        ):
+            # A disconnected/stale report only updates the display if it
+            # comes from the current owner (existing.gateway_id ==
+            # gateway_id), if there's no recorded owner yet to protect
+            # (existing.gateway_id empty -- e.g. a device only seen so far
+            # via a direct result/findme path that never set gateway_id),
+            # or if it's an explicit "no owner" clear (gateway_id=="", used
+            # by delete_gateway()/unregister_gateway_sender() when the
+            # owning gateway/hub itself just went away). What this blocks
+            # is specifically a *different*, still-registered gateway/hub
+            # overwriting a live owner's entry with its own stale view --
+            # that used to also be let through whenever the display wasn't
+            # already "disconnected", which let a stale, long-departed
+            # gateway/hub keep re-flipping the display back to itself on
+            # every heartbeat.
             incoming["last_kind"] = existing.get("last_kind") or "gateway"
         else:
             return None
