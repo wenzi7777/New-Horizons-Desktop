@@ -1244,9 +1244,9 @@ function CalibrationWorkbench({
   }
 
   useEffect(() => {
-    if (!deviceUid || isDeviceOffline) return;
+    if (!deviceUid || isDeviceOffline || busyCommand) return;
     void syncCalibrationStatus().catch(() => undefined);
-  }, [deviceUid, isDeviceOffline]);
+  }, [deviceUid, isDeviceOffline, busyCommand]);
 
   const totalSensors = rows * cols;
   const savedTareLookup = calibrationCellLookup(tarePreview?.saved ?? null);
@@ -1994,6 +1994,13 @@ export function DeviceSettingsPage() {
   const [operationToast, setOperationToast] = useState<OperationLogEntry | null>(null);
   const [operationLog, setOperationLog] = useState<OperationLogEntry[]>([]);
   const [busyCommand, setBusyCommand] = useState("");
+  // The actual mutex for run() below -- busyCommand (React state) is only
+  // updated asynchronously, so two effects that both read busyCommand==""
+  // in the same tick can both decide to call run() before either's
+  // setBusyCommand("...") commits. This ref is checked-and-set
+  // synchronously at the top of run(), so at most one command is ever
+  // in flight for this device from the frontend at a time.
+  const commandInFlightRef = useRef(false);
   const toastTimerRef = useRef(0);
   const operationLogIdRef = useRef(1);
   const pinStatusAutoRequestedRef = useRef<Record<string, boolean>>({});
@@ -2207,6 +2214,15 @@ export function DeviceSettingsPage() {
     if (isControlUnavailable && isLiveQueryCommand(command)) {
       return { queued: null, result: null };
     }
+    // Synchronous mutex -- see commandInFlightRef's declaration comment.
+    // Skips the dispatch entirely (no log entry) rather than queueing,
+    // since every caller of run() is either a manual click (already
+    // button-disabled while busyCommand is set) or a best-effort refresh
+    // that will naturally retry on its own next tick/mount.
+    if (commandInFlightRef.current) {
+      return { queued: null, result: null };
+    }
+    commandInFlightRef.current = true;
     setBusyCommand(command);
     try {
       const response = await queue(payload, timeoutMs);
@@ -2237,6 +2253,7 @@ export function DeviceSettingsPage() {
       });
       throw error;
     } finally {
+      commandInFlightRef.current = false;
       setBusyCommand("");
     }
   }
