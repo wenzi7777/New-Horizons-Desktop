@@ -60,40 +60,42 @@ function AuthenticatedApp() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div>
+        <div className="topbar-brand">
           <h1>{t("appTitle")}</h1>
           <small className="app-version">{APP_VERSION}</small>
         </div>
-        <div className="topbar-actions">
-          <div className="topbar-session">
-            <label className="language-select">
-              <span>{t("language")}</span>
-              <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
-                <option value="en">English</option>
-                <option value="ja">日本語</option>
-                <option value="zh-CN">简体中文</option>
-              </select>
-            </label>
-            <div className="session-chip">
-              <span>{user?.username}</span>
-              <small>{role}</small>
-            </div>
-            <button className="button" type="button" onClick={() => void logout()}>
-              {t("logout")}
-            </button>
+        <nav className="topnav" aria-label={t("appTitle")}>
+          {navItems.map((item) => (
+            <NavLink
+              key={item.to}
+              className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+              to={item.to}
+              end={item.to === "/"}
+            >
+              {t(item.labelKey)}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="topbar-session">
+          <label className="language-select">
+            <span className="sr-only">{t("language")}</span>
+            <select
+              value={locale}
+              onChange={(event) => setLocale(event.target.value as Locale)}
+              aria-label={t("language")}
+            >
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="zh-CN">简体中文</option>
+            </select>
+          </label>
+          <div className="session-chip">
+            <span>{user?.username}</span>
+            <small>{role}</small>
           </div>
-          <nav className="topnav">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
-                to={item.to}
-                end={item.to === "/"}
-              >
-                {t(item.labelKey)}
-              </NavLink>
-            ))}
-          </nav>
+          <button className="button ghost compact" type="button" onClick={() => void logout()}>
+            {t("logout")}
+          </button>
         </div>
       </header>
       <main className="page-shell">

@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -241,7 +242,12 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('className="operation-toast"', source)
         self.assertNotIn('className="operation-toast-backdrop"', source)
         self.assertNotIn(".operation-toast-backdrop", styles)
-        self.assertNotIn("backdrop-filter", styles)
+        # The app shell / modals may use backdrop-filter (translucent chrome),
+        # but the operation toast must stay an opaque solid surface.
+        toast_rules = re.findall(r"\.operation-toast[^\n{]*\{[^}]*\}", styles)
+        self.assertTrue(toast_rules, "expected .operation-toast rules in styles.css")
+        for rule in toast_rules:
+            self.assertNotIn("backdrop-filter", rule)
         self.assertIn('className="operation-toast-close"', source)
         self.assertIn('aria-label={t("closeToast")}', source)
         self.assertIn("setOperationToast(null)", source)
