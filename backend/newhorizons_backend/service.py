@@ -2345,8 +2345,21 @@ class NewHorizonsService:
 
     @staticmethod
     def _is_status_snapshot_result(payload: dict[str, Any]) -> bool:
-        command = str(payload.get("command") or "")
+        # Delivery/transport failures often reuse command="status" (the
+        # original request). They must not replace last_status with an
+        # error envelope (empty of wifi/battery/firmware_version).
         message = str(payload.get("message") or "")
+        if message in (
+            "command_delivery_timeout",
+            "command_expired",
+            "device_not_connected_to_gateway",
+            "switch_command_delivery_timeout",
+        ):
+            return False
+        status = str(payload.get("status") or "").lower()
+        if status == "error" or payload.get("ok") is False:
+            return False
+        command = str(payload.get("command") or "")
         return command in ("status", "query", "memory_status", "scan_health", "storage_status", "set_log", "set_ota_config", "check_update", "enter_maintenance", "exit_maintenance") or message in (
             "status",
             "memory_status",

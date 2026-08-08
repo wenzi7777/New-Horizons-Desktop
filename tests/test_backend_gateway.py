@@ -1209,6 +1209,73 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         devices = {item["device_uid"]: item for item in service.list_devices()}
         self.assertEqual(devices["3CDC7545CCD0"]["last_status"]["memory"]["heap_free"], 81920)
 
+    def test_status_delivery_timeout_does_not_clobber_last_status(self):
+        # Gateway timeouts keep command="status" from the original request.
+        # Treating them as status snapshots used to write the error envelope
+        # into last_status (firmware_version None, no nested objects).
+        service = NewHorizonsService(mock_mode=False)
+        device_uid = "3CDC7545CCD0"
+        service.record_gateway_result(
+            device_uid,
+            {
+                "device_uid": device_uid,
+                "command": "status",
+                "message": "status",
+                "status": "ok",
+                "ok": True,
+                "data": {
+                    "firmware_version": "v0.16.1",
+                    "wifi": {"ip": "192.168.1.10"},
+                },
+                "firmware_version": "v0.16.1",
+            },
+        )
+        devices = {item["device_uid"]: item for item in service.list_devices()}
+        self.assertEqual(devices[device_uid]["last_status"]["firmware_version"], "v0.16.1")
+        self.assertEqual(devices[device_uid]["last_status"]["wifi"]["ip"], "192.168.1.10")
+
+        service.record_gateway_result(
+            device_uid,
+            {
+                "device_uid": device_uid,
+                "request_id": "req-timeout",
+                "command": "status",
+                "status": "error",
+                "message": "command_delivery_timeout",
+            },
+        )
+        devices = {item["device_uid"]: item for item in service.list_devices()}
+        self.assertEqual(devices[device_uid]["last_result"]["message"], "command_delivery_timeout")
+        self.assertEqual(devices[device_uid]["last_status"]["firmware_version"], "v0.16.1")
+        self.assertEqual(devices[device_uid]["last_status"]["wifi"]["ip"], "192.168.1.10")
+
+    def test_is_status_snapshot_result_rejects_transport_errors(self):
+        self.assertFalse(
+            NewHorizonsService._is_status_snapshot_result(
+                {"command": "status", "status": "error", "message": "command_delivery_timeout"}
+            )
+        )
+        self.assertFalse(
+            NewHorizonsService._is_status_snapshot_result(
+                {"command": "status", "status": "error", "message": "command_expired"}
+            )
+        )
+        self.assertFalse(
+            NewHorizonsService._is_status_snapshot_result(
+                {"command": "memory_status", "ok": False, "message": "device_not_connected_to_gateway"}
+            )
+        )
+        self.assertTrue(
+            NewHorizonsService._is_status_snapshot_result(
+                {"command": "status", "message": "status", "status": "ok"}
+            )
+        )
+        self.assertTrue(
+            NewHorizonsService._is_status_snapshot_result(
+                {"command": "memory_status", "message": "memory_status"}
+            )
+        )
+
     def test_visualization_target_fps_tracks_device_scan_timing_without_rounding_or_cap(self):
         service = NewHorizonsService(mock_mode=False)
         self.assertEqual(service.visualization_target_fps("3CDC7545CCD0"), 60)
