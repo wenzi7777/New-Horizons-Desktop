@@ -2351,7 +2351,21 @@ class NewHorizonsService:
         request_id = str(payload.get("request_id") or "")
         if request_id:
             self._forget_pending_command(device_uid, {"request_id": request_id})
-        entry = self._normalize_device_entry(device_uid, payload, kind="result")
+        is_status_snapshot = self._is_status_snapshot_result(payload)
+        inner = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        entry_payload = dict(payload)
+        if is_status_snapshot and inner:
+            # Gateway-relayed Arduino control results retain the firmware's
+            # full status under `data`. Use its identity fields when the
+            # result envelope omits them, rather than transiently falling
+            # back to the bare UID in the device list.
+            for key in (
+                "device_name", "mode", "firmware_version", "hardware_model",
+                "matrix_shape", "findme", "runtime", "logging", "system",
+            ):
+                if entry_payload.get(key) in (None, "") and key in inner:
+                    entry_payload[key] = inner[key]
+        entry = self._normalize_device_entry(device_uid, entry_payload, kind="result")
         with self._lock:
             purged_aliases = self._purge_short_aliases_locked(device_uid)
             previous_mode = self._known_mode_from_status_locked(device_uid)
@@ -2359,13 +2373,12 @@ class NewHorizonsService:
             existing = self._devices.get(device_uid, {})
             merged = self._merge_device_entry(existing, entry)
             merged["last_result"] = payload
-            if self._is_status_snapshot_result(payload):
+            if is_status_snapshot:
                 # Firmware wraps all status fields under a "data" key
                 # (e.g. {"ok":true,"cmd":"status","data":{"wifi":{...},...}}).
                 # The frontend reads flat fields (status.wifi, status.battery …),
                 # matching the heartbeat/stream path.  Hoist the inner "data"
                 # dict to the top level so both paths produce the same shape.
-                inner = payload.get("data") if isinstance(payload.get("data"), dict) else {}
                 if inner:
                     status_payload: dict[str, Any] = dict(inner)
                     for k in ("device_uid", "device_id", "received_at",
@@ -2393,7 +2406,7 @@ class NewHorizonsService:
             if merged.get("mode"):
                 merged["last_direct_mode_at"] = payload.get("received_at")
             self._devices[device_uid] = merged
-            if self._is_status_snapshot_result(payload):
+            if is_status_snapshot:
                 self._clear_boot_pending_if_mode_changed_locked(device_uid, previous_mode, self._mode_from_payload(payload))
             event_item = self._decorate_device_entry(merged)
         self._emit_event(
@@ -2482,7 +2495,12 @@ class NewHorizonsService:
             if isinstance(payload.get("battery"), dict):
                 latest_status = merged.get("last_status")
                 latest_status = dict(latest_status) if isinstance(latest_status, dict) else {}
-                latest_status["battery"] = dict(payload["battery"])
+                existing_battery = latest_status.get("battery")
+                latest_status["battery"] = (
+                    self._merge_nested_status_dict(existing_battery, payload["battery"])
+                    if isinstance(existing_battery, dict)
+                    else dict(payload["battery"])
+                )
                 latest_status["device_uid"] = device_uid
                 latest_status.setdefault("device_id", device_uid)
                 latest_status["received_at"] = datetime.now(timezone.utc).isoformat()

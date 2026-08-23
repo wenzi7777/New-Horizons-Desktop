@@ -68,6 +68,55 @@ class ArduinoControlTcpTest(unittest.TestCase):
             "soc_percent": 73.5,
         })
 
+    def test_v5_battery_stream_preserves_rate_and_profile_from_full_status(self):
+        service = NewHorizonsService(mock_mode=False)
+        service._udp_ingest = object()
+        device_uid = "3CDC7545CCD0"
+        service._record_status(device_uid, {
+            "device_name": "New Horizons OS-3CDC7545CCD0",
+            "battery": {
+                "battery_present": True,
+                "soc_centi_percent": 7200,
+                "rate": -1892,
+                "battery_profile": "manual",
+            },
+        })
+
+        service._handle_udp_datagram(arduino_v5_battery_packet(), ("192.168.50.44", 49152))
+
+        battery = service.get_device(device_uid)["last_status"]["battery"]
+        self.assertEqual(battery["vbat_mv"], 4175)
+        self.assertEqual(battery["soc_centi_percent"], 7350)
+        self.assertEqual(battery["rate"], -1892)
+        self.assertEqual(battery["battery_profile"], "manual")
+
+    def test_gateway_status_result_keeps_name_from_its_nested_status_data(self):
+        service = NewHorizonsService(mock_mode=False)
+        device_uid = "3CDC7545CCD0"
+        service._record_status(device_uid, {
+            "device_name": "New Horizons OS-3CDC7545CCD0",
+        })
+
+        service.record_gateway_result(device_uid, {
+            "device_uid": device_uid,
+            "command": "status",
+            "status": "ok",
+            "ok": True,
+            "data": {
+                "device_uid": device_uid,
+                "device_name": "New Horizons OS-3CDC7545CCD0",
+                "battery": {
+                    "battery_present": True,
+                    "soc_centi_percent": 7350,
+                    "rate": -1892,
+                },
+            },
+        })
+
+        device = service.get_device(device_uid)
+        self.assertEqual(device["device_name"], "New Horizons OS-3CDC7545CCD0")
+        self.assertEqual(device["last_status"]["battery"]["rate"], -1892)
+
     def test_v5_extension_stream_is_rejected_until_the_device_has_an_authoritative_layout(self):
         service = NewHorizonsService(mock_mode=False)
         service._udp_ingest = object()
