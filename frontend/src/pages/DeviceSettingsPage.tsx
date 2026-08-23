@@ -5,6 +5,7 @@ import { api, type PressureCalReadings, type PressureCalServerPreset } from "../
 
 import { useI18n } from "../i18n";
 import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
+import { batteryProfileSetupRequired, buildBatteryProfileCommand } from "../lib/batteryProfile";
 import {
   getPrimaryStepDisabledReason,
   getPrimaryStepStates,
@@ -1925,7 +1926,7 @@ export function DeviceSettingsPage() {
   const analogPinsFromStatus = arrayCsv(matrixLayout.analog_pins ?? matrixLayout.active_rows);
   const selectPinsFromStatus = arrayCsv(matrixLayout.select_pins ?? matrixLayout.active_cols);
   const wifi = recordValue(status.wifi);
-  const batteryStatus = recordValue(status.battery ?? (lastResultCommand === "set_charge_profile" ? lastResult.battery : undefined));
+  const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile"].includes(lastResultCommand) ? lastResult.battery : undefined));
   const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" ? lastResult.power : undefined));
   // The backend hoists memory_status's `data` (heap_*) onto last_status's top
   // level, so read from there; fall back to the fresh memory_status result.
@@ -1969,7 +1970,7 @@ export function DeviceSettingsPage() {
 
   const [activeSection, setActiveSection] = useState<SettingsSection>("overview");
   const boardProfile = useMemo(() => boardProfileForHardwareModel(normalized?.hardwareModel), [normalized?.hardwareModel]);
-  const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : t("powerStatusCopy");
+  const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : boardProfile.hardwareModel === "VD-CTL/R v1.5.F 2026.7" ? t("powerStatusCopyV15") : t("powerStatusCopy");
   const pinLayoutCopy = boardProfile.powerUx === "remote_only" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1");
   const [manifestUrl, setManifestUrl] = useState(() => defaultManifestUrlForHardwareModel(normalized?.hardwareModel));
   const [autoOtaOnBoot, setAutoOtaOnBoot] = useState(otaConfig.auto_apply_on_boot === true);
@@ -1989,6 +1990,9 @@ export function DeviceSettingsPage() {
   const [streamBufferEnabled, setStreamBufferEnabled] = useState(streamBuffer.enabled !== false);
   const [streamBufferMode, setStreamBufferMode] = useState(stringValue(streamBuffer.mode, "standard"));
   const [chargeProfile, setChargeProfile] = useState(stringValue(batteryStatus.profile, "balanced"));
+  const [batteryCapacityChoice, setBatteryCapacityChoice] = useState<"200" | "400" | "custom">("400");
+  const [customBatteryCapacity, setCustomBatteryCapacity] = useState("");
+  const [maxBatteryChargeCurrent, setMaxBatteryChargeCurrent] = useState("250");
   const [imuEnabled, setImuEnabled] = useState(imu.enabled !== false);
   const [filterEnabled, setFilterEnabled] = useState(filter.enabled === true);
   const [filterMedian, setFilterMedian] = useState(numberValue(filter.median, 3));
@@ -2416,6 +2420,10 @@ export function DeviceSettingsPage() {
     await run(t("saveChargeProfile"), { command: "set_charge_profile", profile: chargeProfile });
   }
 
+  async function applyBatteryProfile() {
+    await run(t("saveBatteryProfile"), buildBatteryProfileCommand(batteryCapacityChoice, customBatteryCapacity, maxBatteryChargeCurrent));
+  }
+
   async function applyStreamBuffer() {
     await run(t("saveStreamBuffer"), {
       command: "set_stream_buffer",
@@ -2767,7 +2775,17 @@ export function DeviceSettingsPage() {
                 </div>
                 </div>
                 <div className="metric-row">
-                  <Metric label={t("battery")} value={batteryStatus.state ?? "-"} />
+                  <Metric label={t("battery")} value={batteryStatus.state ?? t("batteryUnknown")} />
+                  <Metric label={t("batterySoc")} value={batteryStatus.soc_percent === undefined ? t("batteryUnknown") : `${batteryStatus.soc_percent}%`} />
+                  <Metric label={t("batteryVoltageMv")} value={batteryStatus.vbat_mv ?? t("batteryUnknown")} />
+                  <Metric label={t("batteryRate")} value={batteryStatus.rate_ma ?? batteryStatus.current_ma ?? t("batteryUnknown")} />
+                  <Metric label={t("batteryPresent")} value={batteryStatus.present === undefined ? t("batteryAvailable") : boolString(batteryStatus.present)} />
+                  <Metric label={t("batteryProfileSource")} value={batteryStatus.profile_source ?? t("batteryUnknown")} />
+                  <Metric label={t("batteryProfileResolved")} value={batteryStatus.profile_resolved === undefined ? t("batteryUnknown") : boolString(batteryStatus.profile_resolved)} />
+                  <Metric label={t("batteryProfileRequired")} value={batteryStatus.battery_profile_required === undefined ? t("batteryUnknown") : boolString(batteryStatus.battery_profile_required)} />
+                  <Metric label={t("batteryCapacityMah")} value={batteryStatus.capacity_mah ?? t("batteryUnknown")} />
+                  <Metric label={t("batteryMaxChargeCurrent")} value={batteryStatus.max_charge_current_ma ?? t("batteryUnknown")} />
+                  <Metric label={t("batteryThermalBypass")} value={batteryStatus.thermal_monitoring_bypass === undefined ? t("batteryUnknown") : boolString(batteryStatus.thermal_monitoring_bypass)} />
                   <Metric label={t("chargeProfile")} value={batteryStatus.profile ?? "-"} />
                   <Metric label={t("chargeCurrentMa")} value={batteryStatus.charge_current_ma ?? "-"} />
                   <Metric label={t("inputLimitMa")} value={batteryStatus.input_limit_ma ?? "-"} />
@@ -2776,6 +2794,17 @@ export function DeviceSettingsPage() {
                   <Metric label={t("configured")} value={boolString(batteryStatus.configured)} />
                   <Metric label={t("chargerDetected")} value={boolString(batteryStatus.charger_detected ?? batteryStatus.detected)} />
                 </div>
+                {batteryProfileSetupRequired(batteryStatus) ? (
+                  <div className="notice">
+                    <p>{t("batteryProfileSetupNotice")}</p>
+                    <div className="field-grid">
+                      <div className="field"><label>{t("batteryCapacityMah")}</label><select value={batteryCapacityChoice} onChange={(event) => setBatteryCapacityChoice(event.target.value as "200" | "400" | "custom")}><option value="200">200mAh</option><option value="400">400mAh</option><option value="custom">{t("batteryCapacityCustom")}</option></select></div>
+                      {batteryCapacityChoice === "custom" ? <div className="field"><label>{t("batteryCapacityCustom")}</label><input type="number" min="1" value={customBatteryCapacity} onChange={(event) => setCustomBatteryCapacity(event.target.value)} /></div> : null}
+                      <div className="field"><label>{t("batteryMaxChargeCurrent")}</label><input type="number" min="100" max="350" step="10" value={maxBatteryChargeCurrent} onChange={(event) => setMaxBatteryChargeCurrent(event.target.value)} /></div>
+                    </div>
+                    <button className="button primary" type="button" disabled={isCommandBusy("set_battery_profile") || !deviceUid} onClick={() => void applyBatteryProfile()}>{isCommandBusy("set_battery_profile") ? t("running") : t("saveBatteryProfile")}</button>
+                  </div>
+                ) : null}
               </>
             )}
           </div>

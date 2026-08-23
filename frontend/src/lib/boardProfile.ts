@@ -31,6 +31,7 @@ export type BoardProfile = {
 };
 
 const V1_HARDWARE_MODEL = "VD-CTL/R v1.0.F 2026.4";
+const V15F_HARDWARE_MODEL = "VD-CTL/R v1.5.F 2026.7";
 const V21_GCU_HARDWARE_MODEL = "VD-CTL/R v2.1 GCU LTS";
 const GCU_HARDWARE_MODEL = "VD-CTL/R v2.3.D GCU LTS";
 
@@ -216,6 +217,28 @@ const V21_GCU_PROFILE: BoardProfile = {
   digitalPinHeading: "DIGITAL PINS",
 };
 
+const V15F_PROFILE: BoardProfile = {
+  hardwareModel: V15F_HARDWARE_MODEL,
+  wikiSlug: "vd-ctl-r-v1-5f",
+  defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v15f-latest.json",
+  defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+  defaultSelectPins: [17, 18, 21, 26, 47, 33, 34, 48, 35, 36, 37, 38, 39, 45],
+  supportsIoVisualizer: true,
+  supportsExternalLed: true,
+  supportsOled: true,
+  supportsIoVisualizerArtwork: true,
+  supportsLocalButtonWake: true,
+  supportsChargeControl: true,
+  powerUx: "local_button",
+  overviewAsset: v1OverviewAsset,
+  analogPinOrder: V1_ANALOG_PIN_SLOTS.map((pin) => pin.label),
+  digitalPinOrder: V1_DIGITAL_PIN_SLOTS.map((pin) => pin.label),
+  analogPinSlots: V1_ANALOG_PIN_SLOTS,
+  digitalPinSlots: V1_DIGITAL_PIN_SLOTS,
+  analogPinHeading: "ANA FPC",
+  digitalPinHeading: "DIG FPC",
+};
+
 const GCU_PROFILE: BoardProfile = {
   hardwareModel: GCU_HARDWARE_MODEL,
   wikiSlug: "vd-ctl-r-v2-3-d-gcu-lts",
@@ -238,7 +261,7 @@ const GCU_PROFILE: BoardProfile = {
   digitalPinHeading: "DIGITAL PINS",
 };
 
-const KNOWN_PROFILES = [V21_GCU_PROFILE, GCU_PROFILE, V1_PROFILE];
+const KNOWN_PROFILES = [V21_GCU_PROFILE, GCU_PROFILE, V15F_PROFILE, V1_PROFILE];
 
 function normalizeHardwareModel(value: string) {
   return value.trim().toLowerCase();
@@ -249,6 +272,7 @@ function slugifyHardwareModel(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/-2026-4$/, "")
+    .replace(/-2026-7$/, "")
     .replace(/-v1-0-f$/, "-v1.0f")
     .replace(/^-+|-+$/g, "");
 }

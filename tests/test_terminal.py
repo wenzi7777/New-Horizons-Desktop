@@ -106,12 +106,34 @@ class DeviceCommandValidationTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "invalid_charge_profile"):
                     compile_terminal_command(f"set-charge-profile --profile {invalid_profile}")
 
+    def test_battery_profile_command_requires_positive_capacity_and_supported_current(self):
+        payload = validate_device_command_payload({"command": "set_battery_profile", "capacity_mah": 400, "max_charge_current_ma": 230})
+
+        self.assertEqual(payload["command"], "set_battery_profile")
+        self.assertEqual(payload["capacity_mah"], 400)
+        self.assertEqual(payload["max_charge_current_ma"], 230)
+        for capacity, current in ((0, 100), (400, 355), (400, 235)):
+            with self.subTest(capacity=capacity, current=current):
+                with self.assertRaisesRegex(ValueError, "invalid_battery_profile"):
+                    validate_device_command_payload({"command": "set_battery_profile", "capacity_mah": capacity, "max_charge_current_ma": current})
+
     def test_board_profile_lists_v21_gcu_lts_manifest_track(self):
         source = BOARD_PROFILE.read_text(encoding="utf-8")
 
         self.assertIn('const V21_GCU_HARDWARE_MODEL = "VD-CTL/R v2.1 GCU LTS";', source)
         self.assertIn('wikiSlug: "vd-ctl-r-v2-1-gcu-lts"', source)
         self.assertIn('defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v21-lts-latest.json"', source)
+
+    def test_backend_board_profile_recognizes_v15f_local_hardware_capabilities(self):
+        from newhorizons_backend.board_profile import board_profile_for_hardware_model
+
+        profile = board_profile_for_hardware_model("VD-CTL/R v1.5.F 2026.7")
+
+        self.assertEqual(profile["hardware_model"], "VD-CTL/R v1.5.F 2026.7")
+        self.assertTrue(profile["supports_external_led"])
+        self.assertTrue(profile["supports_oled"])
+        self.assertTrue(profile["supports_charge_control"])
+        self.assertEqual(profile["power_ux"], "local_button")
 
     def test_recovery_update_commands_are_removed_from_terminal(self):
         removed_commands = (

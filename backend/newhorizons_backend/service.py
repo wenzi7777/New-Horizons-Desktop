@@ -90,6 +90,7 @@ class NewHorizonsService:
         "set_scan_timing",
         "set_stream_buffer",
         "set_charge_profile",
+        "set_battery_profile",
         "power_set_state",
         "set_indicators",
         "set_imu",
@@ -1020,13 +1021,21 @@ class NewHorizonsService:
                 for key in ("external_led", "oled")
                 if isinstance(request.get(key), dict)
             }
-        elif command == "set_charge_profile" and ok:
+        elif command in {"set_charge_profile", "set_battery_profile"} and ok:
             battery_data = data.get("battery") if isinstance(data.get("battery"), dict) else {}
             payload["battery"] = battery_data or {
                 "charger": "integrated",
                 "configured": True,
                 "profile": request.get("profile", "compatible"),
             }
+            if command == "set_battery_profile":
+                payload["battery"].update({
+                    "capacity_mah": request.get("capacity_mah"),
+                    "max_charge_current_ma": request.get("max_charge_current_ma"),
+                    "profile_resolved": True,
+                    "battery_profile_required": False,
+                    "profile_source": "manual",
+                })
         elif command == "power_set_state" and ok:
             power_data = data.get("power") if isinstance(data.get("power"), dict) else {}
             requested_state = str(request.get("state") or "soft_off_auto")
@@ -1043,6 +1052,7 @@ class NewHorizonsService:
             "set_scan_timing",
             "set_stream_buffer",
             "set_charge_profile",
+            "set_battery_profile",
             "power_set_state",
             "set_imu",
             "set_filter",
@@ -1816,6 +1826,17 @@ class NewHorizonsService:
                     "safety_timer_hours": 6,
                 })
                 status["battery"] = battery
+            elif command == "set_battery_profile":
+                battery = dict(status.get("battery") or {})
+                battery.update({
+                    "configured": True,
+                    "capacity_mah": int(payload["capacity_mah"]),
+                    "max_charge_current_ma": int(payload["max_charge_current_ma"]),
+                    "profile_resolved": True,
+                    "battery_profile_required": False,
+                    "profile_source": "manual",
+                })
+                status["battery"] = battery
             elif command == "set_imu":
                 enabled = bool(payload.get("enabled", True))
                 imu = dict(runtime.get("imu") or {})
@@ -2061,6 +2082,13 @@ class NewHorizonsService:
                 result_payload.update({
                     "status": "ok",
                     "message": "charge_profile_updated",
+                    "battery": status.get("battery", {}),
+                    "applied": True,
+                })
+            elif command == "set_battery_profile":
+                result_payload.update({
+                    "status": "ok",
+                    "message": "battery_profile_updated",
                     "battery": status.get("battery", {}),
                     "applied": True,
                 })

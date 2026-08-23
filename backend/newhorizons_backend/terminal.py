@@ -35,6 +35,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "set_scan_timing",
     "set_stream_buffer",
     "set_charge_profile",
+    "set_battery_profile",
     "power_set_state",
     "set_log",
     "set_ota_config",
@@ -60,6 +61,16 @@ def validate_device_command_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("unknown_command")
     result = dict(payload)
     result["command"] = command
+    if command == "set_battery_profile":
+        try:
+            capacity_mah = int(result.get("capacity_mah"))
+            max_charge_current_ma = int(result.get("max_charge_current_ma"))
+        except (TypeError, ValueError) as error:
+            raise ValueError("invalid_battery_profile") from error
+        if capacity_mah <= 0 or not 100 <= max_charge_current_ma <= 350 or max_charge_current_ma % 10:
+            raise ValueError("invalid_battery_profile")
+        result["capacity_mah"] = capacity_mah
+        result["max_charge_current_ma"] = max_charge_current_ma
     if "scope" in result:
         scope = str(result.get("scope") or "user").strip()
         if scope not in {"user", "logs", "calibration"}:
