@@ -91,6 +91,7 @@ class NewHorizonsService:
         "set_stream_buffer",
         "set_charge_profile",
         "set_battery_profile",
+        "detect_battery_profile",
         "power_set_state",
         "set_indicators",
         "set_imu",
@@ -1021,14 +1022,18 @@ class NewHorizonsService:
                 for key in ("external_led", "oled")
                 if isinstance(request.get(key), dict)
             }
-        elif command in {"set_charge_profile", "set_battery_profile"} and ok:
+        elif command in {"set_charge_profile", "set_battery_profile", "detect_battery_profile"} and ok:
             battery_data = data.get("battery") if isinstance(data.get("battery"), dict) else {}
-            payload["battery"] = battery_data or {
-                "charger": "integrated",
-                "configured": True,
-                "profile": request.get("profile", "compatible"),
-            }
+            if battery_data:
+                payload["battery"] = battery_data
+            elif command != "detect_battery_profile":
+                payload["battery"] = {
+                    "charger": "integrated",
+                    "configured": True,
+                    "profile": request.get("profile", "compatible"),
+                }
             if command == "set_battery_profile":
+                payload.setdefault("battery", {})
                 payload["battery"].update({
                     "capacity_mah": request.get("capacity_mah"),
                     "max_charge_current_ma": request.get("max_charge_current_ma"),
@@ -1053,6 +1058,7 @@ class NewHorizonsService:
             "set_stream_buffer",
             "set_charge_profile",
             "set_battery_profile",
+            "detect_battery_profile",
             "power_set_state",
             "set_imu",
             "set_filter",
@@ -3290,7 +3296,12 @@ class NewHorizonsService:
             },
         }
         if profile.get("supports_external_led"):
-            indicators["external_led"].update({"count": 3, "pin": 12, "initialized": True, "active_preset": "off"})
+            indicators["external_led"].update({
+                "count": int(profile.get("external_led_count", 3)),
+                "pin": int(profile.get("external_led_pin", 12)),
+                "initialized": True,
+                "active_preset": "off",
+            })
         else:
             indicators["external_led"]["initialized"] = False
         power = {

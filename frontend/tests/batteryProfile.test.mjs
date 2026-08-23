@@ -5,6 +5,7 @@ import {
   batteryProfileSetupRequired,
   batteryProfileValidationError,
   buildBatteryProfileCommand,
+  buildBatteryProfileDetectionCommand,
   normalizeBatteryStatus,
 } from "../src/lib/batteryProfile.ts";
 
@@ -13,6 +14,12 @@ test("builds a set_battery_profile command with a positive custom capacity and 1
     command: "set_battery_profile",
     capacity_mah: 650,
     max_charge_current_ma: 230,
+  });
+});
+
+test("builds an explicit battery-ID detection command without changing manual settings", () => {
+  assert.deepEqual(buildBatteryProfileDetectionCommand(), {
+    command: "detect_battery_profile",
   });
 });
 

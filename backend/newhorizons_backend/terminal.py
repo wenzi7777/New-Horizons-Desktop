@@ -36,6 +36,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "set_stream_buffer",
     "set_charge_profile",
     "set_battery_profile",
+    "detect_battery_profile",
     "power_set_state",
     "set_log",
     "set_ota_config",

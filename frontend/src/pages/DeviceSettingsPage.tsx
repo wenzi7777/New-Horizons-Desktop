@@ -5,7 +5,7 @@ import { api, type PressureCalReadings, type PressureCalServerPreset } from "../
 
 import { useI18n } from "../i18n";
 import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
-import { batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryProfileCommand, normalizeBatteryStatus } from "../lib/batteryProfile";
+import { batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, normalizeBatteryStatus } from "../lib/batteryProfile";
 import {
   getPrimaryStepDisabledReason,
   getPrimaryStepStates,
@@ -1926,7 +1926,7 @@ export function DeviceSettingsPage() {
   const analogPinsFromStatus = arrayCsv(matrixLayout.analog_pins ?? matrixLayout.active_rows);
   const selectPinsFromStatus = arrayCsv(matrixLayout.select_pins ?? matrixLayout.active_cols);
   const wifi = recordValue(status.wifi);
-  const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile"].includes(lastResultCommand) ? lastResult.battery : undefined));
+  const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "detect_battery_profile"].includes(lastResultCommand) ? lastResult.battery : undefined));
   const battery = normalizeBatteryStatus(batteryStatus);
   const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" ? lastResult.power : undefined));
   // The backend hoists memory_status's `data` (heap_*) onto last_status's top
@@ -1993,7 +1993,7 @@ export function DeviceSettingsPage() {
   const [chargeProfile, setChargeProfile] = useState(stringValue(batteryStatus.profile, "balanced"));
   const [batteryCapacityChoice, setBatteryCapacityChoice] = useState<"200" | "400" | "custom">("400");
   const [customBatteryCapacity, setCustomBatteryCapacity] = useState("");
-  const [maxBatteryChargeCurrent, setMaxBatteryChargeCurrent] = useState("250");
+  const [maxBatteryChargeCurrent, setMaxBatteryChargeCurrent] = useState("100");
   const batteryProfileDraftError = batteryProfileValidationError(batteryCapacityChoice, customBatteryCapacity, maxBatteryChargeCurrent);
   const [imuEnabled, setImuEnabled] = useState(imu.enabled !== false);
   const [filterEnabled, setFilterEnabled] = useState(filter.enabled === true);
@@ -2431,6 +2431,14 @@ export function DeviceSettingsPage() {
     }
   }
 
+  async function detectBatteryProfile() {
+    try {
+      await run(t("detectBatteryProfile"), buildBatteryProfileDetectionCommand());
+    } catch (error) {
+      void error;
+    }
+  }
+
   async function applyStreamBuffer() {
     await run(t("saveStreamBuffer"), {
       command: "set_stream_buffer",
@@ -2800,6 +2808,9 @@ export function DeviceSettingsPage() {
                   <Metric label={t("safetyTimerHours")} value={batteryStatus.safety_timer_hours ?? "-"} />
                   <Metric label={t("configured")} value={boolString(batteryStatus.configured)} />
                   <Metric label={t("chargerDetected")} value={boolString(batteryStatus.charger_detected ?? batteryStatus.detected)} />
+                </div>
+                <div className="actions compact">
+                  <button className="button" type="button" disabled={isCommandBusy("detect_battery_profile") || !deviceUid} onClick={() => void detectBatteryProfile()}>{isCommandBusy("detect_battery_profile") ? t("running") : t("detectBatteryProfile")}</button>
                 </div>
                 {batteryProfileSetupRequired(batteryStatus) ? (
                   <div className="notice">

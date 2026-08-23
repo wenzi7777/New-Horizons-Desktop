@@ -117,6 +117,14 @@ class DeviceCommandValidationTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "invalid_battery_profile"):
                     validate_device_command_payload({"command": "set_battery_profile", "capacity_mah": capacity, "max_charge_current_ma": current})
 
+    def test_battery_profile_detection_command_is_allowed_without_manual_fields(self):
+        payload = validate_device_command_payload(
+            {"command": "detect_battery_profile", "request_id": "req-battery-detect"}
+        )
+
+        self.assertEqual(payload["command"], "detect_battery_profile")
+        self.assertEqual(payload["request_id"], "req-battery-detect")
+
     def test_board_profile_lists_v21_gcu_lts_manifest_track(self):
         source = BOARD_PROFILE.read_text(encoding="utf-8")
 

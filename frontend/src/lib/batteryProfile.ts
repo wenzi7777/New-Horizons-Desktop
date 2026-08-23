@@ -88,3 +88,7 @@ export function buildBatteryProfileCommand(
   const max_charge_current_ma = Number(maxChargeCurrent);
   return { command: "set_battery_profile" as const, capacity_mah, max_charge_current_ma };
 }
+
+export function buildBatteryProfileDetectionCommand() {
+  return { command: "detect_battery_profile" as const };
+}

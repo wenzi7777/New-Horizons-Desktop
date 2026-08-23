@@ -15,6 +15,8 @@ DEFAULT_BOARD_PROFILE = {
     "supports_local_button_wake": True,
     "supports_charge_control": True,
     "power_ux": "local_button",
+    "external_led_count": 3,
+    "external_led_pin": 12,
 }
 
 V15F_BOARD_PROFILE = {
@@ -27,6 +29,8 @@ V15F_BOARD_PROFILE = {
     "default_manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v15f-latest.json",
     "default_analog_pins": list(range(1, 15)),
     "default_select_pins": [17, 18, 21, 26, 47, 33, 34, 48, 35, 36, 37, 38, 39, 45],
+    "external_led_count": 9,
+    "external_led_pin": 16,
 }
 
 V21_GCU_BOARD_PROFILE = {

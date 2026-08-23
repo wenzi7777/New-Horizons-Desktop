@@ -490,6 +490,18 @@ class ArduinoControlTcpTest(unittest.TestCase):
         self.assertNotEqual(device["last_status"]["indicators"]["external_led"].get("initialized"), True)
         self.assertNotEqual(device["last_status"]["indicators"]["oled"].get("detected"), True)
 
+    def test_v15f_mock_status_reports_nine_external_ws2812b_pixels(self):
+        service = NewHorizonsService(mock_mode=True)
+
+        payload = service._mock_status_payload(
+            "3CDC7545CCD0",
+            hardware_model="VD-CTL/R v1.5.F 2026.7",
+        )
+
+        external = payload["indicators"]["external_led"]
+        self.assertEqual(external["pin"], 16)
+        self.assertEqual(external["count"], 9)
+
     def test_arduino_power_state_response_updates_power_status_cache(self):
         service = NewHorizonsService(mock_mode=False)
         service._record_arduino_response(
