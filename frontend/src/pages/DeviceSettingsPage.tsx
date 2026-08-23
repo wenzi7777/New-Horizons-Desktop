@@ -5,7 +5,7 @@ import { api, type PressureCalReadings, type PressureCalServerPreset } from "../
 
 import { useI18n } from "../i18n";
 import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
-import { batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, normalizeBatteryStatus } from "../lib/batteryProfile";
+import { batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
 import {
   getPrimaryStepDisabledReason,
   getPrimaryStepStates,
@@ -19,7 +19,7 @@ import { appHref } from "../lib/runtime";
 import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { BoardIoModal } from "./TerminalPage";
 import { ConfirmModal } from "../components/ConfirmModal";
-import { TriangleAlert } from "lucide-react";
+import { Battery, BatteryCharging, TriangleAlert } from "lucide-react";
 
 // Spike-validated (firmware/spikes/README.md's "PHY rate config" section,
 // 2026-08-06: raw ADC off + 40fps ran clean at 0% loss over ESP-NOW once
@@ -90,7 +90,7 @@ function boardLedBrightnessValue(value: unknown) {
 
 function hasIndicatorData(value: unknown) {
   const indicators = recordValue(value);
-  return Object.keys(recordValue(indicators.board_led)).length > 0 || Object.keys(recordValue(indicators.external_led)).length > 0 || Object.keys(recordValue(indicators.oled)).length > 0;
+  return Object.keys(recordValue(indicators.board_led)).length > 0 || Object.keys(recordValue(indicators.battery_led)).length > 0 || Object.keys(recordValue(indicators.external_led)).length > 0 || Object.keys(recordValue(indicators.oled)).length > 0;
 }
 
 function boolString(value: unknown) {
@@ -114,6 +114,15 @@ function percent(used: unknown, total: unknown) {
   const totalNumber = numberValue(total, 0);
   if (totalNumber <= 0) return 0;
   return Math.max(0, Math.min(100, (usedNumber / totalNumber) * 100));
+}
+
+function durationLabel(minutes: number) {
+  const safeMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const remainingMinutes = safeMinutes % 60;
+  if (hours > 0 && remainingMinutes > 0) return `${hours}h ${remainingMinutes}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${remainingMinutes}m`;
 }
 
 function bytesLabel(value: unknown) {
@@ -1974,6 +1983,7 @@ export function DeviceSettingsPage() {
   }
   const indicators = recordValue(hasIndicatorData(nextIndicators) ? nextIndicators : lastKnownIndicatorsRef.current);
   const boardLed = recordValue(indicators.board_led);
+  const batteryLed = recordValue(indicators.battery_led);
   const externalLed = recordValue(indicators.external_led);
   const oled = recordValue(indicators.oled);
   const updateState = recordValue(status.update_state ?? device?.update_state ?? (lastResultCommand === "check_update" ? lastResult.update_state : undefined));
@@ -2005,6 +2015,8 @@ export function DeviceSettingsPage() {
   const [customBatteryCapacity, setCustomBatteryCapacity] = useState("");
   const [maxBatteryChargeCurrent, setMaxBatteryChargeCurrent] = useState("100");
   const batteryProfileDraftError = batteryProfileValidationError(batteryCapacityChoice, customBatteryCapacity, maxBatteryChargeCurrent);
+  const [lowBatteryThresholdPercent, setLowBatteryThresholdPercent] = useState(stringValue(batteryLed.low_battery_threshold_percent, "10"));
+  const batteryLedThresholdDraftError = batteryLedThresholdValidationError(Number(lowBatteryThresholdPercent));
   const [imuEnabled, setImuEnabled] = useState(imu.enabled !== false);
   const [filterEnabled, setFilterEnabled] = useState(filter.enabled === true);
   const [filterMedian, setFilterMedian] = useState(numberValue(filter.median, 3));
@@ -2023,6 +2035,9 @@ export function DeviceSettingsPage() {
   const [oledUpdateHz, setOledUpdateHz] = useState(numberValue(oled.update_hz, 1));
   const [oledContrast, setOledContrast] = useState(numberValue(oled.contrast, 128));
   const [oledRotation, setOledRotation] = useState(numberValue(oled.rotation, 0));
+  const batteryChargeState = stringValue(powerStatus.charge_state ?? batteryStatus.charge_state, "");
+  const batteryTimeEstimate = estimateBatteryTime(battery, batteryChargeState);
+  const batteryLedSupported = boardProfile.supportsBatteryStatusLed && batteryLed.supported === true;
   const [showIoModal, setShowIoModal] = useState(false);
   const [deviceGroupDraft, setDeviceGroupDraft] = useState(stringValue(device?.device_group, ""));
   const [deviceGroupSaving, setDeviceGroupSaving] = useState(false);
@@ -2176,6 +2191,12 @@ export function DeviceSettingsPage() {
       setChargeProfile(nextProfile);
     }
   }, [batteryStatus.profile]);
+
+  useEffect(() => {
+    if (batteryLed.low_battery_threshold_percent !== undefined) {
+      setLowBatteryThresholdPercent(stringValue(batteryLed.low_battery_threshold_percent, "10"));
+    }
+  }, [batteryLed.low_battery_threshold_percent]);
 
   useEffect(() => {
     const nextExternalMode = stringValue(externalLed.mode, "");
@@ -2454,6 +2475,15 @@ export function DeviceSettingsPage() {
     }
   }
 
+  async function applyBatteryLedThreshold() {
+    if (batteryLedThresholdDraftError) return;
+    try {
+      await run(t("saveBatteryLedWarning"), buildBatteryLedThresholdCommand(Number(lowBatteryThresholdPercent)));
+    } catch (error) {
+      void error;
+    }
+  }
+
   async function applyStreamBuffer() {
     await run(t("saveStreamBuffer"), {
       command: "set_stream_buffer",
@@ -2550,6 +2580,23 @@ export function DeviceSettingsPage() {
             <DetailBox label={t("hardwareModel")} value={normalized?.hardwareModel ?? "-"} />
             <DetailBox label={t("matrixShape")} value={normalized?.matrixShape ?? "-"} />
             <DetailBox label={t("lastSeen")} value={normalized?.lastSeen ?? "-"} />
+          </div>
+          <div className="settings-card battery-overview-card">
+            <div className="battery-overview-reading">
+              <div className="battery-overview-icon" aria-hidden="true">
+                {batteryChargeState === "charging" ? <BatteryCharging size={24} /> : <Battery size={24} />}
+              </div>
+              <div>
+                <span>{t("battery")}</span>
+                <strong>{battery.socPercent === null ? t("batteryUnknown") : `${Math.round(battery.socPercent)}%`}</strong>
+              </div>
+            </div>
+            <div className="battery-overview-estimate">
+              {batteryTimeEstimate.kind === "remaining" ? `${t("batteryEstimatedRemaining")} · ${durationLabel(batteryTimeEstimate.minutes)}` : null}
+              {batteryTimeEstimate.kind === "until_full" ? `${t("batteryEstimatedUntilFull")} · ${durationLabel(batteryTimeEstimate.minutes)}` : null}
+              {batteryTimeEstimate.kind === "full" ? t("batteryFull") : null}
+              {batteryTimeEstimate.kind === "unavailable" ? t("batteryEstimateUnavailable") : null}
+            </div>
           </div>
           <div className="settings-card">
             <div className="settings-detail-header">
@@ -2845,6 +2892,26 @@ export function DeviceSettingsPage() {
                   <Metric label={t("configured")} value={boolString(batteryStatus.configured)} />
                   <Metric label={t("chargerDetected")} value={boolString(batteryStatus.charger_detected ?? batteryStatus.detected)} />
                 </div>
+                {batteryLedSupported ? (
+                  <div className="settings-subsection">
+                    <div>
+                      <h4>{t("batteryLedWarning")}</h4>
+                      <p className="service-muted">{t("batteryLedWarningCopy")}</p>
+                    </div>
+                    <div className="field-grid">
+                      <div className="field">
+                        <label>{t("batteryLedThreshold")}</label>
+                        <input type="number" min="0" max="25" step="1" value={lowBatteryThresholdPercent} onChange={(event) => setLowBatteryThresholdPercent(event.target.value)} />
+                      </div>
+                    </div>
+                    {batteryLedThresholdDraftError ? <p className="notice error">{t("batteryLedThresholdInvalid")}</p> : null}
+                    <div className="actions compact">
+                      <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid || batteryLedThresholdDraftError !== null} onClick={() => void applyBatteryLedThreshold()}>
+                        {isCommandBusy("set_indicators") ? t("running") : t("saveBatteryLedWarning")}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="actions compact">
                   <button className="button" type="button" disabled={isCommandBusy("detect_battery_profile") || !deviceUid} onClick={() => void detectBatteryProfile()}>{isCommandBusy("detect_battery_profile") ? t("running") : t("detectBatteryProfile")}</button>
                 </div>

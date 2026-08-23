@@ -28,6 +28,12 @@ export type BatteryStatusViewModel = {
   thermalMonitoringBypassed: boolean | null;
 };
 
+export type BatteryTimeEstimate =
+  | { kind: "remaining"; minutes: number }
+  | { kind: "until_full"; minutes: number }
+  | { kind: "full" }
+  | { kind: "unavailable" };
+
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -91,4 +97,49 @@ export function buildBatteryProfileCommand(
 
 export function buildBatteryProfileDetectionCommand() {
   return { command: "detect_battery_profile" as const };
+}
+
+export function estimateBatteryTime(
+  battery: Pick<BatteryStatusViewModel, "socPercent" | "ratePercentPerHour" | "batteryPresent">,
+  chargeState: string,
+): BatteryTimeEstimate {
+  if (battery.batteryPresent !== true || battery.socPercent === null) {
+    return { kind: "unavailable" };
+  }
+  if (chargeState === "charge_done") {
+    return { kind: "full" };
+  }
+  const rate = battery.ratePercentPerHour;
+  if (rate === null || Math.abs(rate) < 0.1) {
+    return { kind: "unavailable" };
+  }
+  if (chargeState === "charging" && rate > 0) {
+    return {
+      kind: "until_full",
+      minutes: Math.round(((100 - battery.socPercent) / rate) * 60),
+    };
+  }
+  if (chargeState !== "charging" && rate < 0) {
+    return {
+      kind: "remaining",
+      minutes: Math.round((battery.socPercent / Math.abs(rate)) * 60),
+    };
+  }
+  return { kind: "unavailable" };
+}
+
+export function batteryLedThresholdValidationError(value: unknown): "invalid_low_battery_threshold" | null {
+  return typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 25
+    ? "invalid_low_battery_threshold"
+    : null;
+}
+
+export function buildBatteryLedThresholdCommand(lowBatteryThresholdPercent: number) {
+  if (batteryLedThresholdValidationError(lowBatteryThresholdPercent)) {
+    throw new Error("invalid_low_battery_threshold");
+  }
+  return {
+    command: "set_indicators" as const,
+    battery_led: { low_battery_threshold_percent: lowBatteryThresholdPercent },
+  };
 }

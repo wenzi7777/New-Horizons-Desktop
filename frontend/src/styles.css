@@ -1263,6 +1263,46 @@ button:disabled {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.battery-overview-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.battery-overview-reading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.battery-overview-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-soft));
+  color: var(--accent);
+}
+
+.battery-overview-reading span,
+.battery-overview-estimate {
+  display: block;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.battery-overview-reading strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 24px;
+}
+
+.battery-overview-estimate {
+  text-align: right;
+}
+
 .settings-stack {
   display: grid;
   gap: 14px;

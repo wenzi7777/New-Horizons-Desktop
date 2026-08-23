@@ -20,6 +20,7 @@ export type BoardProfile = {
   supportsIoVisualizerArtwork: boolean;
   supportsLocalButtonWake: boolean;
   supportsChargeControl: boolean;
+  supportsBatteryStatusLed: boolean;
   powerUx: "local_button" | "remote_only";
   overviewAsset: string;
   analogPinOrder: string[];
@@ -185,6 +186,7 @@ const V1_PROFILE: BoardProfile = {
   supportsIoVisualizerArtwork: true,
   supportsLocalButtonWake: true,
   supportsChargeControl: true,
+  supportsBatteryStatusLed: false,
   powerUx: "local_button",
   overviewAsset: v1OverviewAsset,
   analogPinOrder: V1_ANALOG_PIN_SLOTS.map((pin) => pin.label),
@@ -207,6 +209,7 @@ const V21_GCU_PROFILE: BoardProfile = {
   supportsIoVisualizerArtwork: true,
   supportsLocalButtonWake: false,
   supportsChargeControl: false,
+  supportsBatteryStatusLed: false,
   powerUx: "remote_only",
   overviewAsset: gcu21OverviewAsset,
   analogPinOrder: V21_GCU_ANALOG_PIN_SLOTS.map((pin) => pin.label),
@@ -229,6 +232,7 @@ const V15F_PROFILE: BoardProfile = {
   supportsIoVisualizerArtwork: true,
   supportsLocalButtonWake: true,
   supportsChargeControl: true,
+  supportsBatteryStatusLed: true,
   powerUx: "local_button",
   overviewAsset: v1OverviewAsset,
   analogPinOrder: V1_ANALOG_PIN_SLOTS.map((pin) => pin.label),
@@ -251,6 +255,7 @@ const GCU_PROFILE: BoardProfile = {
   supportsIoVisualizerArtwork: true,
   supportsLocalButtonWake: false,
   supportsChargeControl: true,
+  supportsBatteryStatusLed: false,
   powerUx: "remote_only",
   overviewAsset: gcuOverviewAsset,
   analogPinOrder: GCU_ANALOG_PIN_SLOTS.map((pin) => pin.label),

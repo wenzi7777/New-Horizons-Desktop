@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as batteryProfileModule from "../src/lib/batteryProfile.ts";
 
 import {
   batteryProfileSetupRequired,
@@ -80,4 +81,42 @@ test("accepts prior battery field aliases without inventing unavailable gauge da
 test("reports an inline validation error before an invalid manual profile can be dispatched", () => {
   assert.equal(batteryProfileValidationError("custom", "", "230"), "invalid_battery_profile");
   assert.equal(batteryProfileValidationError("400", "", "230"), null);
+});
+
+test("estimates remaining and charging time from MAX17048 SoC and rate without inventing an estimate", () => {
+  assert.equal(typeof batteryProfileModule.estimateBatteryTime, "function");
+  assert.deepEqual(
+    batteryProfileModule.estimateBatteryTime({ socPercent: 73.5, ratePercentPerHour: -2.1, batteryPresent: true }, "not_charging"),
+    { kind: "remaining", minutes: 2100 },
+  );
+  assert.deepEqual(
+    batteryProfileModule.estimateBatteryTime({ socPercent: 70, ratePercentPerHour: 2.5, batteryPresent: true }, "charging"),
+    { kind: "until_full", minutes: 720 },
+  );
+  assert.deepEqual(
+    batteryProfileModule.estimateBatteryTime({ socPercent: 100, ratePercentPerHour: 0, batteryPresent: true }, "charge_done"),
+    { kind: "full" },
+  );
+  assert.deepEqual(
+    batteryProfileModule.estimateBatteryTime({ socPercent: 70, ratePercentPerHour: 0, batteryPresent: true }, "not_charging"),
+    { kind: "unavailable" },
+  );
+  assert.deepEqual(
+    batteryProfileModule.estimateBatteryTime({ socPercent: 70, ratePercentPerHour: -2, batteryPresent: false }, "not_charging"),
+    { kind: "unavailable" },
+  );
+});
+
+test("builds only safe persisted low-battery threshold commands", () => {
+  assert.equal(typeof batteryProfileModule.buildBatteryLedThresholdCommand, "function");
+  assert.deepEqual(batteryProfileModule.buildBatteryLedThresholdCommand(10), {
+    command: "set_indicators",
+    battery_led: { low_battery_threshold_percent: 10 },
+  });
+  assert.deepEqual(batteryProfileModule.buildBatteryLedThresholdCommand(0), {
+    command: "set_indicators",
+    battery_led: { low_battery_threshold_percent: 0 },
+  });
+  assert.throws(() => batteryProfileModule.buildBatteryLedThresholdCommand(26), /invalid_low_battery_threshold/);
+  assert.throws(() => batteryProfileModule.buildBatteryLedThresholdCommand(1.5), /invalid_low_battery_threshold/);
 });
