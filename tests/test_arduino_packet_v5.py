@@ -29,7 +29,7 @@ class ArduinoPacketV5ParserTest(unittest.TestCase):
         battery = struct.pack("<BBHH", 1, 2, 4175, 7350)
         extensions = bytes([0x21, 3]) + b"abc"
 
-        parsed = parse_binary_packet(packet_v5(0x02 | 0x04 | 0x20 | 0x10, matrix + mag + battery + extensions))
+        parsed = parse_binary_packet(packet_v5(0x02 | 0x04 | 0x20 | 0x10, matrix + mag + battery + extensions), sensor_count=2)
 
         self.assertEqual(parsed["packet_version"], 5)
         self.assertEqual(parsed["p"], [1.25, 2.5])
@@ -46,9 +46,17 @@ class ArduinoPacketV5ParserTest(unittest.TestCase):
         self.assertIsNone(parsed["battery"])
         self.assertEqual(parsed["extensions"], [])
 
-    def test_v5_rejects_extension_length_past_payload(self):
+    def test_v5_extensions_require_an_authoritative_sensor_count(self):
+        with self.assertRaisesRegex(PacketParseError, "sensor_count_required_for_extensions"):
+            parse_binary_packet(packet_v5(0x20, struct.pack("<f", 1.0) + bytes([0x22, 1, 0xAA])))
+
+    def test_v5_rejects_extension_length_past_payload_with_known_sensor_count(self):
         with self.assertRaisesRegex(PacketParseError, "invalid_extension_layout"):
-            parse_binary_packet(packet_v5(0x20, struct.pack("<f", 1.0) + bytes([0x22, 4, 0xAA])))
+            parse_binary_packet(packet_v5(0x20, struct.pack("<f", 1.0) + bytes([0x22, 4, 0xAA])), sensor_count=1)
+
+    def test_v5_rejects_trailing_extension_stride_with_known_sensor_count(self):
+        with self.assertRaisesRegex(PacketParseError, "invalid_extension_layout"):
+            parse_binary_packet(packet_v5(0x20, struct.pack("<f", 1.0) + bytes([0x22, 1, 0xAA, 0xFF])), sensor_count=1)
 
     def test_v5_stream_and_heartbeat_detectors_accept_24_byte_header(self):
         stream = packet_v5(0, struct.pack("<f", 1.0))

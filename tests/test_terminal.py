@@ -112,7 +112,7 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertEqual(payload["command"], "set_battery_profile")
         self.assertEqual(payload["capacity_mah"], 400)
         self.assertEqual(payload["max_charge_current_ma"], 230)
-        for capacity, current in ((0, 100), (400, 355), (400, 235)):
+        for capacity, current in ((0, 100), (400, 355), (400, 235), (400, 230.9), (True, 100), (400, True), ("400", 230), (400, "230.9")):
             with self.subTest(capacity=capacity, current=current):
                 with self.assertRaisesRegex(ValueError, "invalid_battery_profile"):
                     validate_device_command_payload({"command": "set_battery_profile", "capacity_mah": capacity, "max_charge_current_ma": current})

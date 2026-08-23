@@ -30,7 +30,40 @@ def arduino_heartbeat_packet(device_uid: bytes = bytes.fromhex("3CDC7545CCD0")) 
     return bytes(packet)
 
 
+def arduino_v5_extension_packet(device_uid: bytes = bytes.fromhex("3CDC7545CCD0")) -> bytes:
+    matrix = struct.pack("<4f", 1.0, 2.0, 3.0, 4.0)
+    extensions = bytes([0x21, 1, 0xAA])
+    packet = bytearray(24 + len(matrix) + len(extensions))
+    struct.pack_into("<HBB", packet, 0, 0xA55A, 5, 0x20)
+    packet[4:10] = device_uid
+    struct.pack_into("<IQH", packet, 10, 9, 1234, len(matrix) + len(extensions))
+    packet[24:] = matrix + extensions
+    return bytes(packet)
+
+
 class ArduinoControlTcpTest(unittest.TestCase):
+    def test_v5_extension_stream_is_rejected_until_the_device_has_an_authoritative_layout(self):
+        service = NewHorizonsService(mock_mode=False)
+        service._udp_ingest = object()
+
+        service._handle_udp_datagram(arduino_v5_extension_packet(), ("192.168.50.44", 49152))
+
+        self.assertEqual(service.latest_visualization("3CDC7545CCD0"), [])
+
+    def test_v5_extension_stream_uses_known_matrix_layout_sensor_count(self):
+        service = NewHorizonsService(mock_mode=False)
+        service._udp_ingest = object()
+        service._record_status("3CDC7545CCD0", {
+            "hardware_model": "VD-CTL/R v1.5.F 2026.7",
+            "matrix_layout": {"active_rows": [1, 2], "active_cols": [17, 18]},
+        })
+
+        service._handle_udp_datagram(arduino_v5_extension_packet(), ("192.168.50.44", 49152))
+
+        parsed = service.latest_visualization("3CDC7545CCD0")[0]
+        self.assertEqual(parsed["p"], [1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(parsed["extensions"], [{"type": 0x21, "value": b"\xAA"}])
+
     def test_arduino_v3_stream_packet_registers_tcp_control_route(self):
         service = NewHorizonsService(mock_mode=False)
         service._udp_ingest = object()

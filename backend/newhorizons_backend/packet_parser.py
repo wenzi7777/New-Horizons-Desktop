@@ -68,25 +68,12 @@ def _parse_extensions(payload: bytes) -> list[dict[str, Any]]:
 def _split_v5_extensions(flags: int, payload: bytes, sensor_count: int | None) -> tuple[bytes, list[dict[str, Any]]]:
     if not flags & FLAG_EXTENSIONS:
         return payload, []
-    if sensor_count is not None:
-        base_len = (sensor_count * (8 if flags & FLAG_RAWADC else 4)) + (IMU_BYTES if flags & FLAG_IMU else 0) + (MAG_BYTES if flags & FLAG_MAG else 0) + (BATTERY_BYTES_V5 if flags & FLAG_BATTERY else 0)
-        if base_len > len(payload):
-            raise PacketParseError("sensor_count_out_of_range")
-        return payload[:base_len], _parse_extensions(payload[base_len:])
-
-    fixed_len = (IMU_BYTES if flags & FLAG_IMU else 0) + (MAG_BYTES if flags & FLAG_MAG else 0) + (BATTERY_BYTES_V5 if flags & FLAG_BATTERY else 0)
-    bytes_per_sensor = 8 if flags & FLAG_RAWADC else 4
-    for base_len in range(fixed_len, len(payload) + 1, bytes_per_sensor):
-        try:
-            extensions = _parse_extensions(payload[base_len:])
-        except PacketParseError:
-            continue
-        if extensions:
-            return payload[:base_len], extensions
-    # EXTENSIONS permits zero items; this is only unambiguous when all bytes are base payload.
-    if (len(payload) - fixed_len) % bytes_per_sensor == 0:
-        return payload, []
-    raise PacketParseError("invalid_extension_layout")
+    if sensor_count is None:
+        raise PacketParseError("sensor_count_required_for_extensions")
+    base_len = (sensor_count * (8 if flags & FLAG_RAWADC else 4)) + (IMU_BYTES if flags & FLAG_IMU else 0) + (MAG_BYTES if flags & FLAG_MAG else 0) + (BATTERY_BYTES_V5 if flags & FLAG_BATTERY else 0)
+    if base_len > len(payload):
+        raise PacketParseError("sensor_count_out_of_range")
+    return payload[:base_len], _parse_extensions(payload[base_len:])
 
 
 def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_uid: str | None = None) -> dict[str, Any]:

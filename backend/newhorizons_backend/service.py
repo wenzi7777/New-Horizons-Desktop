@@ -2142,7 +2142,7 @@ class NewHorizonsService:
             return
         is_arduino = is_arduino_stream_packet(payload)
         try:
-            parsed = parse_binary_packet(payload)
+            parsed = parse_binary_packet(payload, sensor_count=self._v5_extension_sensor_count(payload))
         except PacketParseError:
             return
         device_uid = self._device_uid_from_payload(parsed.get("device_uid") or parsed.get("dn"), parsed)
@@ -2282,6 +2282,37 @@ class NewHorizonsService:
         if rows <= 0 or cols <= 0:
             return None
         return rows, cols
+
+    @classmethod
+    def _known_sensor_count_from_device(cls, device: dict[str, Any]) -> int | None:
+        status = device.get("last_status") if isinstance(device.get("last_status"), dict) else {}
+        for candidate in (status, device):
+            layout = candidate.get("matrix_layout") if isinstance(candidate.get("matrix_layout"), dict) else {}
+            rows = cls._int_list(layout.get("analog_pins") or layout.get("active_rows"))
+            cols = cls._int_list(layout.get("select_pins") or layout.get("active_cols"))
+            if rows and cols:
+                return len(rows) * len(cols)
+            shape = cls._matrix_shape_tuple(candidate.get("matrix_shape"))
+            if shape is not None:
+                return shape[0] * shape[1]
+
+        hardware_model = str(status.get("hardware_model") or device.get("hardware_model") or "").strip()
+        if not hardware_model:
+            return None
+        profile = board_profile_for_hardware_model(hardware_model)
+        if str(profile.get("hardware_model") or "").strip().lower() != hardware_model.lower():
+            return None
+        rows = cls._int_list(profile.get("default_analog_pins"))
+        cols = cls._int_list(profile.get("default_select_pins"))
+        return len(rows) * len(cols) if rows and cols else None
+
+    def _v5_extension_sensor_count(self, payload: bytes) -> int | None:
+        if len(payload) < 10 or payload[2] != 5 or not payload[3] & 0x20:
+            return None
+        device_uid = payload[4:10].hex().upper()
+        with self._lock:
+            device = dict(self._devices.get(device_uid) or {})
+        return self._known_sensor_count_from_device(device)
 
     def _clear_incompatible_visualization_locked(self, device_uid: str, merged: dict[str, Any]) -> None:
         matrix_shape = self._matrix_shape_tuple(merged.get("matrix_shape"))
