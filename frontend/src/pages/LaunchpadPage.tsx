@@ -48,6 +48,11 @@ function batteryLabel(device: NormalizedDevice, t: (key: string) => string) {
   return "-";
 }
 
+function batteryPercentLabel(percent: number | null) {
+  if (percent === null) return "-";
+  return `${percent.toFixed(percent % 1 === 0 ? 0 : 1)}%`;
+}
+
 function deviceMacSuffix(uid: string) {
   return uid.slice(-4).toUpperCase();
 }
@@ -80,7 +85,9 @@ function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) 
             <span>{t("hardwareModel")}: {device.hardwareModel}</span>
             <span>Firmware: {device.firmwareVersion}</span>
             <span>Protocol: {device.protocol}</span>
-            <span>{t("battery")}: {batteryLabel(device, t)}</span>
+            <span className="device-battery-reading" aria-label={`${t("battery")}: ${batteryPercentLabel(device.batterySocPercent)}, ${batteryLabel(device, t)}`}>
+              {t("battery")}: <strong>{batteryPercentLabel(device.batterySocPercent)}</strong> <small>{batteryLabel(device, t)}</small>
+            </span>
             <span>{t("transport")}: {device.transportMode}</span>
             <span>{t("log")}: {device.logging}</span>
             <span>{t("lastSeen")}: {device.lastSeen}</span>

@@ -2475,6 +2475,19 @@ class NewHorizonsService:
                 entry["device_name"] = None
                 entry["display_name"] = None
             merged = self._merge_device_entry(existing, entry)
+            # Arduino v5 carries battery telemetry on the high-rate stream.
+            # Keep a valid sample in last_status as well as visualization so
+            # status-oriented Desktop surfaces (such as the launchpad card)
+            # can show SoC without waiting for the next control status poll.
+            if isinstance(payload.get("battery"), dict):
+                latest_status = merged.get("last_status")
+                latest_status = dict(latest_status) if isinstance(latest_status, dict) else {}
+                latest_status["battery"] = dict(payload["battery"])
+                latest_status["device_uid"] = device_uid
+                latest_status.setdefault("device_id", device_uid)
+                latest_status["received_at"] = datetime.now(timezone.utc).isoformat()
+                merged["last_status"] = latest_status
+                self._latest_status[device_uid] = latest_status
             merged["recording_enabled"] = device_uid in self._recording_enabled
             if device_uid in self._recording_errors:
                 merged["recording_error"] = self._recording_errors[device_uid]

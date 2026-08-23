@@ -212,6 +212,29 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn('step="0.05"', source)
         self.assertNotIn('type="number" step="0.05" value={brightness}', source)
 
+    def test_hardware_page_exposes_v15f_board_led_brightness_at_thirty_percent_by_default(self):
+        source = SETTINGS_PAGE.read_text()
+
+        self.assertIn("DEFAULT_BOARD_LED_BRIGHTNESS = 0.30", source)
+        self.assertIn("BOARD_LED_BRIGHTNESS_OPTIONS", source)
+        self.assertIn("boardLedBrightness", source)
+        self.assertIn("board_led: { brightness: boardLedBrightness }", source)
+        self.assertIn('t("boardLedBrightnessLabel")', source)
+        self.assertIn('t("boardLedBrightnessDefault")', source)
+        self.assertIn('t("saveBoardLedBrightness")', source)
+
+    def test_launchpad_uses_v5_soc_for_a_value_first_battery_reading(self):
+        device_source = DEVICE_LIB.read_text()
+        launchpad = (ROOT / "frontend" / "src" / "pages" / "LaunchpadPage.tsx").read_text()
+        styles = STYLES.read_text()
+
+        self.assertIn("batterySocPercentOf", device_source)
+        self.assertIn("soc_centi_percent", device_source)
+        self.assertIn("batterySocPercent", device_source)
+        self.assertIn("batteryPercentLabel", launchpad)
+        self.assertIn("device-battery-reading", launchpad)
+        self.assertIn("font-variant-numeric: tabular-nums", styles)
+
     def test_indicators_keep_last_known_snapshot_when_status_refresh_has_no_indicator_payload(self):
         source = SETTINGS_PAGE.read_text()
 

@@ -35,6 +35,7 @@ export type NormalizedDevice = {
   matrixShape: string;
   battery: string;
   batteryState: string;
+  batterySocPercent: number | null;
   lastSeen: string;
   lastSeenAt: string;
   raw: DeviceEntry;
@@ -100,6 +101,14 @@ function batteryStateOf(battery: Record<string, unknown>): string {
   if (battery.charging === true) return "charging";
   if (battery.charge_done === true || battery.done === true) return "charge_done";
   return "";
+}
+
+function batterySocPercentOf(battery: Record<string, unknown>): number | null {
+  const direct = Number(battery.soc_percent);
+  if (Number.isFinite(direct)) return Math.max(0, Math.min(100, direct));
+  const centi = Number(battery.soc_centi_percent);
+  if (Number.isFinite(centi)) return Math.max(0, Math.min(100, centi / 100));
+  return null;
 }
 
 export function updateStateOf(device: DeviceEntry | undefined): UpdateState {
@@ -168,6 +177,7 @@ export function normalizeDevice(device: DeviceEntry): NormalizedDevice {
   const cols = Number(matrix.cols ?? 0);
   const matrixShape = rows > 0 && cols > 0 ? `${rows} x ${cols}` : "-";
   const batteryState = batteryStateOf(battery);
+  const batterySocPercent = batterySocPercentOf(battery);
   const batteryLabel = batteryState || "-";
   const lastSeen = formatLastSeen(lastSeenAt);
   return {
@@ -192,6 +202,7 @@ export function normalizeDevice(device: DeviceEntry): NormalizedDevice {
     matrixShape,
     battery: batteryLabel,
     batteryState,
+    batterySocPercent,
     lastSeen,
     lastSeenAt,
     raw: device,

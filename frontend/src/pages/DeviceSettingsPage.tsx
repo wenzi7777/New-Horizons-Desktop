@@ -31,6 +31,8 @@ const DIRECT_STABILITY_FPS = 40;
 const STANDARD_LOG_BYTES = 12 * 1024;
 const EXTENDED_LOG_BYTES = 24 * 1024;
 const DEFAULT_EXTERNAL_LED_BRIGHTNESS = 0.35;
+const DEFAULT_BOARD_LED_BRIGHTNESS = 0.30;
+const BOARD_LED_BRIGHTNESS_OPTIONS = [0.1, 0.2, 0.3, 0.5, 1] as const;
 const EXTERNAL_LED_BRIGHTNESS_OPTIONS = [
   { value: 0.1, labelKey: "brightnessOption_10" },
   { value: 0.2, labelKey: "brightnessOption_20" },
@@ -79,9 +81,16 @@ function externalLedBrightnessValue(value: unknown) {
     : DEFAULT_EXTERNAL_LED_BRIGHTNESS;
 }
 
+function boardLedBrightnessValue(value: unknown) {
+  const parsed = numberValue(value, DEFAULT_BOARD_LED_BRIGHTNESS);
+  return BOARD_LED_BRIGHTNESS_OPTIONS.includes(parsed as typeof BOARD_LED_BRIGHTNESS_OPTIONS[number])
+    ? parsed
+    : DEFAULT_BOARD_LED_BRIGHTNESS;
+}
+
 function hasIndicatorData(value: unknown) {
   const indicators = recordValue(value);
-  return Object.keys(recordValue(indicators.external_led)).length > 0 || Object.keys(recordValue(indicators.oled)).length > 0;
+  return Object.keys(recordValue(indicators.board_led)).length > 0 || Object.keys(recordValue(indicators.external_led)).length > 0 || Object.keys(recordValue(indicators.oled)).length > 0;
 }
 
 function boolString(value: unknown) {
@@ -1964,6 +1973,7 @@ export function DeviceSettingsPage() {
     lastKnownIndicatorsRef.current = nextIndicators;
   }
   const indicators = recordValue(hasIndicatorData(nextIndicators) ? nextIndicators : lastKnownIndicatorsRef.current);
+  const boardLed = recordValue(indicators.board_led);
   const externalLed = recordValue(indicators.external_led);
   const oled = recordValue(indicators.oled);
   const updateState = recordValue(status.update_state ?? device?.update_state ?? (lastResultCommand === "check_update" ? lastResult.update_state : undefined));
@@ -2004,6 +2014,7 @@ export function DeviceSettingsPage() {
   const [logLevel, setLogLevel] = useState(stringValue(logging.level, "error"));
   const [logMode, setLogMode] = useState(stringValue(logging.mode, "standard"));
   const [externalLedMode, setExternalLedMode] = useState(stringValue(externalLed.mode, "off"));
+  const [boardLedBrightness, setBoardLedBrightness] = useState(boardLedBrightnessValue(boardLed.brightness));
   const [brightness, setBrightness] = useState(externalLedBrightnessValue(externalLed.brightness));
   const [externalPreset, setExternalPreset] = useState(stringValue(externalLed.preset, "system_status"));
   const [externalColor, setExternalColor] = useState(stringValue(externalLed.color, "teal"));
@@ -2051,6 +2062,10 @@ export function DeviceSettingsPage() {
     { id: "files", label: t("settingsSection_files") },
     { id: "experimental", label: t("settingsSection_experimental") },
   ];
+
+  useEffect(() => {
+    if (boardLed.brightness !== undefined) setBoardLedBrightness(boardLedBrightnessValue(boardLed.brightness));
+  }, [boardLed.brightness]);
 
   useEffect(() => {
     setDeviceGroupDraft(stringValue(device?.device_group, ""));
@@ -2624,6 +2639,27 @@ export function DeviceSettingsPage() {
             <div className="actions">
               <button className="button primary" type="button" disabled={isCommandBusy("set_matrix_layout") || !deviceUid} onClick={() => void applyPinLayout()}>
                 {isCommandBusy("set_matrix_layout") ? t("running") : t("applyPinLayout")}
+              </button>
+            </div>
+          </div>
+          <div className="settings-card">
+            <h4>{t("boardLedBrightnessLabel")}</h4>
+            <p>{t("boardLedBrightnessCopy")}</p>
+            <div className="field-grid">
+              <div className="field">
+                <label>{t("paramBrightness")}</label>
+                <select value={String(boardLedBrightness)} onChange={(event) => setBoardLedBrightness(boardLedBrightnessValue(event.target.value))}>
+                  {BOARD_LED_BRIGHTNESS_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option === DEFAULT_BOARD_LED_BRIGHTNESS ? t("boardLedBrightnessDefault") : `${Math.round(option * 100)}%`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="actions">
+              <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveBoardLedBrightness"), { command: "set_indicators", board_led: { brightness: boardLedBrightness } })}>
+                {isCommandBusy("set_indicators") ? t("running") : t("saveBoardLedBrightness")}
               </button>
             </div>
           </div>

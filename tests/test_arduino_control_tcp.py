@@ -41,7 +41,33 @@ def arduino_v5_extension_packet(device_uid: bytes = bytes.fromhex("3CDC7545CCD0"
     return bytes(packet)
 
 
+def arduino_v5_battery_packet(device_uid: bytes = bytes.fromhex("3CDC7545CCD0")) -> bytes:
+    matrix = struct.pack("<4f", 1.0, 2.0, 3.0, 4.0)
+    battery = struct.pack("<BBHH", 1, 0, 4175, 7350)
+    packet = bytearray(24 + len(matrix) + len(battery))
+    struct.pack_into("<HBB", packet, 0, 0xA55A, 5, 0x02)
+    packet[4:10] = device_uid
+    struct.pack_into("<IQH", packet, 10, 10, 1235, len(matrix) + len(battery))
+    packet[24:] = matrix + battery
+    return bytes(packet)
+
+
 class ArduinoControlTcpTest(unittest.TestCase):
+    def test_v5_battery_stream_merges_soc_into_device_status(self):
+        service = NewHorizonsService(mock_mode=False)
+        service._udp_ingest = object()
+
+        service._handle_udp_datagram(arduino_v5_battery_packet(), ("192.168.50.44", 49152))
+
+        device = service.get_device("3CDC7545CCD0")
+        self.assertEqual(device["last_status"]["battery"], {
+            "status": 1,
+            "fault": 0,
+            "vbat_mv": 4175,
+            "soc_centi_percent": 7350,
+            "soc_percent": 73.5,
+        })
+
     def test_v5_extension_stream_is_rejected_until_the_device_has_an_authoritative_layout(self):
         service = NewHorizonsService(mock_mode=False)
         service._udp_ingest = object()
