@@ -399,6 +399,36 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertNotIn(device_uid, service._pending_commands)
         self.assertNotIn(device_uid, service._boot_transitions)
 
+    def test_normal_v15f_device_queues_action_button_configuration(self):
+        service = NewHorizonsService(mock_mode=False)
+        sent = []
+        device_uid = "3CDC7545CCD0"
+        service.register_gateway_device(device_uid, sent.append)
+        service.record_gateway_result(
+            device_uid,
+            {
+                "device_uid": device_uid,
+                "message": "status",
+                "mode": "normal",
+                "hardware_model": "VD-CTL/R v1.5.F 2026.7",
+            },
+        )
+
+        queued = service.publish_command(
+            device_uid,
+            {
+                "command": "set_action_button",
+                "short_press": "identify",
+                "long_press": "soft_off",
+                "request_id": "req-action-button",
+            },
+        )
+
+        self.assertEqual(queued["transport"], "gateway_wss")
+        self.assertEqual(sent[-1]["payload"]["command"], "set_action_button")
+        self.assertEqual(sent[-1]["payload"]["short_press"], "identify")
+        self.assertEqual(sent[-1]["payload"]["long_press"], "soft_off")
+
     def test_gateway_summary_connected_device_refreshes_device_presence(self):
         service = NewHorizonsService(mock_mode=False)
         events = []

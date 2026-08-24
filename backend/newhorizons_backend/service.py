@@ -93,6 +93,7 @@ class NewHorizonsService:
         "set_battery_profile",
         "detect_battery_profile",
         "power_set_state",
+        "set_action_button",
         "set_indicators",
         "set_imu",
         "set_filter",
@@ -1022,6 +1023,12 @@ class NewHorizonsService:
                 for key in ("external_led", "oled")
                 if isinstance(request.get(key), dict)
             }
+        elif command == "set_action_button" and ok:
+            action_button_data = data.get("action_button") if isinstance(data.get("action_button"), dict) else {}
+            payload["action_button"] = action_button_data or {
+                "short_press": request.get("short_press", "none"),
+                "long_press": request.get("long_press", "soft_off"),
+            }
         elif command in {"set_charge_profile", "set_battery_profile", "detect_battery_profile"} and ok:
             battery_data = data.get("battery") if isinstance(data.get("battery"), dict) else {}
             if battery_data:
@@ -1062,6 +1069,7 @@ class NewHorizonsService:
             "power_set_state",
             "set_imu",
             "set_filter",
+            "set_action_button",
             "set_indicators",
             "set_log",
             "set_ota_config",

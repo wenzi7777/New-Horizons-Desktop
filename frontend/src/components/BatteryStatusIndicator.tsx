@@ -18,7 +18,6 @@ export function BatteryStatusIndicator({
     <span className={`battery-status-indicator ${className}`.trim()} role="img" aria-label={ariaLabel}>
       <svg viewBox="0 0 28 22" aria-hidden="true" focusable="false">
         <rect className="battery-status-indicator-outline" x="2" y="3" width="20" height="16" rx="3" />
-        <rect className="battery-status-indicator-terminal" x="23" y="8" width="3" height="6" rx="1" />
         {fillHeight > 0 ? (
           <rect
             className="battery-status-indicator-fill"

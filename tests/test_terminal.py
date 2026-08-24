@@ -125,6 +125,20 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertEqual(payload["command"], "detect_battery_profile")
         self.assertEqual(payload["request_id"], "req-battery-detect")
 
+    def test_action_button_command_is_allowed_with_both_gestures(self):
+        payload = validate_device_command_payload(
+            {
+                "command": "set_action_button",
+                "short_press": "identify",
+                "long_press": "soft_off",
+                "request_id": "req-action-button",
+            }
+        )
+
+        self.assertEqual(payload["command"], "set_action_button")
+        self.assertEqual(payload["short_press"], "identify")
+        self.assertEqual(payload["long_press"], "soft_off")
+
     def test_board_profile_lists_v21_gcu_lts_manifest_track(self):
         source = BOARD_PROFILE.read_text(encoding="utf-8")
 

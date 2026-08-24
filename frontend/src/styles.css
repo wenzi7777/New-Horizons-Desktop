@@ -790,10 +790,6 @@ button:disabled {
   stroke-width: 1.6;
 }
 
-.battery-status-indicator-terminal {
-  fill: currentColor;
-}
-
 .battery-status-indicator-fill {
   fill: currentColor;
 }

@@ -38,6 +38,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "set_battery_profile",
     "detect_battery_profile",
     "power_set_state",
+    "set_action_button",
     "set_log",
     "set_ota_config",
     "set_indicators",
