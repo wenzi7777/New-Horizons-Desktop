@@ -1,12 +1,12 @@
 {
   "name": "newhorizons-console",
   "private": true,
-  "version": "0.6.5",
+  "version": "0.6.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --experimental-strip-types --test tests/calibrationFlow.test.mjs",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

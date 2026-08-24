@@ -223,6 +223,24 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('t("boardLedBrightnessDefault")', source)
         self.assertIn('t("saveBoardLedBrightness")', source)
 
+    def test_v15f_action_button_page_is_capability_gated_and_uses_native_radios(self):
+        source = SETTINGS_PAGE.read_text(encoding="utf-8")
+        profile_source = (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8")
+        action_button_source = (ROOT / "frontend" / "src" / "lib" / "actionButton.ts").read_text(encoding="utf-8")
+        styles = STYLES.read_text(encoding="utf-8")
+
+        self.assertIn('"action_button"', source)
+        self.assertIn("supportsActionButtonSettings", source)
+        self.assertIn('command: "set_action_button"', action_button_source)
+        self.assertIn('type="radio"', source)
+        self.assertIn("actionButtonFirmwareUpdateRequired", source)
+        self.assertIn("actionButtonBootWifiFixed", source)
+        self.assertIn("actionButtonActionsForGesture", source)
+        self.assertIn("supportsActionButtonSettings: true", profile_source)
+        self.assertIn(".action-button-choice:active", styles)
+        self.assertIn("prefers-reduced-motion", styles)
+        self.assertIn("prefers-reduced-transparency", styles)
+
     def test_launchpad_uses_v5_soc_for_a_value_first_battery_reading(self):
         device_source = DEVICE_LIB.read_text()
         launchpad = (ROOT / "frontend" / "src" / "pages" / "LaunchpadPage.tsx").read_text()
@@ -317,7 +335,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
         self.assertIn("statusDrivenSectionAutoRefreshKeyRef", source)
         self.assertIn("shouldAutoRefreshStatusForSection", source)
-        self.assertIn('const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["overview", "hardware", "runtime", "diagnostics", "files", "experimental"]', source)
+        self.assertIn('const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["overview", "hardware", "action_button", "runtime", "diagnostics", "files", "experimental"]', source)
         self.assertIn('command: "status"', source)
 
     def test_offline_device_skips_auto_refresh_and_disables_live_queries(self):
@@ -642,6 +660,36 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
             self.assertNotIn("IMU は搭載されていません", content, path)
             self.assertNotIn("has no effect", content, path)
             self.assertNotIn("効果はありません", content, path)
+
+    def test_v15f_wiki_is_schematic_traceable_and_has_localized_hardware_reference(self):
+        readme_files = [
+            "wiki/devices/vd-ctl-r-v1-5f/README.md",
+            "wiki/devices/vd-ctl-r-v1-5f/en/README.md",
+            "wiki/devices/vd-ctl-r-v1-5f/ja/README.md",
+        ]
+        hardware_files = [
+            "wiki/devices/vd-ctl-r-v1-5f/hardware.md",
+            "wiki/devices/vd-ctl-r-v1-5f/en/hardware.md",
+            "wiki/devices/vd-ctl-r-v1-5f/ja/hardware.md",
+        ]
+        schematic_markers = (
+            "SCH_Schematic1_1-P1_2026-08-23.png",
+            "ESP32-S3 MINI 1 N8",
+            "BMI270",
+            "BMM350",
+            "MAX17048X+T10",
+            "FPC-05F-20PH20",
+            "VOUT5V",
+        )
+
+        for path in readme_files:
+            content = (ROOT / path).read_text(encoding="utf-8")
+            self.assertIn("SCH_Schematic1_1-P1_2026-08-23.png", content, path)
+
+        for path in hardware_files:
+            content = (ROOT / path).read_text(encoding="utf-8")
+            for marker in schematic_markers:
+                self.assertIn(marker, content, f"{path}: {marker}")
 
     def test_power_and_indicator_copy_are_board_aware(self):
         source = SETTINGS_PAGE.read_text()

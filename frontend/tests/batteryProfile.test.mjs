@@ -78,6 +78,31 @@ test("accepts prior battery field aliases without inventing unavailable gauge da
   assert.equal(battery.ratePercentPerHour, null);
 });
 
+test("clamps the visual battery fill to the measured percentage without inventing a value", () => {
+  assert.equal(typeof batteryProfileModule.batteryFillPercent, "function");
+  assert.equal(batteryProfileModule.batteryFillPercent(null), null);
+  assert.equal(batteryProfileModule.batteryFillPercent(0), 0);
+  assert.equal(batteryProfileModule.batteryFillPercent(48.6), 48.6);
+  assert.equal(batteryProfileModule.batteryFillPercent(100), 100);
+  assert.equal(batteryProfileModule.batteryFillPercent(-12), 0);
+  assert.equal(batteryProfileModule.batteryFillPercent(126), 100);
+});
+
+test("creates a dynamic battery indicator only for a board that declares support", () => {
+  assert.equal(typeof batteryProfileModule.batteryIndicatorState, "function");
+  assert.equal(batteryProfileModule.batteryIndicatorState(false, 64.2, true), null);
+  assert.deepEqual(batteryProfileModule.batteryIndicatorState(true, 64.2, true), {
+    fillPercent: 64.2,
+    label: "64%",
+    charging: true,
+  });
+  assert.deepEqual(batteryProfileModule.batteryIndicatorState(true, null, false), {
+    fillPercent: null,
+    label: null,
+    charging: false,
+  });
+});
+
 test("reports an inline validation error before an invalid manual profile can be dispatched", () => {
   assert.equal(batteryProfileValidationError("custom", "", "230"), "invalid_battery_profile");
   assert.equal(batteryProfileValidationError("400", "", "230"), null);

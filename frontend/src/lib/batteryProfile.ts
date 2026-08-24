@@ -46,6 +46,25 @@ function optionalString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
+export function batteryFillPercent(socPercent: number | null): number | null {
+  if (socPercent === null || !Number.isFinite(socPercent)) return null;
+  return Math.max(0, Math.min(100, socPercent));
+}
+
+export function batteryIndicatorState(
+  supported: boolean,
+  socPercent: number | null,
+  charging: boolean,
+) {
+  if (!supported) return null;
+  const fillPercent = batteryFillPercent(socPercent);
+  return {
+    fillPercent,
+    label: fillPercent === null ? null : `${Math.round(fillPercent)}%`,
+    charging,
+  };
+}
+
 export function normalizeBatteryStatus(status: BatteryProfileStatus): BatteryStatusViewModel {
   const socCentiPercent = finiteNumber(status.soc_centi_percent);
   const thermalMonitoring = optionalString(status.temperature_monitoring);

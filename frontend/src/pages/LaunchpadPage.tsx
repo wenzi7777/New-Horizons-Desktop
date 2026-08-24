@@ -3,6 +3,9 @@ import { Link } from "react-router-dom";
 import { Folder, X } from "lucide-react";
 
 import { useI18n } from "../i18n";
+import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
+import { boardProfileForHardwareModel } from "../lib/boardProfile";
+import { batteryIndicatorState } from "../lib/batteryProfile";
 import { isHubRelayed, useDevicesPolling, type NormalizedDevice } from "../lib/device";
 
 const GLOBAL_APPS = [
@@ -68,6 +71,11 @@ function renderDeviceCode(uid: string) {
 }
 
 function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) {
+  const batteryIndicator = batteryIndicatorState(
+    boardProfileForHardwareModel(device.hardwareModel).supportsBatteryPercentageIndicator,
+    device.batterySocPercent,
+    device.batteryState === "charging",
+  );
   return (
     <article key={device.uid} className={`device-card ${deviceClassName(device)}`}>
       <Link className="device-main-link" to={`/device/${encodeURIComponent(device.uid)}/settings`}>
@@ -85,8 +93,17 @@ function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) 
             <span>{t("hardwareModel")}: {device.hardwareModel}</span>
             <span>Firmware: {device.firmwareVersion}</span>
             <span>Protocol: {device.protocol}</span>
-            <span className="device-battery-reading" aria-label={`${t("battery")}: ${batteryPercentLabel(device.batterySocPercent)}, ${batteryLabel(device, t)}`}>
-              {t("battery")}: <strong>{batteryPercentLabel(device.batterySocPercent)}</strong> <small>{batteryLabel(device, t)}</small>
+            <span className="device-battery-reading">
+              {batteryIndicator ? (
+                <>
+                  <BatteryStatusIndicator
+                    fillPercent={batteryIndicator.fillPercent}
+                    charging={batteryIndicator.charging}
+                    ariaLabel={`${t("battery")}: ${batteryIndicator.label ?? t("batteryUnknown")}${batteryIndicator.charging ? `, ${t("batteryChargingOrMissing")}` : ""}`}
+                  />
+                  <span aria-hidden="true">{t("battery")}: <strong>{batteryPercentLabel(device.batterySocPercent)}</strong> <small>{batteryLabel(device, t)}</small></span>
+                </>
+              ) : <>{t("battery")}: <strong>{batteryPercentLabel(device.batterySocPercent)}</strong> <small>{batteryLabel(device, t)}</small></>}
             </span>
             <span>{t("transport")}: {device.transportMode}</span>
             <span>{t("log")}: {device.logging}</span>

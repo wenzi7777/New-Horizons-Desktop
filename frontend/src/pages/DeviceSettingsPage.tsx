@@ -5,7 +5,8 @@ import { api, type PressureCalReadings, type PressureCalServerPreset } from "../
 
 import { useI18n } from "../i18n";
 import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
-import { batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
+import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
+import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
 import {
   getPrimaryStepDisabledReason,
   getPrimaryStepStates,
@@ -18,8 +19,9 @@ import { useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
 import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { BoardIoModal } from "./TerminalPage";
+import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
 import { ConfirmModal } from "../components/ConfirmModal";
-import { Battery, BatteryCharging, TriangleAlert } from "lucide-react";
+import { Battery, CircleOff, Lightbulb, Power, TriangleAlert } from "lucide-react";
 
 // Spike-validated (firmware/spikes/README.md's "PHY rate config" section,
 // 2026-08-06: raw ADC off + 40fps ran clean at 0% loss over ESP-NOW once
@@ -40,11 +42,12 @@ const EXTERNAL_LED_BRIGHTNESS_OPTIONS = [
   { value: 0.5, labelKey: "brightnessOption_50" },
   { value: 1, labelKey: "brightnessOption_100_danger" },
 ] as const;
-const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["overview", "hardware", "runtime", "diagnostics", "files", "experimental"];
+const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["overview", "hardware", "action_button", "runtime", "diagnostics", "files", "experimental"];
 
 type SettingsSection =
   | "overview"
   | "hardware"
+  | "action_button"
   | "runtime"
   | "maintenance"
   | "diagnostics"
@@ -1947,6 +1950,9 @@ export function DeviceSettingsPage() {
   const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "detect_battery_profile"].includes(lastResultCommand) ? lastResult.battery : undefined));
   const battery = normalizeBatteryStatus(batteryStatus);
   const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" ? lastResult.power : undefined));
+  const actionButton = normalizeActionButtonStatus(
+    status.action_button ?? (lastResultCommand === "set_action_button" ? lastResult.action_button : undefined),
+  );
   // The backend hoists memory_status's `data` (heap_*) onto last_status's top
   // level, so read from there; fall back to the fresh memory_status result.
   const memory = recordValue(status.memory ?? (lastResultCommand === "memory_status" ? recordValue(lastResult.data) : undefined) ?? status);
@@ -2035,8 +2041,16 @@ export function DeviceSettingsPage() {
   const [oledUpdateHz, setOledUpdateHz] = useState(numberValue(oled.update_hz, 1));
   const [oledContrast, setOledContrast] = useState(numberValue(oled.contrast, 128));
   const [oledRotation, setOledRotation] = useState(numberValue(oled.rotation, 0));
+  const [actionButtonShortPress, setActionButtonShortPress] = useState<ActionButtonAction>(actionButton.shortPress ?? "none");
+  const [actionButtonLongPress, setActionButtonLongPress] = useState<ActionButtonAction>(actionButton.longPress ?? "soft_off");
+  const [actionButtonDraftTouched, setActionButtonDraftTouched] = useState(false);
   const batteryChargeState = stringValue(powerStatus.charge_state ?? batteryStatus.charge_state, "");
   const batteryTimeEstimate = estimateBatteryTime(battery, batteryChargeState);
+  const batteryIndicator = batteryIndicatorState(
+    boardProfile.supportsBatteryPercentageIndicator,
+    battery.socPercent,
+    batteryChargeState === "charging",
+  );
   const batteryLedSupported = boardProfile.supportsBatteryStatusLed && batteryLed.supported === true;
   const [showIoModal, setShowIoModal] = useState(false);
   const [deviceGroupDraft, setDeviceGroupDraft] = useState(stringValue(device?.device_group, ""));
@@ -2068,7 +2082,7 @@ export function DeviceSettingsPage() {
   }
   const findme = recordValue(busyCommand && stringValue(lastAttachedFindmeRef.current.state, "") === "attached" ? lastAttachedFindmeRef.current : rawFindme);
 
-  const sections: { id: SettingsSection; label: string }[] = [
+  const baseSections: { id: SettingsSection; label: string }[] = [
     { id: "overview", label: t("settingsSection_overview") },
     { id: "hardware", label: t("settingsSection_hardware") },
     { id: "runtime", label: t("settingsSection_runtime") },
@@ -2077,6 +2091,11 @@ export function DeviceSettingsPage() {
     { id: "files", label: t("settingsSection_files") },
     { id: "experimental", label: t("settingsSection_experimental") },
   ];
+  const sections = boardProfile.supportsActionButtonSettings
+    ? [...baseSections.slice(0, 2), { id: "action_button" as const, label: t("settingsSection_actionButton") }, ...baseSections.slice(2)]
+    : baseSections;
+  const actionButtonDraftDirty = actionButtonShortPress !== (actionButton.shortPress ?? "none") ||
+    actionButtonLongPress !== (actionButton.longPress ?? "soft_off");
 
   useEffect(() => {
     if (boardLed.brightness !== undefined) setBoardLedBrightness(boardLedBrightnessValue(boardLed.brightness));
@@ -2207,6 +2226,25 @@ export function DeviceSettingsPage() {
     if (nextColor) setExternalColor(nextColor);
     if (externalLed.brightness !== undefined) setBrightness(externalLedBrightnessValue(externalLed.brightness));
   }, [externalLed.brightness, externalLed.mode, externalLed.preset, externalLed.color]);
+
+  useEffect(() => {
+    const persistedShortPress = actionButton.shortPress ?? "none";
+    const persistedLongPress = actionButton.longPress ?? "soft_off";
+    const persistedMatchesDraft =
+      actionButtonShortPress === persistedShortPress &&
+      actionButtonLongPress === persistedLongPress;
+    if (!actionButtonDraftTouched || persistedMatchesDraft) {
+      setActionButtonShortPress(persistedShortPress);
+      setActionButtonLongPress(persistedLongPress);
+      setActionButtonDraftTouched(false);
+    }
+  }, [
+    actionButton.longPress,
+    actionButton.shortPress,
+    actionButtonDraftTouched,
+    actionButtonLongPress,
+    actionButtonShortPress,
+  ]);
 
   useEffect(() => {
     const nextOledMode = stringValue(oled.mode, "");
@@ -2553,6 +2591,10 @@ export function DeviceSettingsPage() {
     });
   }
 
+  async function saveActionButtonSettings() {
+    await run(t("saveActionButton"), buildActionButtonCommand(actionButtonShortPress, actionButtonLongPress));
+  }
+
   function renderSection() {
     if (activeSection === "overview") {
       return (
@@ -2583,10 +2625,16 @@ export function DeviceSettingsPage() {
           </div>
           <div className="settings-card battery-overview-card">
             <div className="battery-overview-reading">
-              <div className="battery-overview-icon" aria-hidden="true">
-                {batteryChargeState === "charging" ? <BatteryCharging size={24} /> : <Battery size={24} />}
+              <div className="battery-overview-icon" aria-hidden={batteryIndicator ? undefined : true}>
+                {batteryIndicator ? (
+                  <BatteryStatusIndicator
+                    fillPercent={batteryIndicator.fillPercent}
+                    charging={batteryIndicator.charging}
+                    ariaLabel={`${t("battery")}: ${batteryIndicator.label ?? t("batteryUnknown")}${batteryIndicator.charging ? `, ${t("batteryChargingOrMissing")}` : ""}`}
+                  />
+                ) : <Battery size={24} />}
               </div>
-              <div>
+              <div aria-hidden={batteryIndicator ? true : undefined}>
                 <span>{t("battery")}</span>
                 <strong>{battery.socPercent === null ? t("batteryUnknown") : `${Math.round(battery.socPercent)}%`}</strong>
               </div>
@@ -2953,6 +3001,89 @@ export function DeviceSettingsPage() {
               <Metric label={t("chargeState")} value={powerStatus.charge_state ?? batteryStatus.charge_state ?? "-"} />
             </div>
           </div>
+        </div>
+      );
+    }
+
+    if (activeSection === "action_button") {
+      const actionIcon = (action: ActionButtonAction) => {
+        if (action === "soft_off") return <Power aria-hidden="true" size={20} />;
+        if (action === "identify") return <Lightbulb aria-hidden="true" size={20} />;
+        if (action === "toggle_external_led") return <CircleOff aria-hidden="true" size={20} />;
+        return <span className="action-button-none-icon" aria-hidden="true">—</span>;
+      };
+      const actionLabel = (action: ActionButtonAction) => t(`actionButtonAction_${action}`);
+      const actionCopy = (action: ActionButtonAction) => t(`actionButtonActionCopy_${action}`);
+      const renderActionChoices = (gesture: ActionButtonGesture, value: ActionButtonAction, setValue: (next: ActionButtonAction) => void) => (
+        <fieldset className="action-button-choice-group" disabled={!actionButton.supported || !deviceUid || isControlUnavailable || isCommandBusy("set_action_button")}>
+          <legend>{gesture === "short" ? t("actionButtonShortPress") : t("actionButtonLongPress")}</legend>
+          <div className="action-button-choice-grid">
+            {actionButtonActionsForGesture(gesture).map((action) => (
+              <label key={action} className={`action-button-choice ${value === action ? "selected" : ""}`}>
+                <input
+                  type="radio"
+                  name={`action-button-${gesture}`}
+                  value={action}
+                  checked={value === action}
+                  onChange={() => setValue(action)}
+                />
+                <span className="action-button-choice-icon">{actionIcon(action)}</span>
+                <span className="action-button-choice-copy">
+                  <strong>{actionLabel(action)}</strong>
+                  <small>{actionCopy(action)}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      );
+
+      return (
+        <div className="settings-stack action-button-settings">
+          <div className="settings-detail-header">
+            <div>
+              <h3>{t("settingsSection_actionButton")}</h3>
+              <p>{t("actionButtonPageCopy")}</p>
+            </div>
+          </div>
+          <section className="action-button-hero" aria-label={t("settingsSection_actionButton")}>
+            <div className="action-button-glyph" aria-hidden="true"><span /></div>
+            <div>
+              <p className="action-button-eyebrow">{t("actionButtonConfiguredFor")}</p>
+              <h4>{`${t("actionButtonShortPress")}: ${actionLabel(actionButtonShortPress)} · ${t("actionButtonLongPress")}: ${actionLabel(actionButtonLongPress)}`}</h4>
+              <p>{t("actionButtonBootWifiFixed")}</p>
+            </div>
+          </section>
+          {!actionButton.supported ? (
+            <div className="notice action-button-unavailable">
+              <strong>{t("actionButtonFirmwareUpdateRequired")}</strong>
+              <p>{t("actionButtonFirmwareUpdateRequiredCopy")}</p>
+            </div>
+          ) : (
+            <>
+              <div className="action-button-panel">
+                {renderActionChoices("short", actionButtonShortPress, (next) => {
+                  setActionButtonDraftTouched(true);
+                  setActionButtonShortPress(next);
+                })}
+                {renderActionChoices("long", actionButtonLongPress, (next) => {
+                  setActionButtonDraftTouched(true);
+                  setActionButtonLongPress(next);
+                })}
+              </div>
+              {actionButtonDraftDirty ? (
+                <div className="actions action-button-save">
+                  <button className="button primary" type="button" disabled={isCommandBusy("set_action_button") || !deviceUid || isControlUnavailable} onClick={() => void saveActionButtonSettings()}>
+                    {isCommandBusy("set_action_button") ? t("running") : t("saveActionButton")}
+                  </button>
+                </div>
+              ) : null}
+              <div className="metric-row">
+                <Metric label={t("actionButtonLastAction")} value={actionButton.lastAction ?? "-"} />
+                <Metric label={t("actionButtonLastResult")} value={actionButton.lastResult ?? "-"} />
+              </div>
+            </>
+          )}
         </div>
       );
     }

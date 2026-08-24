@@ -155,6 +155,16 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertIn("defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]", v15_profile)
         self.assertIn("defaultSelectPins: [17, 18, 21, 26, 47, 33, 34, 48, 35, 36, 37, 38, 39, 45]", v15_profile)
 
+    def test_v15f_visual_io_uses_expanded_pin_headings_and_top_down_digital_order(self):
+        source = BOARD_PROFILE.read_text(encoding="utf-8")
+        v15_profile = source.split("const V15F_PROFILE: BoardProfile = {", 1)[1].split("\n};", 1)[0]
+        v15_digital_slots = source.split("const V15F_DIGITAL_PIN_SLOTS: BoardPinSlot[] = [", 1)[1].split("\n];", 1)[0]
+
+        self.assertIn('analogPinHeading: "Analog Pins"', v15_profile)
+        self.assertIn('digitalPinHeading: "Digital Pins"', v15_profile)
+        self.assertLess(v15_digital_slots.index('{ label: "5V" }'), v15_digital_slots.index('{ label: "D0", gpio: 17, role: "select" }'))
+        self.assertLess(v15_digital_slots.index('{ label: "GND" }'), v15_digital_slots.index('{ label: "D0", gpio: 17, role: "select" }'))
+
     def test_recovery_update_commands_are_removed_from_terminal(self):
         removed_commands = (
             "check_os_release",

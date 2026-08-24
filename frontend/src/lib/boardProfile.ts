@@ -22,6 +22,8 @@ export type BoardProfile = {
   supportsLocalButtonWake: boolean;
   supportsChargeControl: boolean;
   supportsBatteryStatusLed: boolean;
+  supportsBatteryPercentageIndicator: boolean;
+  supportsActionButtonSettings: boolean;
   powerUx: "local_button" | "remote_only";
   overviewAsset: string;
   analogPinOrder: string[];
@@ -107,26 +109,26 @@ const V15F_ANALOG_PIN_SLOTS: BoardPinSlot[] = [
 ];
 
 const V15F_DIGITAL_PIN_SLOTS: BoardPinSlot[] = [
-  { label: "D0", gpio: 17, role: "select" },
-  { label: "D1", gpio: 18, role: "select" },
-  { label: "D2", gpio: 21, role: "select" },
-  { label: "D3", gpio: 26, role: "select" },
-  { label: "D4", gpio: 47, role: "select" },
-  { label: "D5", gpio: 33, role: "select" },
-  { label: "D6", gpio: 34, role: "select" },
-  { label: "D7", gpio: 48, role: "select" },
-  { label: "D8", gpio: 35, role: "select" },
-  { label: "D9", gpio: 36, role: "select" },
-  { label: "D10", gpio: 37, role: "select" },
-  { label: "D11", gpio: 38, role: "select" },
-  { label: "D12", gpio: 39, role: "select" },
-  { label: "D13", gpio: 45, role: "select" },
-  { label: "SDA", gpio: 40 },
-  { label: "SCL", gpio: 42 },
-  { label: "GND" },
-  { label: "GND" },
-  { label: "3V3" },
   { label: "5V" },
+  { label: "3V3" },
+  { label: "GND" },
+  { label: "GND" },
+  { label: "SCL", gpio: 42 },
+  { label: "SDA", gpio: 40 },
+  { label: "D13", gpio: 45, role: "select" },
+  { label: "D12", gpio: 39, role: "select" },
+  { label: "D11", gpio: 38, role: "select" },
+  { label: "D10", gpio: 37, role: "select" },
+  { label: "D9", gpio: 36, role: "select" },
+  { label: "D8", gpio: 35, role: "select" },
+  { label: "D7", gpio: 48, role: "select" },
+  { label: "D6", gpio: 34, role: "select" },
+  { label: "D5", gpio: 33, role: "select" },
+  { label: "D4", gpio: 47, role: "select" },
+  { label: "D3", gpio: 26, role: "select" },
+  { label: "D2", gpio: 21, role: "select" },
+  { label: "D1", gpio: 18, role: "select" },
+  { label: "D0", gpio: 17, role: "select" },
 ];
 
 const GCU_DIGITAL_PIN_SLOTS: BoardPinSlot[] = [
@@ -234,6 +236,8 @@ const V1_PROFILE: BoardProfile = {
   supportsLocalButtonWake: true,
   supportsChargeControl: true,
   supportsBatteryStatusLed: false,
+  supportsBatteryPercentageIndicator: false,
+  supportsActionButtonSettings: false,
   powerUx: "local_button",
   overviewAsset: v1OverviewAsset,
   analogPinOrder: V1_ANALOG_PIN_SLOTS.map((pin) => pin.label),
@@ -257,6 +261,8 @@ const V21_GCU_PROFILE: BoardProfile = {
   supportsLocalButtonWake: false,
   supportsChargeControl: false,
   supportsBatteryStatusLed: false,
+  supportsBatteryPercentageIndicator: false,
+  supportsActionButtonSettings: false,
   powerUx: "remote_only",
   overviewAsset: gcu21OverviewAsset,
   analogPinOrder: V21_GCU_ANALOG_PIN_SLOTS.map((pin) => pin.label),
@@ -280,14 +286,16 @@ const V15F_PROFILE: BoardProfile = {
   supportsLocalButtonWake: true,
   supportsChargeControl: true,
   supportsBatteryStatusLed: true,
+  supportsBatteryPercentageIndicator: true,
+  supportsActionButtonSettings: true,
   powerUx: "local_button",
   overviewAsset: v15fOverviewAsset,
   analogPinOrder: V15F_ANALOG_PIN_SLOTS.map((pin) => pin.label),
   digitalPinOrder: V15F_DIGITAL_PIN_SLOTS.map((pin) => pin.label),
   analogPinSlots: V15F_ANALOG_PIN_SLOTS,
   digitalPinSlots: V15F_DIGITAL_PIN_SLOTS,
-  analogPinHeading: "ANA FPC",
-  digitalPinHeading: "DIG FPC",
+  analogPinHeading: "Analog Pins",
+  digitalPinHeading: "Digital Pins",
 };
 
 const GCU_PROFILE: BoardProfile = {
@@ -303,6 +311,8 @@ const GCU_PROFILE: BoardProfile = {
   supportsLocalButtonWake: false,
   supportsChargeControl: true,
   supportsBatteryStatusLed: false,
+  supportsBatteryPercentageIndicator: false,
+  supportsActionButtonSettings: false,
   powerUx: "remote_only",
   overviewAsset: gcuOverviewAsset,
   analogPinOrder: GCU_ANALOG_PIN_SLOTS.map((pin) => pin.label),
