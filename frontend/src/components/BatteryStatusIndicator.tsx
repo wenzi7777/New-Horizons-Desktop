@@ -11,20 +11,20 @@ export function BatteryStatusIndicator({
   ariaLabel,
   className = "",
 }: BatteryStatusIndicatorProps) {
-  const fillHeight = fillPercent === null ? 0 : (12 * fillPercent) / 100;
-  const fillY = 17 - fillHeight;
+  const fillWidth = fillPercent === null ? 0 : (16 * fillPercent) / 100;
 
   return (
     <span className={`battery-status-indicator ${className}`.trim()} role="img" aria-label={ariaLabel}>
       <svg viewBox="0 0 28 22" aria-hidden="true" focusable="false">
         <rect className="battery-status-indicator-outline" x="2" y="3" width="20" height="16" rx="3" />
-        {fillHeight > 0 ? (
+        <rect className="battery-status-indicator-terminal" x="23" y="8" width="3" height="6" rx="1" />
+        {fillWidth > 0 ? (
           <rect
             className="battery-status-indicator-fill"
             x="4"
-            y={fillY}
-            width="16"
-            height={fillHeight}
+            y="5"
+            width={fillWidth}
+            height="12"
             rx="1"
           />
         ) : null}

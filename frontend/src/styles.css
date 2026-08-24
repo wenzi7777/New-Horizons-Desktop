@@ -790,6 +790,10 @@ button:disabled {
   stroke-width: 1.6;
 }
 
+.battery-status-indicator-terminal {
+  fill: currentColor;
+}
+
 .battery-status-indicator-fill {
   fill: currentColor;
 }
@@ -1411,16 +1415,6 @@ button:disabled {
   border-radius: 24px;
   background: var(--panel-solid);
   box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--panel-soft) 86%, transparent);
-}
-
-.action-button-glyph span {
-  position: absolute;
-  top: 17px;
-  right: -13px;
-  width: 10px;
-  height: 23px;
-  border-radius: 0 8px 8px 0;
-  background: var(--accent);
 }
 
 .action-button-panel {

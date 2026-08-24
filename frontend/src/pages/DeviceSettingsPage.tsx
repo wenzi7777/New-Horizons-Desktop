@@ -3047,7 +3047,7 @@ export function DeviceSettingsPage() {
             </div>
           </div>
           <section className="action-button-hero" aria-label={t("settingsSection_actionButton")}>
-            <div className="action-button-glyph" aria-hidden="true"><span /></div>
+            <div className="action-button-glyph" aria-hidden="true" />
             <div>
               <p className="action-button-eyebrow">{t("actionButtonConfiguredFor")}</p>
               <h4>{`${t("actionButtonShortPress")}: ${actionLabel(actionButtonShortPress)} · ${t("actionButtonLongPress")}: ${actionLabel(actionButtonLongPress)}`}</h4>
