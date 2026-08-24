@@ -143,6 +143,18 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertTrue(profile["supports_charge_control"])
         self.assertEqual(profile["power_ux"], "local_button")
 
+    def test_v15f_visual_io_uses_its_own_board_art_and_14_by_14_pin_layout(self):
+        """The v1.5.F editor must never silently fall back to the v1.0.F board picture or 10-pin layout."""
+        source = BOARD_PROFILE.read_text(encoding="utf-8")
+        v15_profile = source.split("const V15F_PROFILE: BoardProfile = {", 1)[1].split("\n};", 1)[0]
+
+        self.assertIn("VDCTLRv15F20267OVERVIEW.png", source)
+        self.assertIn("overviewAsset: v15fOverviewAsset", v15_profile)
+        self.assertIn("analogPinSlots: V15F_ANALOG_PIN_SLOTS", v15_profile)
+        self.assertIn("digitalPinSlots: V15F_DIGITAL_PIN_SLOTS", v15_profile)
+        self.assertIn("defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]", v15_profile)
+        self.assertIn("defaultSelectPins: [17, 18, 21, 26, 47, 33, 34, 48, 35, 36, 37, 38, 39, 45]", v15_profile)
+
     def test_recovery_update_commands_are_removed_from_terminal(self):
         removed_commands = (
             "check_os_release",
