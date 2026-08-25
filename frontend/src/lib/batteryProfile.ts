@@ -3,6 +3,7 @@ export type BatteryProfileStatus = {
   soc_percent?: unknown;
   vbat_mv?: unknown;
   rate?: unknown;
+  sample_valid?: unknown;
   battery_present?: unknown;
   present?: unknown;
   profile_required?: unknown;
@@ -13,6 +14,9 @@ export type BatteryProfileStatus = {
   max_charge_current_ma?: unknown;
   temperature_monitoring?: unknown;
   thermal_monitoring_bypass?: unknown;
+  gauge_sync_state?: unknown;
+  last_sync_reason?: unknown;
+  gauge_sync_count?: unknown;
 };
 
 export type BatteryStatusViewModel = {
@@ -26,6 +30,9 @@ export type BatteryStatusViewModel = {
   capacityMah: number | null;
   maxChargeCurrentMa: number | null;
   thermalMonitoringBypassed: boolean | null;
+  syncState: "ready" | "syncing" | "error" | null;
+  lastSyncReason: string | null;
+  syncCount: number | null;
 };
 
 export type BatteryTimeEstimate =
@@ -44,6 +51,10 @@ function optionalBoolean(value: unknown): boolean | null {
 
 function optionalString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
+}
+
+function optionalGaugeSyncState(value: unknown): BatteryStatusViewModel["syncState"] {
+  return value === "ready" || value === "syncing" || value === "error" ? value : null;
 }
 
 export function batteryFillPercent(socPercent: number | null): number | null {
@@ -69,10 +80,12 @@ export function normalizeBatteryStatus(status: BatteryProfileStatus): BatterySta
   const socCentiPercent = finiteNumber(status.soc_centi_percent);
   const thermalMonitoring = optionalString(status.temperature_monitoring);
   const rate = finiteNumber(status.rate);
+  const syncState = optionalGaugeSyncState(status.gauge_sync_state);
+  const measurementsValid = optionalBoolean(status.sample_valid) !== false && syncState !== "syncing" && syncState !== "error";
   return {
-    socPercent: socCentiPercent === null ? finiteNumber(status.soc_percent) : socCentiPercent / 100,
-    vbatMv: finiteNumber(status.vbat_mv),
-    ratePercentPerHour: rate === null ? null : rate / 100,
+    socPercent: measurementsValid ? (socCentiPercent === null ? finiteNumber(status.soc_percent) : socCentiPercent / 100) : null,
+    vbatMv: measurementsValid ? finiteNumber(status.vbat_mv) : null,
+    ratePercentPerHour: measurementsValid && rate !== null ? rate / 100 : null,
     batteryPresent: optionalBoolean(status.battery_present) ?? optionalBoolean(status.present),
     profileSource: optionalString(status.profile_source),
     profileResolved: optionalBoolean(status.profile_resolved),
@@ -80,6 +93,9 @@ export function normalizeBatteryStatus(status: BatteryProfileStatus): BatterySta
     capacityMah: finiteNumber(status.capacity_mah),
     maxChargeCurrentMa: finiteNumber(status.max_charge_current_ma),
     thermalMonitoringBypassed: thermalMonitoring === "bypassed" ? true : optionalBoolean(status.thermal_monitoring_bypass),
+    syncState,
+    lastSyncReason: optionalString(status.last_sync_reason),
+    syncCount: finiteNumber(status.gauge_sync_count),
   };
 }
 
@@ -116,6 +132,10 @@ export function buildBatteryProfileCommand(
 
 export function buildBatteryProfileDetectionCommand() {
   return { command: "detect_battery_profile" as const };
+}
+
+export function buildBatteryGaugeResyncCommand() {
+  return { command: "resync_battery_gauge" as const };
 }
 
 export function estimateBatteryTime(

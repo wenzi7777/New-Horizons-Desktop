@@ -125,6 +125,14 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertEqual(payload["command"], "detect_battery_profile")
         self.assertEqual(payload["request_id"], "req-battery-detect")
 
+    def test_battery_gauge_resync_command_is_allowed_without_manual_fields(self):
+        payload = validate_device_command_payload(
+            {"command": "resync_battery_gauge", "request_id": "req-battery-resync"}
+        )
+
+        self.assertEqual(payload["command"], "resync_battery_gauge")
+        self.assertEqual(payload["request_id"], "req-battery-resync")
+
     def test_action_button_command_is_allowed_with_both_gestures(self):
         payload = validate_device_command_payload(
             {

@@ -7,6 +7,7 @@ import {
   batteryProfileValidationError,
   buildBatteryProfileCommand,
   buildBatteryProfileDetectionCommand,
+  buildBatteryGaugeResyncCommand,
   normalizeBatteryStatus,
 } from "../src/lib/batteryProfile.ts";
 
@@ -21,6 +22,12 @@ test("builds a set_battery_profile command with a positive custom capacity and 1
 test("builds an explicit battery-ID detection command without changing manual settings", () => {
   assert.deepEqual(buildBatteryProfileDetectionCommand(), {
     command: "detect_battery_profile",
+  });
+});
+
+test("builds a distinct MAX17048 fuel-gauge resync command", () => {
+  assert.deepEqual(buildBatteryGaugeResyncCommand(), {
+    command: "resync_battery_gauge",
   });
 });
 
@@ -60,7 +67,33 @@ test("normalizes the canonical Task 1 firmware battery status into display value
     capacityMah: 400,
     maxChargeCurrentMa: 200,
     thermalMonitoringBypassed: true,
+    syncState: null,
+    lastSyncReason: null,
+    syncCount: null,
   });
+});
+
+test("hides stale gauge measurements while resyncing or after a resync error", () => {
+  for (const gauge_sync_state of ["syncing", "error"]) {
+    const battery = normalizeBatteryStatus({
+      sample_valid: false,
+      battery_present: null,
+      vbat_mv: 4175,
+      soc_centi_percent: 7350,
+      rate: -208,
+      gauge_sync_state,
+      last_sync_reason: "manual",
+      gauge_sync_count: 4,
+    });
+
+    assert.equal(battery.socPercent, null);
+    assert.equal(battery.vbatMv, null);
+    assert.equal(battery.ratePercentPerHour, null);
+    assert.equal(battery.batteryPresent, null);
+    assert.equal(battery.syncState, gauge_sync_state);
+    assert.equal(battery.lastSyncReason, "manual");
+    assert.equal(battery.syncCount, 4);
+  }
 });
 
 test("accepts prior battery field aliases without inventing unavailable gauge data", () => {

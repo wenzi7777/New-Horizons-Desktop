@@ -37,6 +37,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "set_charge_profile",
     "set_battery_profile",
     "detect_battery_profile",
+    "resync_battery_gauge",
     "power_set_state",
     "set_action_button",
     "set_log",

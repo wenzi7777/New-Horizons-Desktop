@@ -429,6 +429,54 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(sent[-1]["payload"]["short_press"], "identify")
         self.assertEqual(sent[-1]["payload"]["long_press"], "soft_off")
 
+    def test_normal_v15f_device_queues_battery_gauge_resync(self):
+        service = NewHorizonsService(mock_mode=False)
+        sent = []
+        device_uid = "3CDC7545CCD0"
+        service.register_gateway_device(device_uid, sent.append)
+        service.record_gateway_result(
+            device_uid,
+            {
+                "device_uid": device_uid,
+                "message": "status",
+                "mode": "normal",
+                "hardware_model": "VD-CTL/R v1.5.F 2026.7",
+            },
+        )
+
+        queued = service.publish_command(
+            device_uid,
+            {"command": "resync_battery_gauge", "request_id": "req-battery-resync"},
+        )
+
+        self.assertEqual(queued["transport"], "gateway_wss")
+        self.assertEqual(sent[-1]["payload"]["command"], "resync_battery_gauge")
+
+    def test_battery_gauge_resync_result_updates_status_battery(self):
+        service = NewHorizonsService(mock_mode=False)
+        device_uid = "3CDC7545CCD0"
+        service._record_arduino_response(
+            device_uid,
+            {"command": "resync_battery_gauge", "request_id": "req-battery-resync"},
+            {
+                "status": "ok",
+                "message": "battery_gauge_resync_started",
+                "data": {
+                    "battery": {
+                        "sample_valid": False,
+                        "battery_present": None,
+                        "gauge_sync_state": "syncing",
+                        "last_sync_reason": "manual",
+                        "gauge_sync_count": 2,
+                    }
+                },
+            },
+        )
+
+        device = {item["device_uid"]: item for item in service.list_devices()}[device_uid]
+        self.assertEqual(device["last_status"]["battery"]["gauge_sync_state"], "syncing")
+        self.assertIsNone(device["last_status"]["battery"]["battery_present"])
+
     def test_gateway_summary_connected_device_refreshes_device_presence(self):
         service = NewHorizonsService(mock_mode=False)
         events = []

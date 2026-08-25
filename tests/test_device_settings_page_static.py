@@ -138,6 +138,20 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('t("extremeChargingMode")', source)
         self.assertIn('isCommandBusy("set_charge_profile")', source)
 
+    def test_v15f_hardware_page_exposes_fuel_gauge_resync_state(self):
+        source = SETTINGS_PAGE.read_text(encoding="utf-8")
+        battery_helper = (ROOT / "frontend" / "src" / "lib" / "batteryProfile.ts").read_text(encoding="utf-8")
+
+        self.assertIn("buildBatteryGaugeResyncCommand", battery_helper)
+        self.assertIn('command: "resync_battery_gauge"', battery_helper)
+        self.assertIn("battery.syncState", source)
+        self.assertIn("supportsBatteryPercentageIndicator", source)
+        self.assertIn('isCommandBusy("resync_battery_gauge")', source)
+        self.assertIn('t("resyncBatteryGauge")', source)
+        self.assertIn('t("batteryGaugeSyncing")', source)
+        self.assertIn('t("batteryGaugeSyncFailed")', source)
+        self.assertIn('battery.batteryPresent === null ? t("batteryUnknown")', source)
+
     def test_diagnostics_exposes_power_state_controls_and_status_metrics(self):
         source = SETTINGS_PAGE.read_text()
 

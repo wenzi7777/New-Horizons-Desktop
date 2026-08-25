@@ -92,6 +92,7 @@ class NewHorizonsService:
         "set_charge_profile",
         "set_battery_profile",
         "detect_battery_profile",
+        "resync_battery_gauge",
         "power_set_state",
         "set_action_button",
         "set_indicators",
@@ -1029,11 +1030,11 @@ class NewHorizonsService:
                 "short_press": request.get("short_press", "none"),
                 "long_press": request.get("long_press", "soft_off"),
             }
-        elif command in {"set_charge_profile", "set_battery_profile", "detect_battery_profile"} and ok:
+        elif command in {"set_charge_profile", "set_battery_profile", "detect_battery_profile", "resync_battery_gauge"} and ok:
             battery_data = data.get("battery") if isinstance(data.get("battery"), dict) else {}
             if battery_data:
                 payload["battery"] = battery_data
-            elif command != "detect_battery_profile":
+            elif command not in {"detect_battery_profile", "resync_battery_gauge"}:
                 payload["battery"] = {
                     "charger": "integrated",
                     "configured": True,
@@ -1066,6 +1067,7 @@ class NewHorizonsService:
             "set_charge_profile",
             "set_battery_profile",
             "detect_battery_profile",
+            "resync_battery_gauge",
             "power_set_state",
             "set_imu",
             "set_filter",

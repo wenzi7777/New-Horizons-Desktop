@@ -6,7 +6,7 @@ import { api, type PressureCalReadings, type PressureCalServerPreset } from "../
 import { useI18n } from "../i18n";
 import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
-import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
+import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
 import {
   getPrimaryStepDisabledReason,
   getPrimaryStepStates,
@@ -1947,7 +1947,7 @@ export function DeviceSettingsPage() {
   const analogPinsFromStatus = arrayCsv(matrixLayout.analog_pins ?? matrixLayout.active_rows);
   const selectPinsFromStatus = arrayCsv(matrixLayout.select_pins ?? matrixLayout.active_cols);
   const wifi = recordValue(status.wifi);
-  const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "detect_battery_profile"].includes(lastResultCommand) ? lastResult.battery : undefined));
+  const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "detect_battery_profile", "resync_battery_gauge"].includes(lastResultCommand) ? lastResult.battery : undefined));
   const battery = normalizeBatteryStatus(batteryStatus);
   const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" ? lastResult.power : undefined));
   const actionButton = normalizeActionButtonStatus(
@@ -2045,11 +2045,13 @@ export function DeviceSettingsPage() {
   const [actionButtonLongPress, setActionButtonLongPress] = useState<ActionButtonAction>(actionButton.longPress ?? "soft_off");
   const [actionButtonDraftTouched, setActionButtonDraftTouched] = useState(false);
   const batteryChargeState = stringValue(powerStatus.charge_state ?? batteryStatus.charge_state, "");
+  const batteryGaugeSyncing = battery.syncState === "syncing";
+  const batteryGaugeSyncFailed = battery.syncState === "error";
   const batteryTimeEstimate = estimateBatteryTime(battery, batteryChargeState);
   const batteryIndicator = batteryIndicatorState(
     boardProfile.supportsBatteryPercentageIndicator,
     battery.socPercent,
-    batteryChargeState === "charging",
+    batteryChargeState === "charging" && !batteryGaugeSyncing,
   );
   const batteryLedSupported = boardProfile.supportsBatteryStatusLed && batteryLed.supported === true;
   const [showIoModal, setShowIoModal] = useState(false);
@@ -2396,6 +2398,20 @@ export function DeviceSettingsPage() {
     };
   }, [deviceUid, isControlUnavailable, ramMonitorEnabled]);
 
+  useEffect(() => {
+    if (!batteryGaugeSyncing || !deviceUid || isControlUnavailable) return undefined;
+    let cancelled = false;
+    const intervalId = window.setInterval(() => {
+      if (!cancelled && !commandInFlightRef.current) {
+        void run(t("refreshStatus"), { command: "status" }, 18000).catch(() => undefined);
+      }
+    }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [batteryGaugeSyncing, deviceUid, isControlUnavailable, t]);
+
   useEffect(() => () => {
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current);
@@ -2508,6 +2524,14 @@ export function DeviceSettingsPage() {
   async function detectBatteryProfile() {
     try {
       await run(t("detectBatteryProfile"), buildBatteryProfileDetectionCommand());
+    } catch (error) {
+      void error;
+    }
+  }
+
+  async function resyncBatteryGauge() {
+    try {
+      await run(t("resyncBatteryGauge"), buildBatteryGaugeResyncCommand());
     } catch (error) {
       void error;
     }
@@ -2922,10 +2946,11 @@ export function DeviceSettingsPage() {
                 </div>
                 <div className="metric-row">
                   <Metric label={t("battery")} value={batteryStatus.state ?? t("batteryUnknown")} />
-                  <Metric label={t("batterySoc")} value={battery.socPercent === null ? t("batteryUnknown") : `${battery.socPercent}%`} />
+                  <Metric label={t("batterySoc")} value={batteryGaugeSyncing ? t("batteryGaugeSyncing") : batteryGaugeSyncFailed ? t("batteryGaugeSyncFailed") : battery.socPercent === null ? t("batteryUnknown") : `${battery.socPercent}%`} />
                   <Metric label={t("batteryVoltageMv")} value={battery.vbatMv ?? t("batteryUnknown")} />
                   <Metric label={t("batteryRate")} value={battery.ratePercentPerHour === null ? t("batteryUnknown") : `${battery.ratePercentPerHour}%/h`} />
-                  <Metric label={t("batteryPresent")} value={battery.batteryPresent === null ? t("batteryAvailable") : boolString(battery.batteryPresent)} />
+                  <Metric label={t("batteryPresent")} value={battery.batteryPresent === null ? t("batteryUnknown") : boolString(battery.batteryPresent)} />
+                  <Metric label={t("batteryGaugeSyncState")} value={battery.syncState ?? t("batteryUnknown")} />
                   <Metric label={t("batteryProfileSource")} value={battery.profileSource ?? t("batteryUnknown")} />
                   <Metric label={t("batteryProfileResolved")} value={battery.profileResolved === null ? t("batteryUnknown") : boolString(battery.profileResolved)} />
                   <Metric label={t("batteryProfileRequired")} value={battery.profileRequired === null ? t("batteryUnknown") : boolString(battery.profileRequired)} />
@@ -2962,7 +2987,14 @@ export function DeviceSettingsPage() {
                 ) : null}
                 <div className="actions compact">
                   <button className="button" type="button" disabled={isCommandBusy("detect_battery_profile") || !deviceUid} onClick={() => void detectBatteryProfile()}>{isCommandBusy("detect_battery_profile") ? t("running") : t("detectBatteryProfile")}</button>
+                  {boardProfile.supportsBatteryPercentageIndicator ? (
+                    <button className="button" type="button" disabled={batteryGaugeSyncing || isCommandBusy("resync_battery_gauge") || !deviceUid} onClick={() => void resyncBatteryGauge()}>
+                      {batteryGaugeSyncing || isCommandBusy("resync_battery_gauge") ? t("batteryGaugeSyncing") : t("resyncBatteryGauge")}
+                    </button>
+                  ) : null}
                 </div>
+                {batteryGaugeSyncing ? <p className="notice">{t("batteryGaugeSyncing")}</p> : null}
+                {batteryGaugeSyncFailed ? <p className="notice error">{t("batteryGaugeSyncFailed")}</p> : null}
                 {batteryProfileSetupRequired(batteryStatus) ? (
                   <div className="notice">
                     <p>{t("batteryProfileSetupNotice")}</p>

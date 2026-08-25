@@ -14,6 +14,7 @@ ARDUINO_ROOT = ROOT / "NewHorizonsOS-OTA" / "firmware" / "newhorizons_os"
 FINDME_CPP = ARDUINO_ROOT / "FindMeClient.cpp"
 FINDME_H = ARDUINO_ROOT / "FindMeClient.h"
 CONFIG_H = ARDUINO_ROOT / "Config.h"
+PACKET_WIRE_H = ARDUINO_ROOT / "PacketWire.h"
 CONTROL_CPP = ARDUINO_ROOT / "ControlServer.cpp"
 PACKET_BUILDER_CPP = ARDUINO_ROOT / "PacketBuilder.cpp"
 PACKET_BUILDER_H = ARDUINO_ROOT / "PacketBuilder.h"
@@ -49,17 +50,19 @@ class FirmwareFindMeStaticTest(unittest.TestCase):
         self.assertIn("attachedThisBoot_ = true;", source)
         self.assertNotIn('state_ = streamHost_.isEmpty() ? "idle" : "attached";', source)
 
-    def test_heartbeat_packet_contract_is_v3_empty_payload(self):
+    def test_heartbeat_packet_contract_is_v5_empty_payload_with_optional_epoch(self):
         config = CONFIG_H.read_text()
+        packet_wire = PACKET_WIRE_H.read_text()
         builder_header = PACKET_BUILDER_H.read_text()
         builder_source = PACKET_BUILDER_CPP.read_text()
         sketch = SKETCH.read_text()
 
-        self.assertIn("kPacketFlagHeartbeat = 0x80", config)
+        self.assertIn("kPacketFlagHeartbeat = 0x80", packet_wire)
         self.assertIn("kHeartbeatIntervalMs = 5000", config)
         self.assertIn("buildHeartbeat", builder_header)
-        self.assertIn("out[3] = kPacketFlagHeartbeat;", builder_source)
-        self.assertIn("putU16(out + 18, 0);", builder_source)
+        self.assertIn("out[3] = kPacketFlagHeartbeat | (epochValid ? kPacketFlagEpochValid : 0);", builder_source)
+        self.assertIn("out[22] = 0;", builder_source)
+        self.assertIn("out[23] = 0;", builder_source)
         self.assertIn("sendHeartbeatIfDue", sketch)
         self.assertIn("if (!wifi.isConnected() || !findme.hasGateway())", sketch)
         self.assertIn("sendHeartbeatIfDue();", sketch)

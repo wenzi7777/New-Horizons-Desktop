@@ -16,6 +16,8 @@ from newhorizons_backend.service import NewHorizonsService  # noqa: E402
 from newhorizons_backend.standalone import create_standalone_app  # noqa: E402
 from newhorizons_backend.ws import WebSocketHub, _WsClient  # noqa: E402
 
+USER_PASSWORD = str(AuthManager.DEFAULT_USERS["user"]["passwords"][0])
+
 
 class _FakeSocket:
     def send(self, payload):
@@ -36,13 +38,13 @@ class NewHorizonsAuthTest(unittest.TestCase):
         app = create_standalone_app()
         return app.test_client(), Path(env["NEWHORIZONS_AUTH_DB"]), app
 
-    def test_auth_seeds_users_and_accepts_legacy_and_new_passwords(self):
+    def test_auth_seeds_users_and_accepts_configured_passwords(self):
         client, db_path, _ = self.create_client()
         manager = AuthManager(db_path)
 
         self.assertEqual(manager.authenticate("admin", "admin"), AuthUser(username="admin", role="admin"))
         self.assertEqual(manager.authenticate("admin", "uoacnlab2026"), AuthUser(username="admin", role="admin"))
-        self.assertEqual(manager.authenticate("user", "nedo"), AuthUser(username="user", role="user"))
+        self.assertEqual(manager.authenticate("user", USER_PASSWORD), AuthUser(username="user", role="user"))
         self.assertEqual(manager.authenticate("user", "uoacnlab2026"), AuthUser(username="user", role="user"))
 
         response = client.post("/newhorizons/api/auth/login", json={"username": "admin", "password": "bad-password"})
@@ -66,7 +68,7 @@ class NewHorizonsAuthTest(unittest.TestCase):
 
     def test_user_role_can_access_visualization_and_profiles_but_not_admin_routes(self):
         client, _, _ = self.create_client()
-        login = client.post("/newhorizons/api/auth/login", json={"username": "user", "password": "nedo"})
+        login = client.post("/newhorizons/api/auth/login", json={"username": "user", "password": USER_PASSWORD})
         self.assertEqual(login.status_code, 200)
 
         self.assertEqual(client.get("/newhorizons/api/health").status_code, 200)
@@ -142,7 +144,7 @@ class NewHorizonsAuthTest(unittest.TestCase):
         service = app.config["NEWHORIZONS_SERVICE"]
         service.register_gateway("nh-gateway-existing", lambda _payload: None, {"gateway_name": "Existing"})
 
-        user_login = client.post("/newhorizons/api/auth/login", json={"username": "user", "password": "nedo"})
+        user_login = client.post("/newhorizons/api/auth/login", json={"username": "user", "password": USER_PASSWORD})
         self.assertEqual(user_login.status_code, 200)
         self.assertEqual(client.delete("/newhorizons/api/gateways/nh-gateway-existing").status_code, 403)
 
