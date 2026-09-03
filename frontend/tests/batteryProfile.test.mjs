@@ -178,3 +178,70 @@ test("builds only safe persisted low-battery threshold commands", () => {
   assert.throws(() => batteryProfileModule.buildBatteryLedThresholdCommand(26), /invalid_low_battery_threshold/);
   assert.throws(() => batteryProfileModule.buildBatteryLedThresholdCommand(1.5), /invalid_low_battery_threshold/);
 });
+
+test("formats battery time estimates as compact hour/minute labels", () => {
+  const { durationLabel } = batteryProfileModule;
+  assert.equal(durationLabel(0), "0m");
+  assert.equal(durationLabel(45), "45m");
+  assert.equal(durationLabel(60), "1h");
+  assert.equal(durationLabel(200), "3h 20m");
+});
+
+const readout = (overrides = {}) =>
+  batteryProfileModule.deviceBatteryReadout({
+    supported: true,
+    battery: { sample_valid: true, battery_present: true, soc_centi_percent: 6800, rate: -200 },
+    power: { charge_state: "not_charging" },
+    batteryLed: { low_battery_threshold_percent: 10 },
+    ...overrides,
+  });
+
+test("boards without a fuel gauge report unsupported instead of a blank reading", () => {
+  const result = readout({ supported: false });
+  assert.equal(result.supported, false);
+  assert.equal(result.socPercent, null);
+  assert.equal(result.lowBattery, false);
+  assert.deepEqual(result.estimate, { kind: "unavailable" });
+});
+
+test("estimates remaining time while discharging and time to full while charging", () => {
+  assert.deepEqual(readout().estimate, { kind: "remaining", minutes: 2040 });
+  assert.deepEqual(
+    readout({ power: { charge_state: "charging" }, battery: { sample_valid: true, battery_present: true, soc_centi_percent: 6800, rate: 3200 } }).estimate,
+    { kind: "until_full", minutes: 60 },
+  );
+  assert.deepEqual(readout({ power: { charge_state: "charge_done" } }).estimate, { kind: "full" });
+});
+
+test("charging state drives the bolt independently of the time estimate", () => {
+  assert.equal(readout().charging, false);
+  assert.equal(readout({ power: { charge_state: "charging" } }).charging, true);
+});
+
+test("low-battery warning mirrors the firmware BatteryLedPolicy trigger", () => {
+  const low = { sample_valid: true, battery_present: true, soc_centi_percent: 800, rate: -200 };
+  // At or below a non-zero threshold while not charging: warn.
+  assert.equal(readout({ battery: low }).lowBattery, true);
+  assert.equal(
+    readout({ battery: { ...low, soc_centi_percent: 1000 } }).lowBattery,
+    true,
+    "the threshold itself is inclusive",
+  );
+  // Above the threshold: quiet.
+  assert.equal(readout({ battery: { ...low, soc_centi_percent: 1100 } }).lowBattery, false);
+  // A zero threshold disables the warning outright, exactly as the firmware does.
+  assert.equal(readout({ battery: low, batteryLed: { low_battery_threshold_percent: 0 } }).lowBattery, false);
+  // Charging suppresses the warning even deep below the threshold.
+  assert.equal(readout({ battery: low, power: { charge_state: "charging" } }).lowBattery, false);
+  // Never invent a threshold the board did not report.
+  assert.equal(readout({ battery: low, batteryLed: {} }).lowBattery, false);
+});
+
+test("a resyncing fuel gauge withholds the stale reading instead of warning on it", () => {
+  const result = readout({
+    battery: { sample_valid: true, battery_present: true, soc_centi_percent: 500, rate: -200, gauge_sync_state: "syncing" },
+  });
+  assert.equal(result.syncing, true);
+  assert.equal(result.socPercent, null);
+  assert.equal(result.lowBattery, false);
+});

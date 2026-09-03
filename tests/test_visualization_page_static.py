@@ -89,6 +89,73 @@ class VisualizationPageStaticTest(unittest.TestCase):
         self.assertIn("const activeRange = hasEnabledCalibration ? calibrationDisplayRange(calibrationState, cardRange) : cardRange;", source)
         self.assertIn('{t("calibratedRangeHint")}', source)
 
+    def test_visualization_card_gates_battery_on_board_profile_and_warns_when_low(self):
+        source = VISUALIZATION_PAGE.read_text()
+
+        self.assertIn("boardProfileForHardwareModel", source)
+        self.assertIn("deviceBatteryReadout", source)
+        self.assertIn("supportsBatteryPercentageIndicator", source)
+        # The reading rides in the card header, alongside the live/offline pill.
+        self.assertIn("<DeviceBatteryChip readout={batteryReadout} t={t} />", source)
+        header = source.split('className="actions compact-actions"', 1)[1]
+        self.assertLess(header.index("DeviceBatteryChip"), header.index("stopRecording"))
+
+    def test_low_battery_alarm_survives_reduced_motion(self):
+        styles = STYLES.read_text()
+
+        rule = styles.split(".visualization-battery-chip.low {", 1)[1].split("}", 1)[0]
+        # The global prefers-reduced-motion block clamps animation-iteration-count
+        # to 1, so the warning must be legible from static colour alone.
+        self.assertIn("var(--danger)", rule)
+        self.assertIn("background:", rule)
+        self.assertIn("battery-low-pulse", rule)
+        self.assertIn("@keyframes battery-low-pulse", styles)
+
+    def test_add_device_modal_shows_real_connection_state_not_operating_mode(self):
+        source = VISUALIZATION_PAGE.read_text()
+        modal = source.split('className="modal-panel add-device-modal"', 1)[1]
+
+        # The picker must normalize, so it sees connectionState at all.
+        self.assertIn("connectionStateLabel(normalized, t)", modal)
+        self.assertIn("statusDot(normalized)", modal)
+        self.assertIn("deviceClassName(normalized)", modal)
+
+        # The two bugs being fixed. `device.mode` is the operating mode, not
+        # reachability; `last_seen_at` is refreshed by the gateway even for
+        # disconnected devices, so it is never a liveness signal.
+        self.assertNotIn("device.mode", modal)
+        self.assertNotIn("device.last_seen_at", modal)
+        self.assertIn("normalized.lastSeen", modal)
+
+        # Detail parity with the Launchpad card.
+        self.assertIn("normalized.hardwareModel", modal)
+        self.assertIn("normalized.firmwareVersion", modal)
+        self.assertIn("normalized.protocol", modal)
+        self.assertIn("DeviceBatteryChip", modal)
+
+    def test_add_device_modal_is_searchable_and_sorted_by_reachability(self):
+        source = VISUALIZATION_PAGE.read_text()
+
+        self.assertIn("connectionRank(left.normalized) - connectionRank(right.normalized)", source)
+        self.assertIn('type="search"', source)
+        self.assertIn("autoFocus", source)
+        self.assertIn('t("noDevicesMatchFilter")', source)
+        # Connection state ages out on a timer, so the list must re-sort itself
+        # without the user reopening the modal.
+        candidates = source.split("const addCandidates = useMemo(", 1)[1].split("}, [", 1)[1]
+        self.assertIn("clockTick", candidates)
+        # Dismissing must reset the filter, not leave it primed for next time.
+        self.assertIn("function closeAddModal()", source)
+        self.assertIn("setAddFilter(\"\")", source)
+
+    def test_add_device_card_stays_readable_when_offline_and_already_added(self):
+        styles = STYLES.read_text()
+
+        # .device-card.offline (0.72) x .add-device-card:disabled (0.58) = 0.42.
+        self.assertIn(".add-device-card.offline:disabled", styles)
+        # The search box must not scroll away with the list.
+        self.assertIn(".add-device-modal .device-grid", styles)
+
 
 if __name__ == "__main__":
     unittest.main()

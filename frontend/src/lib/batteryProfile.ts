@@ -182,3 +182,59 @@ export function buildBatteryLedThresholdCommand(lowBatteryThresholdPercent: numb
     battery_led: { low_battery_threshold_percent: lowBatteryThresholdPercent },
   };
 }
+
+export function durationLabel(minutes: number) {
+  const safeMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const remainingMinutes = safeMinutes % 60;
+  if (hours > 0 && remainingMinutes > 0) return `${hours}h ${remainingMinutes}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${remainingMinutes}m`;
+}
+
+// Mirrors the firmware's own low-battery rule in BatteryLedPolicy.cpp: the
+// dedicated v1.5.F battery pixel only fast-blinks when the pack is NOT
+// charging and sits at or below a configured, non-zero threshold (a threshold
+// of 0 disables the warning outright). Keeping the two in lockstep means the
+// WebUI never warns while the board itself is calm, or vice versa.
+export function isLowBattery(
+  socPercent: number | null,
+  charging: boolean,
+  thresholdPercent: number | null,
+): boolean {
+  if (thresholdPercent === null || thresholdPercent <= 0) return false;
+  if (socPercent === null || charging) return false;
+  return socPercent <= thresholdPercent;
+}
+
+export type DeviceBatteryReadout = {
+  supported: boolean;
+  socPercent: number | null;
+  charging: boolean;
+  syncing: boolean;
+  lowBattery: boolean;
+  estimate: BatteryTimeEstimate;
+};
+
+export function deviceBatteryReadout(input: {
+  supported: boolean;
+  battery: BatteryProfileStatus;
+  power: Record<string, unknown>;
+  batteryLed: Record<string, unknown>;
+}): DeviceBatteryReadout {
+  const battery = normalizeBatteryStatus(input.battery);
+  const chargeState = optionalString(input.power.charge_state ?? (input.battery as Record<string, unknown>).charge_state) ?? "";
+  const syncing = battery.syncState === "syncing";
+  const charging = chargeState === "charging" && !syncing;
+  // Only ever warn on a threshold the board actually reported -- inventing a
+  // default here would fire a false alarm on a device whose owner set 0.
+  const thresholdPercent = finiteNumber(input.batteryLed.low_battery_threshold_percent);
+  return {
+    supported: input.supported,
+    socPercent: input.supported ? battery.socPercent : null,
+    charging,
+    syncing,
+    lowBattery: input.supported && isLowBattery(battery.socPercent, charging, thresholdPercent),
+    estimate: input.supported ? estimateBatteryTime(battery, chargeState) : { kind: "unavailable" },
+  };
+}

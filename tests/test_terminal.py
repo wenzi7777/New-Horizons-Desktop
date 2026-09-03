@@ -165,6 +165,30 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertTrue(profile["supports_charge_control"])
         self.assertEqual(profile["power_ux"], "local_button")
 
+    def test_backend_board_profile_does_not_mistake_v22c_gcu_lts_for_a_v1_board(self):
+        """v2.2.C used to fall through to the v1.0.F default, which claims a charger,
+        an OLED, an external LED strip and a local power button it does not have."""
+        from newhorizons_backend.board_profile import board_profile_for_hardware_model
+
+        profile = board_profile_for_hardware_model("VD-CTL/R v2.2.C GCU LTS")
+
+        self.assertEqual(profile["hardware_model"], "VD-CTL/R v2.2.C GCU LTS")
+        self.assertFalse(profile["supports_charge_control"])
+        self.assertFalse(profile["supports_oled"])
+        self.assertFalse(profile["supports_external_led"])
+        self.assertFalse(profile["supports_local_button_wake"])
+        self.assertEqual(profile["power_ux"], "remote_only")
+
+    def test_board_profile_lists_v22c_gcu_lts_manifest_track(self):
+        source = BOARD_PROFILE.read_text(encoding="utf-8")
+
+        self.assertIn('const V22C_GCU_HARDWARE_MODEL = "VD-CTL/R v2.2.C GCU LTS";', source)
+        self.assertIn('wikiSlug: "vd-ctl-r-v2-2-c-gcu-lts"', source)
+        self.assertIn(
+            'defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v22c-lts-latest.json"',
+            source,
+        )
+
     def test_v15f_visual_io_uses_its_own_board_art_and_14_by_14_pin_layout(self):
         """The v1.5.F editor must never silently fall back to the v1.0.F board picture or 10-pin layout."""
         source = BOARD_PROFILE.read_text(encoding="utf-8")

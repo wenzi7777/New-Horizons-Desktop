@@ -2738,6 +2738,24 @@ button:disabled {
   width: min(640px, 100%);
 }
 
+/* .modal-panel is itself the scroll container, so without this the header and
+   search box would scroll away with the list. Give the panel fixed rows and
+   move the overflow onto the grid instead. */
+.add-device-modal {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.add-device-modal .device-grid {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.add-device-search {
+  margin-bottom: 12px;
+}
+
 .add-device-card {
   text-align: left;
   cursor: pointer;
@@ -2746,6 +2764,19 @@ button:disabled {
 .add-device-card:disabled {
   cursor: default;
   opacity: 0.58;
+}
+
+/* .device-card.offline already dims to 0.72; multiplying that by the disabled
+   0.58 would leave an offline-and-already-added card at 0.42 and barely
+   readable. Pin the combination to a single legible value. */
+.add-device-card.offline:disabled {
+  opacity: 0.5;
+}
+
+.add-device-card .device-card-header h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .compact-actions {
@@ -2894,6 +2925,46 @@ button:disabled {
 
 .status-pill.offline {
   color: var(--text-muted);
+}
+
+.visualization-battery-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.visualization-battery-chip .battery-status-indicator {
+  width: 22px;
+}
+
+.visualization-battery-chip.unsupported {
+  color: var(--text-dim);
+}
+
+/* The low-battery alarm must read as a warning with the animation stripped:
+   the global prefers-reduced-motion block clamps animation-iteration-count to
+   1, so the static red fill below carries the meaning and the pulse only
+   reinforces it. The 1s period is deliberately slower than the firmware's
+   400ms BAT-LED blink -- a full background strobing at 2.5Hz in a browser is
+   harsh and brushes photosensitivity guidance, while the trigger condition
+   (not charging, at or below threshold) stays identical. */
+.visualization-battery-chip.low {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: color-mix(in srgb, var(--danger) 16%, var(--panel-soft));
+  animation: battery-low-pulse 1s ease-in-out infinite;
+}
+
+@keyframes battery-low-pulse {
+  50% {
+    background: color-mix(in srgb, var(--danger) 34%, var(--panel-soft));
+  }
 }
 
 .upgrade-panel {

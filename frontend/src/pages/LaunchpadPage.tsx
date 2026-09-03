@@ -7,6 +7,7 @@ import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
 import { boardProfileForHardwareModel } from "../lib/boardProfile";
 import { batteryIndicatorState } from "../lib/batteryProfile";
 import { isHubRelayed, useDevicesPolling, type NormalizedDevice } from "../lib/device";
+import { deviceClassName, statusDot } from "../lib/deviceStatus";
 
 const GLOBAL_APPS = [
   { to: "/visualization", icon: "VIS", titleKey: "visualization" },
@@ -22,21 +23,6 @@ type LaunchpadFolder = {
   devices: NormalizedDevice[];
   tone: "online" | "offline" | "custom";
 };
-
-function deviceClassName(device: NormalizedDevice) {
-  if (device.connectionState === "reconnecting") return "reconnecting";
-  if (device.connectionState === "offline") return "offline";
-  if (device.mode === "maintenance" || device.mode === "safe_maintenance") return "maintenance";
-  if (device.connectionState === "booting") return "booting";
-  return "normal";
-}
-
-function statusDot(device: NormalizedDevice) {
-  if (device.connectionState === "booting") return "status-dot booting";
-  if (device.connectionState === "reconnecting") return "status-dot reconnecting";
-  if (device.connectionState === "offline") return "status-dot offline";
-  return "status-dot online";
-}
 
 function deviceStateLabel(device: NormalizedDevice, t: (key: string) => string) {
   if (device.connectionState === "reconnecting") return t("reconnecting");

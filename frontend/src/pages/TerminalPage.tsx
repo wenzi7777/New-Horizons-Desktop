@@ -838,7 +838,7 @@ type BoardIoModalProps = {
   defaultSelectPins?: number[];
   boardName?: string;
   supportsPinVisualizer?: boolean;
-  overviewAsset?: string;
+  overviewAsset?: string | null;
   analogPinOrder?: string[];
   digitalPinOrder?: string[];
   analogPinSlots?: BoardPinSlot[];
@@ -968,7 +968,7 @@ export function BoardIoModal({
         </div>
         <div className="board-diagram">
           <div className="board-outline board-image-outline">
-            {supportsPinVisualizer ? (
+            {supportsPinVisualizer && overviewAsset ? (
               <img className="board-overview-image" src={overviewAsset} alt={`${boardName} overview`} />
             ) : (
               <div className="board-overview-image" aria-label={boardName}>

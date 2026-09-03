@@ -3,7 +3,11 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { api, type DeviceEntry, type ProfileListEntry, type VisualizationEntry } from "../lib/api";
+import { DeviceBatteryChip } from "../components/DeviceBatteryChip";
+import { deviceBatteryReadout } from "../lib/batteryProfile";
+import { boardProfileForHardwareModel } from "../lib/boardProfile";
 import { isHubRelayed, normalizeDevice } from "../lib/device";
+import { connectionRank, connectionStateLabel, deviceClassName, statusDot } from "../lib/deviceStatus";
 import { fitProfileRect, profilePointToScreen, profilePointToWorld, type FittedProfileRect } from "../lib/profileLayout";
 import { useI18n } from "../i18n";
 import { useWsState } from "../lib/wsClient";
@@ -973,6 +977,7 @@ export function VisualizationPage() {
   const [profileCache, setProfileCache] = useState<Record<string, ProfileData>>({});
   const [profileError, setProfileError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [addFilter, setAddFilter] = useState("");
   const [showCop, setShowCop] = useState(true);
   const [range, setRange] = useState(DEFAULT_RANGE);
   const [deviceFpsByDevice, setDeviceFpsByDevice] = useState<Record<string, number>>({});
@@ -1177,6 +1182,11 @@ export function VisualizationPage() {
     setViews((current) => current.map((view) => (view.id === id ? { ...view, ...patch } : view)));
   }
 
+  function closeAddModal() {
+    setAddOpen(false);
+    setAddFilter("");
+  }
+
   function addDeviceView(deviceUid: string) {
     const normalized = normalizeUid(deviceUid);
     if (!normalized) return;
@@ -1196,7 +1206,7 @@ export function VisualizationPage() {
         },
       ];
     });
-    setAddOpen(false);
+    closeAddModal();
   }
 
   function removeView(id: string) {
@@ -1237,6 +1247,35 @@ export function VisualizationPage() {
 
   const selectedCount = views.filter((view) => view.selected).length;
   const addedDevices = new Set(views.map((view) => normalizeUid(view.deviceUid)));
+
+  // Normalizing here is what makes the picker honest: the raw DeviceEntry has
+  // no connection state at all, and its `last_seen_at` is refreshed by the
+  // gateway even for disconnected devices. clockTick is a dependency because
+  // connectionState ages out on its own once the reconnect grace expires.
+  const addCandidates = useMemo(() => {
+    const query = addFilter.trim().toLowerCase();
+    const uidQuery = normalizeUid(addFilter);
+    return devices
+      .map((device) => {
+        const uid = normalizeUid(device.device_uid);
+        return { device, uid, normalized: normalizeDevice(device), added: addedDevices.has(uid) };
+      })
+      .filter((entry) => {
+        if (!query) return true;
+        if (uidQuery && entry.uid.includes(uidQuery)) return true;
+        return (
+          entry.normalized.displayName.toLowerCase().includes(query) ||
+          entry.normalized.nickname.toLowerCase().includes(query) ||
+          entry.normalized.name.toLowerCase().includes(query)
+        );
+      })
+      .sort((left, right) => {
+        const byReachability = connectionRank(left.normalized) - connectionRank(right.normalized);
+        if (byReachability !== 0) return byReachability;
+        if (left.added !== right.added) return left.added ? 1 : -1;
+        return left.normalized.displayName.localeCompare(right.normalized.displayName);
+      });
+  }, [devices, addFilter, clockTick, views]);
 
   return (
     <>
@@ -1316,6 +1355,13 @@ export function VisualizationPage() {
           const maxPressure = values.length ? Math.max(...values) : 0;
           const isRecording = Boolean(recording[deviceUid] ?? device?.recording_enabled);
           const normalizedDevice = device ? normalizeDevice(device) : null;
+          const cardStatus = recordValue(device?.last_status);
+          const batteryReadout = deviceBatteryReadout({
+            supported: boardProfileForHardwareModel(normalizedDevice?.hardwareModel).supportsBatteryPercentageIndicator,
+            battery: recordValue(cardStatus.battery),
+            power: recordValue(cardStatus.power),
+            batteryLed: recordValue(recordValue(cardStatus.indicators).battery_led),
+          });
           const title = normalizedDevice?.displayName || safeDisplayName(device, deviceUid);
           const badgeState = visualizationBadgeState(device, item, clockTick);
           const badgeLabel = badgeState === "live" ? t("live") : badgeState === "waiting" ? t("waitingForData") : t("offline");
@@ -1332,6 +1378,7 @@ export function VisualizationPage() {
                 </label>
                 <div className="actions compact-actions">
                   <div className={`status-pill ${badgeState}`}>{badgeLabel}</div>
+                  <DeviceBatteryChip readout={batteryReadout} t={t} />
                   {isHubRelayed(device) ? <span className="device-badge hub-relay">{t("deviceViaHub")}</span> : null}
                   <button
                     className={`button ${isRecording ? "danger" : "primary"}`}
@@ -1492,41 +1539,69 @@ export function VisualizationPage() {
       </section>
 
       {addOpen ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => setAddOpen(false)}>
+        <div className="modal-backdrop" role="presentation" onClick={closeAddModal}>
           <div className="modal-panel add-device-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <div>
                 <h3>{t("addDeviceView")}</h3>
                 <p>{t("addDeviceViewCopy")}</p>
               </div>
-              <button className="button" type="button" onClick={() => setAddOpen(false)}>
+              <button className="button" type="button" onClick={closeAddModal}>
                 {t("cancel")}
               </button>
             </div>
+            <div className="field add-device-search">
+              <input
+                type="search"
+                autoFocus
+                value={addFilter}
+                placeholder={t("searchDevices")}
+                aria-label={t("searchDevices")}
+                onChange={(event) => setAddFilter(event.target.value)}
+              />
+            </div>
             <div className="device-grid">
               {devices.length === 0 ? <div className="panel span-12">{t("noDevicesDiscovered")}</div> : null}
-              {devices.map((device) => {
-                const deviceUid = normalizeUid(device.device_uid);
-                const exists = addedDevices.has(deviceUid);
+              {devices.length > 0 && addCandidates.length === 0 ? (
+                <div className="panel span-12">{t("noDevicesMatchFilter")}</div>
+              ) : null}
+              {addCandidates.map(({ device, uid, normalized, added }) => {
+                const batteryReadout = deviceBatteryReadout({
+                  supported: boardProfileForHardwareModel(normalized.hardwareModel).supportsBatteryPercentageIndicator,
+                  battery: recordValue(recordValue(device.last_status).battery),
+                  power: recordValue(recordValue(device.last_status).power),
+                  batteryLed: recordValue(recordValue(recordValue(device.last_status).indicators).battery_led),
+                });
                 return (
                   <button
-                    key={deviceUid}
-                    className="device-card add-device-card"
+                    key={uid}
+                    className={`device-card add-device-card ${deviceClassName(normalized)}`}
                     type="button"
-                    disabled={exists}
-                    onClick={() => addDeviceView(deviceUid)}
+                    disabled={added}
+                    onClick={() => addDeviceView(uid)}
                   >
                     <div className="device-card-header">
-                      <h3>{safeDisplayName(device, deviceUid)}</h3>
-                      <span className={`device-badge ${device.mode ?? ""}`}>{device.mode ?? "-"}</span>
+                      <h3>
+                        <span className={statusDot(normalized)} aria-hidden="true" />
+                        {normalized.displayName}
+                      </h3>
+                      <span className={`device-badge ${deviceClassName(normalized)}`}>
+                        {connectionStateLabel(normalized, t)}
+                      </span>
                       {isHubRelayed(device) ? <span className="device-badge hub-relay">{t("deviceViaHub")}</span> : null}
                     </div>
-                    <div className="device-uid">{deviceUid}</div>
+                    <div className="device-uid">{uid}</div>
                     <div className="device-meta-grid">
-                      <span>{t("matrixShape")}: {device.matrix_shape ? `${device.matrix_shape.rows} × ${device.matrix_shape.cols}` : "-"}</span>
-                      <span>{t("transport")}: {device.transport_mode ?? "-"}</span>
-                      <span>{t("lastSeen")}: {device.last_seen_at ?? "-"}</span>
-                      <span>{exists ? t("deviceAlreadyAdded") : t("addDeviceView")}</span>
+                      <span>{t("hardwareModel")}: {normalized.hardwareModel}</span>
+                      <span>{t("firmwareVersion")}: {normalized.firmwareVersion}</span>
+                      <span>{t("protocol")}: {normalized.protocol}</span>
+                      <span>{t("matrixShape")}: {normalized.matrixShape}</span>
+                      <span className="device-battery-reading">
+                        <DeviceBatteryChip readout={batteryReadout} t={t} />
+                      </span>
+                      <span>{t("transport")}: {normalized.transportMode}</span>
+                      <span>{t("lastSeen")}: {normalized.lastSeen}</span>
+                      <span>{added ? t("deviceAlreadyAdded") : t("addDeviceView")}</span>
                     </div>
                   </button>
                 );

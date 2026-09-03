@@ -6,7 +6,7 @@ import { api, type PressureCalReadings, type PressureCalServerPreset } from "../
 import { useI18n } from "../i18n";
 import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
-import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
+import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
 import {
   getPrimaryStepDisabledReason,
   getPrimaryStepStates,
@@ -117,15 +117,6 @@ function percent(used: unknown, total: unknown) {
   const totalNumber = numberValue(total, 0);
   if (totalNumber <= 0) return 0;
   return Math.max(0, Math.min(100, (usedNumber / totalNumber) * 100));
-}
-
-function durationLabel(minutes: number) {
-  const safeMinutes = Math.max(0, Math.round(minutes));
-  const hours = Math.floor(safeMinutes / 60);
-  const remainingMinutes = safeMinutes % 60;
-  if (hours > 0 && remainingMinutes > 0) return `${hours}h ${remainingMinutes}m`;
-  if (hours > 0) return `${hours}h`;
-  return `${remainingMinutes}m`;
 }
 
 function bytesLabel(value: unknown) {
