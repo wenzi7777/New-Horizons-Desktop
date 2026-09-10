@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import threading
+import time as _time
 from datetime import datetime, timezone
 from typing import Any
 import time
@@ -73,6 +74,23 @@ def _payload_from_message(message: dict[str, Any]) -> dict[str, Any]:
     if message.get("device_uid") and "device_uid" not in result:
         result["device_uid"] = message.get("device_uid")
     return result
+
+
+# Last wall-clock push per device, so an unsynced device is not re-sent the
+# time on every single status message.
+_LAST_TIME_PUSH: dict[str, float] = {}
+_TIME_PUSH_INTERVAL_S = 600.0
+
+
+def _clock_is_synced(payload: dict[str, Any]) -> bool | None:
+    """True/False if the device reported its clock state, None if unknown."""
+    for container in (payload, payload.get("status"), payload.get("data")):
+        if not isinstance(container, dict):
+            continue
+        clock = container.get("clock")
+        if isinstance(clock, dict) and "synced" in clock:
+            return bool(clock.get("synced"))
+    return None
 
 
 class GatewaySocketSession:
@@ -175,6 +193,7 @@ class GatewaySocketSession:
             payload.setdefault("transport_path", "gateway_wss")
             self.service.register_gateway_device(device_uid, self.sender, gateway_id=self.gateway_id)
             self.service.record_gateway_status(device_uid, payload)
+            self._maybe_push_time(device_uid, payload)
             return
 
         if msg_type == "gateway_command_result":
@@ -199,6 +218,44 @@ class GatewaySocketSession:
             return
 
         self._send_json({"type": "error", "code": "unknown_gateway_type", "message": "Unknown gateway message type"})
+
+    def _maybe_push_time(self, device_uid: str, payload: dict[str, Any]) -> None:
+        """Give an unsynced device a wall clock.
+
+        An ESP-NOW/Direct device never associates with an AP, so it can never
+        reach NTP: without this it timestamps nothing and every packet carries
+        epochValid=false. The push is an ordinary `set_time` control command,
+        so it reaches the device over whichever transport already works --
+        Gateway UDP or relayed through a Hub -- with no new protocol.
+
+        Called outside the service lock: publish_command() takes that lock
+        itself.
+        """
+        # Only push when the device actively says it is unsynced. Firmware
+        # before v1.0.0 has no set_time command and reports no `clock` block
+        # at all, so _clock_is_synced() returns None for it -- treating that
+        # as "unsynced" would send every pre-v1.0.0 device a doomed command
+        # every interval, and a Hub pauses its sensor-data relay for the
+        # lifetime of each pending command.
+        if _clock_is_synced(payload) is not False:
+            return
+        now = _time.monotonic()
+        if now - _LAST_TIME_PUSH.get(device_uid, 0.0) < _TIME_PUSH_INTERVAL_S:
+            return
+        _LAST_TIME_PUSH[device_uid] = now
+        try:
+            self.service.publish_command(
+                device_uid,
+                {
+                    "command": "set_time",
+                    "request_id": "clock-sync-{}".format(int(now * 1000)),
+                    "epoch_ms": str(int(_time.time() * 1000)),
+                },
+            )
+        except Exception:
+            # A device that is booting or briefly unreachable simply gets the
+            # time on its next hello; this must never break status handling.
+            pass
 
     def _send_json(self, payload: dict[str, Any]) -> None:
         with self._send_lock:

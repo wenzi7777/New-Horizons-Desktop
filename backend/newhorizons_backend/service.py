@@ -37,6 +37,17 @@ def command_error_message(code: str) -> str:
     return code
 
 
+DEFAULT_DEVICE_NAME_PREFIX = "NHOS-"
+# Firmware before v1.0.0 reported "New Horizons OS-<UID>" as its default name.
+# Those devices stay in the field (and on show) long after the desktop updates,
+# so the old prefix must keep counting as "still the default name" -- otherwise
+# their card would show the factory name over a nickname the user had set.
+LEGACY_DEFAULT_DEVICE_NAME_PREFIXES = ("New Horizons OS-",)
+DEFAULT_DEVICE_NAME_PREFIXES = (
+    DEFAULT_DEVICE_NAME_PREFIX,
+) + LEGACY_DEFAULT_DEVICE_NAME_PREFIXES
+
+
 class NewHorizonsService:
     COMMAND_TTL_MS = 15000
     BOOT_GRACE_SEC = 90.0
@@ -515,12 +526,12 @@ class NewHorizonsService:
     @staticmethod
     def _canonical_device_name(device_name: str, device_uid: str) -> str:
         if (
-            device_name.startswith("New Horizons OS-")
+            device_name.startswith(DEFAULT_DEVICE_NAME_PREFIXES)
             and len(device_uid) == 12
             and device_uid.endswith(device_name.rsplit("-", 1)[-1].strip().upper())
             and not device_name.endswith(device_uid)
         ):
-            return "New Horizons OS-{}".format(device_uid)
+            return "{}{}".format(DEFAULT_DEVICE_NAME_PREFIX, device_uid)
         return device_name
 
     def _purge_short_aliases_locked(self, device_uid: str) -> bool:
@@ -1210,9 +1221,9 @@ class NewHorizonsService:
             # hello never sends it, so absence defaults to "gateway" for
             # backward compatibility. Previously there was no wire-level
             # self-identification at all, so every entry (Hub included)
-            # silently defaulted to the "New Horizons Gateway" name below.
+            # silently defaulted to the Gateway name below.
             client_type = payload.get("client_type") or existing.get("client_type") or "gateway"
-            default_name = "New Horizons Hub" if client_type == "hub" else "New Horizons Gateway"
+            default_name = "NHOS Hub" if client_type == "hub" else "NHOS Gateway"
             existing.update({
                 "gateway_id": gateway_id,
                 "gateway_name": payload.get("gateway_name") or payload.get("name") or existing.get("gateway_name") or default_name,
@@ -1754,7 +1765,7 @@ class NewHorizonsService:
                     "host": "127.0.0.1",
                     "udp_port": int(self._udp_ingest.bound_port if self._udp_ingest else self._udp_port),
                     "gateway_id": self._gateway_id,
-                    "gateway_name": "New Horizons Gateway",
+                    "gateway_name": "NHOS Gateway",
                     "source": "findme",
                     "state": "discovered",
                     "last_success_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
@@ -2140,7 +2151,7 @@ class NewHorizonsService:
                 {
                     "device_uid": device_uid,
                     "device_id": device_uid,
-                    "device_name": "New Horizons OS-{}".format(device_uid),
+                    "device_name": "NHOS-{}".format(device_uid),
                     "protocol": "NHO/Arduino/1",
                     "transport_path": "arduino_heartbeat",
                     "gateway_connected": True,
@@ -2188,7 +2199,7 @@ class NewHorizonsService:
             {
                 "device_uid": device_uid,
                 "device_id": device_uid,
-                "device_name": "New Horizons OS-{}".format(device_uid),
+                "device_name": "NHOS-{}".format(device_uid),
                 "protocol": "NHO/Arduino/1",
                 "transport_path": "arduino_udp",
                 "gateway_connected": True,
@@ -3418,7 +3429,7 @@ class NewHorizonsService:
                     "host": "127.0.0.1",
                     "udp_port": 13250,
                     "gateway_id": "newhorizons-standalone",
-                    "gateway_name": "New Horizons Gateway",
+                    "gateway_name": "NHOS Gateway",
                     "source": "findme",
                     "last_success_ms": 0,
                     "last_error": "",
@@ -3465,14 +3476,14 @@ class NewHorizonsService:
                 "host": "127.0.0.1",
                 "udp_port": 13250,
                 "gateway_id": "newhorizons-standalone",
-                "gateway_name": "New Horizons Gateway",
+                "gateway_name": "NHOS Gateway",
                 "source": "findme",
                 "last_success_ms": 0,
                 "last_error": "",
             },
             "update": {
                 "source": "github",
-                "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-latest.json",
+                "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f-latest.json",
             },
             "update_state": {
                 "phase": "idle",

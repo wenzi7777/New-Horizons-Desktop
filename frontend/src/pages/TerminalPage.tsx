@@ -68,6 +68,73 @@ const COMMAND_BLOCKS: CommandBlock[] = [
   },
   { command: "exit-maintenance", groupKey: "commandGroupMaintenance", params: [] },
   { command: "scan-health", groupKey: "commandGroupCore", params: [] },
+  { command: "task-list", groupKey: "commandGroupCore", params: [] },
+  { command: "service-list", groupKey: "commandGroupCore", params: [] },
+  { command: "capabilities", groupKey: "commandGroupCore", params: [] },
+  { command: "app-list", groupKey: "commandGroupCore", params: [] },
+  {
+    command: "app-enable",
+    groupKey: "commandGroupConfig",
+    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "features" }],
+  },
+  {
+    command: "app-disable",
+    groupKey: "commandGroupConfig",
+    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "rules" }],
+  },
+  {
+    command: "app-revive",
+    groupKey: "commandGroupMaintenance",
+    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "rules" }],
+  },
+  {
+    command: "app-load-rules",
+    groupKey: "commandGroupConfig",
+    params: [{ key: "path", labelKey: "paramRulePath", type: "text", placeholder: "apps/rules.json" }],
+  },
+  { command: "app-unload-rules", groupKey: "commandGroupConfig", params: [] },
+  { command: "config-schema", groupKey: "commandGroupConfig", params: [] },
+  {
+    command: "config-get",
+    groupKey: "commandGroupConfig",
+    params: [{ key: "path", labelKey: "paramConfigPath", type: "text", placeholder: "scan.target_fps" }],
+  },
+  {
+    command: "config-set",
+    groupKey: "commandGroupConfig",
+    params: [
+      { key: "path", labelKey: "paramConfigPath", type: "text", required: true, placeholder: "scan.target_fps" },
+      { key: "value", labelKey: "paramConfigValue", type: "text", required: true, placeholder: "60" },
+    ],
+  },
+  {
+    command: "set-power-profile",
+    groupKey: "commandGroupConfig",
+    params: [
+      {
+        key: "profile",
+        labelKey: "paramProfile",
+        type: "select",
+        defaultValue: "performance",
+        options: [
+          { labelKey: "powerProfilePerformance", value: "performance" },
+          { labelKey: "powerProfileBalanced", value: "balanced" },
+          { labelKey: "powerProfilePowersave", value: "powersave" },
+        ],
+      },
+    ],
+  },
+  {
+    command: "service-restart",
+    groupKey: "commandGroupMaintenance",
+    params: [{ key: "name", labelKey: "paramServiceName", type: "text", required: true, placeholder: "imu" }],
+  },
+  { command: "dmesg", groupKey: "commandGroupFiles", params: [] },
+  {
+    command: "set-time",
+    groupKey: "commandGroupConfig",
+    params: [{ key: "epoch-ms", labelKey: "paramEpochMs", type: "text", required: true, placeholder: "1780000000000" }],
+  },
   {
     command: "set-stream-buffer",
     groupKey: "commandGroupConfig",
@@ -492,6 +559,8 @@ const COMMAND_BLOCKS: CommandBlock[] = [
     params: [{ key: "lines", labelKey: "paramLines", type: "number", defaultValue: "50" }],
   },
   { command: "log-clear", groupKey: "commandGroupFiles", params: [] },
+  { command: "crash-log", groupKey: "commandGroupFiles", params: [] },
+  { command: "crash-clear", groupKey: "commandGroupFiles", params: [] },
   { command: "reboot", groupKey: "commandGroupDanger", params: [] },
 ];
 

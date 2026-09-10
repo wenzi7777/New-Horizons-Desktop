@@ -1781,7 +1781,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
 
                 gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "hub-a")
                 self.assertEqual(gateway["client_type"], "hub")
-                self.assertEqual(gateway["gateway_name"], "New Horizons Hub")
+                self.assertEqual(gateway["gateway_name"], "NHOS Hub")
                 self.assertEqual(gateway["version"], "v0.1.0")
 
     def test_gateway_hello_without_client_type_defaults_to_gateway(self):
@@ -1797,7 +1797,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
 
                 gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "gw-a")
                 self.assertEqual(gateway["client_type"], "gateway")
-                self.assertEqual(gateway["gateway_name"], "New Horizons Gateway")
+                self.assertEqual(gateway["gateway_name"], "NHOS Gateway")
 
     def test_hub_mac_reported_via_gateway_status_is_visible_on_gateway(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -145,7 +145,7 @@ class ArduinoControlTcpTest(unittest.TestCase):
         service._handle_udp_datagram(arduino_packet(), ("192.168.50.44", 49152))
 
         discovered = service.get_device("3CDC7545CCD0")
-        self.assertEqual(discovered["device_name"], "New Horizons OS-3CDC7545CCD0")
+        self.assertEqual(discovered["device_name"], "NHOS-3CDC7545CCD0")
 
         with patch.object(service, "_send_arduino_command") as send_tcp:
             send_tcp.return_value = {
@@ -181,7 +181,7 @@ class ArduinoControlTcpTest(unittest.TestCase):
         service._handle_udp_datagram(arduino_heartbeat_packet(), ("192.168.50.44", 49152))
 
         discovered = service.get_device("3CDC7545CCD0")
-        self.assertEqual(discovered["device_name"], "New Horizons OS-3CDC7545CCD0")
+        self.assertEqual(discovered["device_name"], "NHOS-3CDC7545CCD0")
         self.assertEqual(discovered["gateway_connected"], True)
         self.assertEqual(discovered["transport_path"], "arduino_heartbeat")
         self.assertEqual(discovered["findme"]["state"], "attached")

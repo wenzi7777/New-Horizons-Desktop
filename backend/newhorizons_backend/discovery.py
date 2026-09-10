@@ -19,7 +19,7 @@ class DiscoveryResponder:
         gateway_id: str,
         udp_port: Callable[[], int] | int,
         priority: int = 100,
-        gateway_name: str = "New Horizons Gateway",
+        gateway_name: str = "NHOS Gateway",
     ) -> None:
         self.host = host
         self.port = int(port)

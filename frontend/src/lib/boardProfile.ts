@@ -273,7 +273,7 @@ const V22C_GCU_DIGITAL_PIN_SLOTS: BoardPinSlot[] = [
 const V1_PROFILE: BoardProfile = {
   hardwareModel: V1_HARDWARE_MODEL,
   wikiSlug: "vd-ctl-r-v1.0f",
-  defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-latest.json",
+  defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f-latest.json",
   defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   defaultSelectPins: [13, 14, 15, 16, 17, 18, 19, 20, 21, 26, 47, 33, 34, 48, 40, 41, 35, 36, 37, 38, 39],
   supportsIoVisualizer: true,
