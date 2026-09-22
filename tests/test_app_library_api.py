@@ -20,7 +20,7 @@ from newhorizons_backend.standalone import create_standalone_app  # noqa: E402
 
 PACKAGE = {
     "nhapp": 1,
-    "kind": "rules",
+    "kind": "flow",
     "name": "demo",
     "manifest": {
         "id": "demo", "name": "Demo", "version": "1.0.0", "author": "wenzi7777",

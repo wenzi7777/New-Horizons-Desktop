@@ -5577,3 +5577,266 @@ button:disabled {
   border-radius: 10px;
   margin: 0;
 }
+
+/* --- Device apps -------------------------------------------------------- */
+
+.device-apps-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.device-apps-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.device-apps-page-header h1 {
+  margin: 0 0 4px;
+}
+
+.device-apps-subtitle {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted, #7a7a7a);
+}
+
+.device-apps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.device-apps-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.device-apps-header h3 {
+  margin: 0;
+}
+
+.app-slot-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.app-slot-table th,
+.app-slot-table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  vertical-align: middle;
+}
+
+.app-slot-table th {
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-slot-name {
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+.app-slot-free {
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-slot-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.app-state-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78em;
+  background: var(--surface-muted, rgba(0, 0, 0, 0.06));
+}
+
+.app-state-badge.running { background: rgba(48, 164, 108, 0.16); }
+.app-state-badge.killed { background: rgba(214, 69, 69, 0.18); }
+.app-state-badge.suspended { background: rgba(224, 160, 48, 0.2); }
+.app-state-badge.faulted { background: rgba(214, 69, 69, 0.12); }
+.app-state-badge.degraded { background: rgba(224, 160, 48, 0.2); margin-left: 6px; }
+
+.app-overruns,
+.app-suspended-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted, #7a7a7a);
+  font-size: 0.78em;
+}
+
+.app-budget-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 140px;
+}
+
+.app-budget-track {
+  position: relative;
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-muted, rgba(0, 0, 0, 0.08));
+  overflow: visible;
+}
+
+.app-budget-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent, #3b82f6);
+}
+
+.app-budget-fill.over {
+  background: #d64545;
+}
+
+.app-budget-peak {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 12px;
+  background: var(--text-muted, #7a7a7a);
+}
+
+.app-budget-label {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8em;
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-package-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.app-package-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  border-radius: 12px;
+}
+
+.app-package-summary {
+  color: var(--text-muted, #7a7a7a);
+  font-size: 0.9em;
+  margin: 2px 0 6px;
+}
+
+.app-package-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.78em;
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-package-failed {
+  color: #d64545;
+}
+
+.app-package-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.app-event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.82em;
+}
+
+.app-event-list li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.06));
+}
+
+.app-event-seq,
+.app-event-frame,
+.app-event-app,
+.app-event-detail {
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-events-dropped {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 0.8em;
+}
+
+.app-install-panel {
+  padding: 16px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.app-install-panel h3 {
+  margin: 0;
+}
+
+.app-install-summary {
+  margin: 0;
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-install-actions,
+.app-install-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.app-install-progress .progress-track {
+  flex: 1;
+  min-width: 160px;
+}
+
+.app-detail-install {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.app-detail-device-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.app-exit-maintenance {
+  margin: 0;
+}

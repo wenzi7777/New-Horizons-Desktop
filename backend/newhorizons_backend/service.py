@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import csv
 import json
@@ -11,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .app_event_log import append_dropped_marker, append_events
 from .arduino_protocol import CONTROL_PORT, is_arduino_heartbeat_packet, is_arduino_stream_packet, packet_device_uid, send_control_command
 from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_for_hardware_model
 from .packet_parser import PacketParseError, parse_binary_packet
@@ -113,8 +115,11 @@ class NewHorizonsService:
         "app_enable",
         "app_disable",
         "app_revive",
-        "app_load_rules",
-        "app_unload_rules",
+        "app_load_flow",
+        "app_unload_flow",
+        "app_events",
+        "app_list_packages",
+        "app_verify",
     }
     NORMAL_COMMANDS = SHARED_COMMANDS | {
         "enter_maintenance",
@@ -152,6 +157,11 @@ class NewHorizonsService:
         "file_write_chunk",
         "file_write_finish",
         "file_delete",
+        "app_install",
+        "app_uninstall",
+        "app_activate",
+        "app_deactivate",
+        "app_reindex",
     }
     MODE_COMMANDS = {
         "normal": NORMAL_COMMANDS,
@@ -200,8 +210,13 @@ class NewHorizonsService:
         self._mock_write_sessions: dict[tuple[str, str, str], dict[str, Any]] = {}
         # Mock app roster per device, so the Apps UI is developable without hardware.
         self._mock_apps: dict[str, list[dict[str, Any]]] = {}
+        self._mock_packages: dict[str, list[dict[str, Any]]] = {}
         self._recording_enabled: set[str] = set()
         self._recording_errors: dict[str, str] = {}
+        # Highest app-event sequence already written to a sidecar, per device.
+        self._app_event_seq: dict[str, int] = {}
+        self._app_event_thread: threading.Thread | None = None
+        self._app_event_stop = threading.Event()
         self._pending_commands: dict[str, dict[str, dict[str, Any]]] = {}
         self._event_listeners: list[Callable[[dict[str, Any]], None]] = []
         self._ws_stats_provider: Callable[[], dict[str, Any]] | None = None
@@ -483,6 +498,7 @@ class NewHorizonsService:
             if enabled:
                 self._recording_enabled.add(device_uid)
                 self._recording_errors.pop(device_uid, None)
+                self._app_event_seq.pop(device_uid, None)
             else:
                 self._recording_enabled.discard(device_uid)
                 self._csv_paths.pop(device_uid, None)
@@ -494,6 +510,8 @@ class NewHorizonsService:
                 "device_uid": device_uid,
                 "enabled": enabled,
             }
+        if enabled:
+            self._ensure_app_event_poller()
         self._emit_event({"type": "recording_update", **result})
         return result
 
@@ -2044,8 +2062,7 @@ class NewHorizonsService:
                     "applied": True,
                     "reboot_required": True,
                 })
-            elif command in ("app_list", "app_enable", "app_disable", "app_revive",
-                             "app_load_rules", "app_unload_rules"):
+            elif command.startswith("app_"):
                 result_payload.update(self._mock_app_command(device_uid, command, payload))
             elif command in ("file_write_begin", "file_write_chunk", "file_write_finish"):
                 result_payload.update(self._mock_file_write(device_uid, command, payload))
@@ -2371,6 +2388,81 @@ class NewHorizonsService:
         self._latest_visualization.pop(device_uid, None)
         merged.pop("latest_sample", None)
 
+    # -- app event capture --------------------------------------------------
+    #
+    # This is the one place the backend sends commands on its own initiative.
+    # It earns that because it already owns the recording's lifecycle: the
+    # frontend cannot be the one polling, since closing the tab would silently
+    # stop capturing events half way through a session.
+    APP_EVENT_POLL_SEC = 0.5
+
+    def _ensure_app_event_poller(self) -> None:
+        if self._mock_mode:
+            return
+        if self._app_event_thread is not None and self._app_event_thread.is_alive():
+            return
+        self._app_event_stop.clear()
+        self._app_event_thread = threading.Thread(
+            target=self._app_event_loop, name="newhorizons-app-events", daemon=True
+        )
+        self._app_event_thread.start()
+
+    def _app_event_loop(self) -> None:
+        while not self._app_event_stop.wait(self.APP_EVENT_POLL_SEC):
+            with self._lock:
+                recording = sorted(self._recording_enabled)
+            if not recording:
+                # Nothing to capture; the thread parks itself rather than
+                # polling devices nobody is recording.
+                return
+            for device_uid in recording:
+                since = self._app_event_seq.get(device_uid, 0)
+                try:
+                    self.publish_command(device_uid, {"command": "app_events", "since_seq": since})
+                except RuntimeError:
+                    # Offline, booting, or the firmware predates app_events.
+                    # Not an error worth surfacing on every tick.
+                    continue
+
+    def _capture_app_events(self, device_uid: str, payload: dict[str, Any]) -> None:
+        """Write an app_events result into the recording's sidecar."""
+        with self._lock:
+            if device_uid not in self._recording_enabled:
+                return
+            sample_path = self._csv_paths.get(device_uid)
+        if sample_path is None:
+            return
+
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return
+        events = data.get("events")
+        if not isinstance(events, list):
+            return
+
+        try:
+            written = append_events(sample_path, events)
+            dropped = int(data.get("dropped") or 0)
+            previous = self._app_event_seq.get(device_uid, 0)
+            if dropped and previous:
+                append_dropped_marker(sample_path, previous, dropped)
+        except OSError:
+            # A failed sidecar write must never interrupt the sample recording,
+            # which is the thing actually being measured.
+            return
+
+        highest = 0
+        for event in events:
+            if isinstance(event, dict):
+                try:
+                    highest = max(highest, int(event.get("seq") or 0))
+                except (TypeError, ValueError):
+                    continue
+        if highest:
+            self._app_event_seq[device_uid] = highest
+        elif written == 0 and not self._app_event_seq.get(device_uid):
+            self._app_event_seq[device_uid] = int(data.get("seq") or 0)
+
     def _record_result(self, device_uid: str, payload: Any) -> None:
         if not isinstance(payload, dict):
             return
@@ -2386,6 +2478,8 @@ class NewHorizonsService:
         request_id = str(payload.get("request_id") or "")
         if request_id:
             self._forget_pending_command(device_uid, {"request_id": request_id})
+        if str(payload.get("command") or "") == "app_events":
+            self._capture_app_events(device_uid, payload)
         is_status_snapshot = self._is_status_snapshot_result(payload)
         inner = payload.get("data") if isinstance(payload.get("data"), dict) else {}
         entry_payload = dict(payload)
@@ -2625,6 +2719,11 @@ class NewHorizonsService:
                     + ["P{}".format(index + 1) for index in range(len(pressures))]
                     + (["RawADC_{}".format(index + 1) for index in range(len(pressures))] if include_raw else [])
                     + ["Mag_x", "Mag_y", "Mag_z", "Gyro_x", "Gyro_y", "Gyro_z", "Acc_x", "Acc_y", "Acc_z"]
+                    # Appended rather than inserted: a positional reader written
+                    # against an older export keeps working. This is the device's
+                    # own frame.seq, and app events carry the same number, so the
+                    # sample file and the .events.csv sidecar join on it.
+                    + ["frame_seq"]
                 )
             writer.writerow(
                 [timestamp]
@@ -2633,6 +2732,7 @@ class NewHorizonsService:
                 + list(mag[:3])
                 + list(gyro[:3])
                 + list(acc[:3])
+                + [int(payload.get("frame_id") or 0)]
             )
 
     def _normalize_device_entry(self, device_uid: str, payload: dict[str, Any], kind: str) -> dict[str, Any]:
@@ -3243,10 +3343,11 @@ class NewHorizonsService:
 
         for device_uid in samples:
             self._mock_apps[device_uid] = self._mock_default_apps()
+            self._mock_packages[device_uid] = self._mock_default_packages()
         # One device carries a killed app, so the overrun/revive UI has something
         # real to render against. Killing "rules" rather than inventing a third
         # app keeps the roster to what a v1.0.0 device actually has.
-        killed = next(a for a in self._mock_apps["NH-MOCK-002"] if a["name"] == "rules")
+        killed = next(a for a in self._mock_apps["NH-MOCK-002"] if a["name"] == "flow")
         killed.update({"state": "killed", "overruns": 5, "last_us": 2130, "max_us": 2410})
 
         for device_uid, sample in samples.items():
@@ -3555,7 +3656,7 @@ class NewHorizonsService:
                     app["last_us"], app["max_us"], app["overruns"]))
             lines.append("")
             lines.append("EVENTS")
-            lines.append("[18420] rules contact_begin rise")
+            lines.append("[6 @18700 f18718] flow heel_strike fall")
             return "\n".join(lines) + "\n"
         if path == "tasks":
             return ("NAME          INVOCATIONS  LAST_US  MAX_US  CPU_PERMILLE\n"
@@ -3592,42 +3693,88 @@ class NewHorizonsService:
 
     @staticmethod
     def _mock_default_apps() -> list[dict[str, Any]]:
-        """The two apps a v1.0.0 device actually compiles in -- no invented ones.
+        """The four flow slots a v1.1.0 device compiles in.
 
-        Shapes match AppManager::statusJson() so the UI written against the mock
-        works unchanged against hardware.
+        Slots are hosts, not content: a slot exists whether or not a package is
+        bound to it. Shapes match AppManager::statusJson() so UI written against
+        the mock works unchanged against hardware.
         """
+        def slot(name: str, state: str, **overrides: Any) -> dict[str, Any]:
+            entry = {
+                "name": name, "version": "1.0.0", "state": state,
+                "capabilities": 5, "budget_us": 2000, "invocations": 18422,
+                "last_us": 0, "max_us": 0, "overruns": 0, "events": 0,
+                "state_detail": {
+                    "graph": "", "package": "", "source": "", "nodes": 0,
+                    "estimated_us": 0, "budget_us": 2000, "emissions": 0,
+                    "frames": 0, "degraded": False, "degradations": 0, "outputs": [],
+                },
+            }
+            entry.update(overrides)
+            return entry
+
         return [
-            {
-                "name": "features", "version": "1.0.0", "state": "running",
-                "capabilities": 5, "budget_us": 400, "invocations": 18422,
-                "last_us": 244, "max_us": 361, "overruns": 0, "events": 12,
-                "state_detail": {
-                    "total_force": 41.7, "peak": 12.5, "peak01": 0.25, "peak_index": 98,
-                    "active_cells": 9, "centroid_row": 6.4, "centroid_col": 7.1,
-                    "in_contact": True, "contacts": 6, "frames": 18422,
-                },
-            },
-            {
-                "name": "rules", "version": "1.0.0", "state": "running",
-                "capabilities": 5, "budget_us": 1500, "invocations": 18422,
-                "last_us": 900, "max_us": 1180, "overruns": 0, "events": 6,
-                "state_detail": {
-                    "graph": "contact", "source": "apps/rules.json", "nodes": 4,
-                    "estimated_us": 880, "budget_us": 1500, "emissions": 6, "frames": 18422,
-                    "outputs": [{"op": "total", "result": 41.7, "bool": False}],
-                },
-            },
+            slot("flow", "running", last_us=900, max_us=1180, events=6, state_detail={
+                "graph": "heel_strike", "package": "heel_strike",
+                "source": "apps/heel_strike.nha", "nodes": 4, "estimated_us": 15,
+                "budget_us": 2000, "emissions": 6, "frames": 18422,
+                "degraded": False, "degradations": 0,
+                "outputs": [{"op": "region_sum", "result": 41.7, "bool": False}],
+            }),
+            slot("flow1", "installed"),
+            slot("flow2", "installed"),
+            slot("flow3", "installed"),
         ]
+
+    @staticmethod
+    def _mock_default_packages() -> list[dict[str, Any]]:
+        return [{
+            "id": "heel_strike", "name": "Heel Strike", "version": "1.0.0",
+            "author": "wenzi7777", "summary": "Emits heel_strike on the rear half of the mat.",
+            "category": "biomechanics", "min_os": "v1.0.0", "sha256": "0" * 64,
+            "capabilities": 5, "size": 492, "estimated_us": 15, "slot": 0,
+            "state": "active",
+        }]
 
     def _mock_app_command(self, device_uid: str, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         apps = self._mock_apps.setdefault(device_uid, self._mock_default_apps())
+        packages = self._mock_packages.setdefault(device_uid, self._mock_default_packages())
 
-        def status_json() -> dict[str, Any]:
-            return {"frames": 18422, "count": len(apps), "apps": apps}
+        def app_status() -> dict[str, Any]:
+            return {
+                "dispatches": 18422, "count": len(apps), "budget_us": 2000 * len(apps),
+                "last_total_us": 900, "max_total_us": 1180,
+                "event_seq": 6, "events_dropped": 0, "apps": apps,
+            }
+
+        def registry_status() -> dict[str, Any]:
+            return {
+                "count": len(packages), "capacity": 8, "slots": 4,
+                "used_us": sum(int(p.get("estimated_us") or 0) for p in packages),
+                "index_writes": 1, "recovered_from_tmp": False, "rebuilt": False,
+                "packages": packages,
+            }
+
+        def find_package(app_id: str) -> dict[str, Any] | None:
+            return next((p for p in packages if p["id"] == app_id), None)
 
         if command == "app_list":
-            return {"message": "app_list", "data": status_json()}
+            return {"message": "app_list", "data": app_status()}
+
+        if command == "app_list_packages":
+            return {"message": "app_list_packages", "data": registry_status()}
+
+        if command == "app_events":
+            since = int(payload.get("since_seq") or 0)
+            events = [
+                {"seq": 5, "ms": 18400, "frame_seq": 18400, "app": "flow",
+                 "event": "heel_strike", "detail": "rise"},
+                {"seq": 6, "ms": 18700, "frame_seq": 18718, "app": "flow",
+                 "event": "heel_strike", "detail": "fall"},
+            ]
+            return {"message": "app_events",
+                    "data": {"seq": 6, "dropped": 0,
+                             "events": [e for e in events if e["seq"] > since]}}
 
         if command in ("app_enable", "app_disable", "app_revive"):
             name = str(payload.get("name") or "")
@@ -3636,35 +3783,137 @@ class NewHorizonsService:
             app = next((a for a in apps if a["name"] == name), None)
             if app is None:
                 return {"ok": False, "status": "error",
-                        "error": "app_revive_failed" if command == "app_revive" else "app_state_change_rejected"}
+                        "error": "app_revive_failed" if command == "app_revive"
+                        else "app_state_change_rejected"}
             if command == "app_revive":
                 if app["state"] != "killed":
                     return {"ok": False, "status": "error", "error": "app_revive_failed"}
                 app["state"] = "running"
                 app["overruns"] = 0
-                return {"message": "app_revived", "data": status_json()}
+                return {"message": "app_revived", "data": app_status()}
             # setEnabled() refuses to silently un-kill an app that blew its budget.
             if app["state"] == "killed":
                 return {"ok": False, "status": "error", "error": "app_state_change_rejected"}
             app["state"] = "running" if command == "app_enable" else "installed"
             return {"message": "app_enabled" if command == "app_enable" else "app_disabled",
-                    "data": status_json()}
+                    "data": app_status()}
 
-        rules = next((a for a in apps if a["name"] == "rules"), None)
-        if rules is None:
-            return {"ok": False, "status": "error", "error": "rule_engine_unavailable"}
+        if command == "app_install":
+            path = str(payload.get("path") or "")
+            if not path:
+                return {"ok": False, "status": "error", "error": "path_required"}
+            target = self._mock_resolve_scope_path(device_uid, "user", path)
+            if target is None or not target.exists():
+                return {"ok": False, "status": "error", "error": "package_not_found"}
+            try:
+                doc = json.loads(target.read_text(encoding="utf-8"))
+                manifest = doc["manifest"]
+                app_id = str(manifest["id"])
+            except Exception:
+                return {"ok": False, "status": "error", "error": "not_a_package"}
+            if path != "apps/{}.nha".format(app_id):
+                return {"ok": False, "status": "error",
+                        "error": "id_path_mismatch:{}".format(app_id)}
+            existing = find_package(app_id)
+            if existing is not None and not payload.get("replace"):
+                return {"ok": False, "status": "error",
+                        "error": "already_installed:{}".format(app_id)}
+            if existing is None and len(packages) >= 8:
+                return {"ok": False, "status": "error", "error": "registry_full"}
+            entry = existing or {"slot": -1}
+            entry.update({
+                "id": app_id, "name": manifest.get("name", app_id),
+                "version": manifest.get("version", "0.0.0"),
+                "author": manifest.get("author", ""), "summary": manifest.get("summary", ""),
+                "category": manifest.get("category", "other"),
+                "min_os": manifest.get("min_os", "v1.0.0"),
+                "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                "capabilities": 5, "size": target.stat().st_size,
+                "estimated_us": 15 * max(1, len(doc.get("nodes") or [])) // 4,
+                "state": "active" if entry.get("slot", -1) >= 0 else "installed",
+            })
+            if existing is None:
+                packages.append(entry)
+            return {"message": "app_installed",
+                    "data": {"id": app_id, "registry": registry_status()}}
 
-        if command == "app_load_rules":
-            path = str(payload.get("path") or "apps/rules.json")
+        if command == "app_uninstall":
+            app_id = str(payload.get("id") or "")
+            entry = find_package(app_id)
+            if entry is None:
+                return {"ok": False, "status": "error",
+                        "error": "unknown_package:{}".format(app_id)}
+            if entry.get("slot", -1) >= 0:
+                apps[entry["slot"]]["state_detail"]["package"] = ""
+            packages.remove(entry)
+            if not payload.get("keep_file"):
+                self._mock_file_delete(device_uid, {"scope": "user",
+                                                    "path": "apps/{}.nha".format(app_id)})
+            return {"message": "app_uninstalled", "data": registry_status()}
+
+        if command in ("app_activate", "app_deactivate"):
+            app_id = str(payload.get("id") or "")
+            entry = find_package(app_id) if app_id else None
+            if command == "app_activate":
+                if entry is None:
+                    return {"ok": False, "status": "error",
+                            "error": "unknown_package:{}".format(app_id)}
+                if entry.get("slot", -1) >= 0:
+                    return {"ok": False, "status": "error",
+                            "error": "already_active:{}".format(entry["slot"])}
+                taken = {p["slot"] for p in packages if p.get("slot", -1) >= 0}
+                slot = int(payload.get("slot", -1))
+                if slot < 0:
+                    slot = next((i for i in range(4) if i not in taken), -1)
+                if slot < 0:
+                    return {"ok": False, "status": "error", "error": "no_free_slot"}
+                if slot >= 4:
+                    return {"ok": False, "status": "error",
+                            "error": "slot_out_of_range:{}".format(slot)}
+                if slot in taken:
+                    return {"ok": False, "status": "error", "error": "slot_occupied"}
+                entry["slot"] = slot
+                entry["state"] = "active"
+                apps[slot]["state_detail"]["package"] = app_id
+                return {"message": "app_activated", "data": registry_status()}
+            slot = int(payload.get("slot", -1))
+            if entry is None:
+                entry = next((p for p in packages if p.get("slot", -1) == slot), None)
+            if entry is None:
+                return {"ok": False, "status": "error",
+                        "error": "slot_not_active:{}".format(slot)}
+            apps[entry["slot"]]["state_detail"]["package"] = ""
+            entry["slot"] = -1
+            entry["state"] = "installed"
+            return {"message": "app_deactivated", "data": registry_status()}
+
+        if command == "app_verify":
+            entry = find_package(str(payload.get("id") or ""))
+            if entry is None:
+                return {"ok": False, "status": "error", "error": "unknown_package"}
+            return {"message": "app_verified",
+                    "data": {"id": entry["id"], "sha256": entry["sha256"], "match": True}}
+
+        if command == "app_reindex":
+            return {"message": "app_reindexed",
+                    "data": {"recovered": len(packages), "dropped": 0,
+                             "registry": registry_status()}}
+
+        slot0 = apps[0]
+        if command == "app_load_flow":
+            path = str(payload.get("path") or "apps/flow.json")
             if self._mock_resolve_scope_path(device_uid, "user", path) is None:
-                return {"ok": False, "status": "error", "error": "rule_load_failed:file_not_found"}
-            rules["state_detail"] = dict(rules["state_detail"], source=path, graph=Path(path).stem)
-            return {"message": "rule_graph_loaded", "data": rules["state_detail"]}
+                return {"ok": False, "status": "error", "error": "flow_load_failed:file_not_found"}
+            slot0["state_detail"] = dict(slot0["state_detail"], source=path,
+                                         graph=Path(path).stem)
+            return {"message": "flow_graph_loaded", "data": slot0["state_detail"]}
 
-        # app_unload_rules
-        rules["state_detail"] = {"graph": "", "source": "", "nodes": 0, "estimated_us": 0,
-                                 "budget_us": 1500, "emissions": 0, "frames": 0, "outputs": []}
-        return {"message": "rule_graph_unloaded", "data": rules["state_detail"]}
+        # app_unload_flow
+        slot0["state_detail"] = {"graph": "", "package": "", "source": "", "nodes": 0,
+                                 "estimated_us": 0, "budget_us": 2000, "emissions": 0,
+                                 "frames": 0, "degraded": False, "degradations": 0,
+                                 "outputs": []}
+        return {"message": "flow_graph_unloaded", "data": slot0["state_detail"]}
 
     def _mock_resolve_scope_path(self, device_uid: str, scope: str, raw_path: str) -> Path | None:
         """Resolve a device-relative path inside a mock scope, or None if it escapes."""
@@ -3722,10 +3971,16 @@ class NewHorizonsService:
         self._mock_write_sessions.pop(key, None)
         if len(session["buffer"]) != session["expected"]:
             return {"ok": False, "status": "error", "error": "file_write_incomplete"}
+        digest = hashlib.sha256(bytes(session["buffer"])).hexdigest()
+        expected = str(payload.get("sha256") or "")
+        if expected and expected.lower() != digest:
+            # A corrupt file that looks complete is worse than none, because
+            # whatever consumes it next will not know.
+            return {"ok": False, "status": "error", "error": "file_checksum_mismatch"}
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(bytes(session["buffer"]))
         return {"message": "file_write_finished", "scope": scope, "path": raw_path,
-                "size": len(session["buffer"])}
+                "size": len(session["buffer"]), "sha256": digest}
 
     def _mock_file_delete(self, device_uid: str, payload: dict[str, Any]) -> dict[str, Any]:
         scope = str(payload.get("scope") or "user")

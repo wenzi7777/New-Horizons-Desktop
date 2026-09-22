@@ -28,8 +28,12 @@ class RoutingTests(unittest.TestCase):
 
     def test_the_store_is_admin_only(self):
         app = read("App.tsx")
-        block = app[app.index('path="/apps"'):app.index('path="*"')]
-        self.assertEqual(block.count('RequireRole roles={["admin"]}'), 2)
+        # Check each route's own element rather than counting over a span, so
+        # inserting a route between them does not break the assertion.
+        for path in ('path="/apps"', 'path="/apps/:appId"'):
+            with self.subTest(path=path):
+                element = app[app.index(path):]
+                self.assertIn('RequireRole roles={["admin"]}', element[:220])
 
 
 class PageWiringTests(unittest.TestCase):

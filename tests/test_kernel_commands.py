@@ -31,6 +31,9 @@ from newhorizons_backend.terminal import (  # noqa: E402
 
 
 # command line -> firmware command name
+#
+# v1.1.0 renamed the engine from "rule" to "flow" and kept no aliases, so these
+# are the only spellings that exist.
 KERNEL_COMMANDS = {
     "task-list": "task_list",
     "service-list": "service_list",
@@ -45,11 +48,11 @@ KERNEL_COMMANDS = {
     "set-time --epoch-ms 1716026905000": "set_time",
     "set-power-profile --profile balanced": "set_power_profile",
     "app-list": "app_list",
-    "app-enable --name features": "app_enable",
-    "app-disable --name rules": "app_disable",
-    "app-revive --name rules": "app_revive",
-    "app-load-rules --path apps/rules.json": "app_load_rules",
-    "app-unload-rules": "app_unload_rules",
+    "app-enable --name flow": "app_enable",
+    "app-disable --name flow1": "app_disable",
+    "app-revive --name flow": "app_revive",
+    "app-load-flow --path apps/flow.json": "app_load_flow",
+    "app-unload-flow": "app_unload_flow",
 }
 
 # Terminal entries handled entirely in the browser -- they open a local modal and
@@ -75,7 +78,7 @@ class KernelCommandCompilationTests(unittest.TestCase):
         # The firmware treats an absent path as "dump everything" / "use the
         # default file"; inventing a default here would change its meaning.
         self.assertNotIn("path", compile_terminal_command("config-get")["payload"])
-        self.assertNotIn("path", compile_terminal_command("app-load-rules")["payload"])
+        self.assertNotIn("path", compile_terminal_command("app-load-flow")["payload"])
 
 
 class KernelCommandModeGateTests(unittest.TestCase):

@@ -5,23 +5,17 @@ import { useI18n } from "../i18n";
 import { type DeviceFileEntry } from "../lib/api";
 import { normalizeDevice, useDevicesPolling } from "../lib/device";
 import { useDeviceCommand } from "../lib/deviceCommand";
+import {
+  MAX_USER_PATH,
+  bytesToHex,
+  ensureWriteOk,
+  hexToBytes,
+  writeDeviceFile,
+} from "../lib/deviceFileTransfer";
 import { storageSnapshotFromResult } from "../lib/storageStatus";
 
 const SCOPES = ["user", "logs", "calibration"] as const;
 type FileScope = typeof SCOPES[number];
-
-function bytesToHex(bytes: Uint8Array) {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function hexToBytes(hex: string) {
-  const cleaned = hex.trim();
-  const bytes = new Uint8Array(Math.floor(cleaned.length / 2));
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(cleaned.slice(index * 2, index * 2 + 2), 16);
-  }
-  return bytes;
-}
 
 function chunkDataText(result: Record<string, unknown> | null | undefined) {
   const chunkResult = result ?? {};
@@ -260,47 +254,23 @@ export function DeviceFilesPage() {
     await refreshStorage();
   }
 
-  function ensureWriteOk(result: Record<string, unknown> | null) {
-    if (result && (result.status === "error" || result.ok === false)) {
-      throw new Error(String(result.error ?? result.message ?? "file_write_failed"));
-    }
-  }
-
   async function uploadSelectedFile() {
     if (!uploadFile) return;
     const targetPath = uploadPath.trim() || uploadFile.name;
-    // SPIFFS_OBJ_NAME_LEN=32 (1 byte for null), /files/ prefix = 7 chars → max 24
-    if (targetPath.length > 24) {
-      setStatusMessage(`${t("uploadFailed")}: path_too_long (${targetPath.length}/24)`);
+    if (targetPath.length > MAX_USER_PATH) {
+      setStatusMessage(`${t("uploadFailed")}: path_too_long (${targetPath.length}/${MAX_USER_PATH})`);
       return;
     }
     const bytes = new Uint8Array(await uploadFile.arrayBuffer());
-    const ulStartTime = Date.now();
     uploadAbortRef.current = false;
-    setUploadProgress({ loaded: 0, total: bytes.length, startTime: ulStartTime });
     try {
-      const begin = await queue({ command: "file_write_begin", scope: "user", path: targetPath, size: bytes.length });
-      ensureWriteOk(begin.result);
-      let offset = 0;
-      const chunkSize = 96;
-      while (offset < bytes.length) {
-        if (uploadAbortRef.current) {
-          throw new Error("upload_cancelled");
-        }
-        const chunk = bytes.slice(offset, offset + chunkSize);
-        const written = await queue({
-          command: "file_write_chunk",
-          scope: "user",
-          path: targetPath,
-          offset,
-          data: bytesToHex(chunk),
-        });
-        ensureWriteOk(written.result);
-        offset += chunk.length;
-        setUploadProgress({ loaded: offset, total: bytes.length, startTime: ulStartTime });
-      }
-      const finish = await queue({ command: "file_write_finish", scope: "user", path: targetPath });
-      ensureWriteOk(finish.result);
+      await writeDeviceFile(queue, {
+        path: targetPath,
+        bytes,
+        scope: "user",
+        onProgress: setUploadProgress,
+        abortRef: uploadAbortRef,
+      });
       setStatusMessage(`${t("uploadComplete")}: ${targetPath}`);
       setUploadFile(null);
       setUploadPath("");

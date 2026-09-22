@@ -31,7 +31,7 @@ from newhorizons_backend.app_library import (  # noqa: E402
 
 GOOD_PACKAGE = {
     "nhapp": 1,
-    "kind": "rules",
+    "kind": "flow",
     "name": "demo",
     "manifest": {
         "id": "demo", "name": "Demo", "version": "1.0.0", "author": "wenzi7777",
@@ -130,9 +130,13 @@ class PackageValidationTests(unittest.TestCase):
         self.assertRejects(doc, "input_out_of_order")
 
     def test_unsupported_kind_is_refused(self):
-        doc = json.loads(json.dumps(GOOD_PACKAGE))
-        doc["kind"] = "lua"
-        self.assertRejects(doc, "unsupported_kind")
+        # The discriminator exists so a future scripted runtime cannot be
+        # mistaken for a flow graph by firmware that predates it.
+        for kind in ("lua", "rules", "berry"):
+            with self.subTest(kind=kind):
+                doc = json.loads(json.dumps(GOOD_PACKAGE))
+                doc["kind"] = kind
+                self.assertRejects(doc, "unsupported_kind")
 
     def test_event_names_fit_the_firmware_buffer(self):
         doc = json.loads(json.dumps(GOOD_PACKAGE))

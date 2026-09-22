@@ -75,24 +75,65 @@ const COMMAND_BLOCKS: CommandBlock[] = [
   {
     command: "app-enable",
     groupKey: "commandGroupConfig",
-    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "features" }],
+    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "flow" }],
   },
   {
     command: "app-disable",
     groupKey: "commandGroupConfig",
-    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "rules" }],
+    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "flow1" }],
   },
   {
     command: "app-revive",
     groupKey: "commandGroupMaintenance",
-    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "rules" }],
+    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "flow" }],
   },
   {
-    command: "app-load-rules",
-    groupKey: "commandGroupConfig",
-    params: [{ key: "path", labelKey: "paramRulePath", type: "text", placeholder: "apps/rules.json" }],
+    command: "app-events",
+    groupKey: "commandGroupCore",
+    params: [
+      { key: "since_seq", labelKey: "paramSinceSeq", type: "number", placeholder: "0" },
+      { key: "limit", labelKey: "paramLimit", type: "number", placeholder: "32" },
+    ],
   },
-  { command: "app-unload-rules", groupKey: "commandGroupConfig", params: [] },
+  { command: "app-list-packages", groupKey: "commandGroupCore", params: [] },
+  {
+    command: "app-install",
+    groupKey: "commandGroupMaintenance",
+    params: [
+      { key: "path", labelKey: "paramPackagePath", type: "text", required: true, placeholder: "apps/heel_strike.nha" },
+      { key: "sha256", labelKey: "paramSha256", type: "text" },
+    ],
+  },
+  {
+    command: "app-uninstall",
+    groupKey: "commandGroupMaintenance",
+    params: [{ key: "id", labelKey: "paramAppId", type: "text", required: true, placeholder: "heel_strike" }],
+  },
+  {
+    command: "app-activate",
+    groupKey: "commandGroupMaintenance",
+    params: [
+      { key: "id", labelKey: "paramAppId", type: "text", required: true, placeholder: "heel_strike" },
+      { key: "slot", labelKey: "paramSlot", type: "number", placeholder: "1" },
+    ],
+  },
+  {
+    command: "app-deactivate",
+    groupKey: "commandGroupMaintenance",
+    params: [{ key: "id", labelKey: "paramAppId", type: "text", required: true, placeholder: "heel_strike" }],
+  },
+  {
+    command: "app-verify",
+    groupKey: "commandGroupCore",
+    params: [{ key: "id", labelKey: "paramAppId", type: "text", required: true, placeholder: "heel_strike" }],
+  },
+  { command: "app-reindex", groupKey: "commandGroupMaintenance", params: [] },
+  {
+    command: "app-load-flow",
+    groupKey: "commandGroupConfig",
+    params: [{ key: "path", labelKey: "paramFlowPath", type: "text", placeholder: "apps/flow.json" }],
+  },
+  { command: "app-unload-flow", groupKey: "commandGroupConfig", params: [] },
   { command: "config-schema", groupKey: "commandGroupConfig", params: [] },
   {
     command: "config-get",

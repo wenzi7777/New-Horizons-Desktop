@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { api } from "../lib/api";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { api, type DeviceEntry } from "../lib/api";
+import { useDevicesPolling } from "../lib/device";
 import {
   type AppCatalogEntry,
   categoriesOf,
@@ -45,7 +46,11 @@ function AppCard({ entry, onOpen }: { entry: AppCatalogEntry; onOpen: () => void
   );
 }
 
-function AppDetail({ entry, onBack }: { entry: AppCatalogEntry; onBack: () => void }) {
+function AppDetail({ entry, onBack, devices }: {
+  entry: AppCatalogEntry;
+  onBack: () => void;
+  devices: DeviceEntry[];
+}) {
   const { t, locale } = useI18n();
   const localised = useLocalised();
   const [readme, setReadme] = useState<string | null>(null);
@@ -103,7 +108,21 @@ function AppDetail({ entry, onBack }: { entry: AppCatalogEntry; onBack: () => vo
           : null}
       </dl>
 
-      <p className="app-detail-install-hint">{t("appInstallComingSoon")}</p>
+      <div className="app-detail-install">
+        <span className="app-detail-install-hint">{t("appInstallPickDevice")}</span>
+        <div className="app-detail-device-list">
+          {devices.map((device) => (
+            <Link
+              key={device.device_uid}
+              className="button"
+              to={`/device/${encodeURIComponent(device.device_uid)}/apps?install=${encodeURIComponent(entry.id)}`}
+            >
+              {device.display_name || device.device_name || device.device_uid}
+            </Link>
+          ))}
+          {!devices.length ? <span className="app-slot-free">{t("appInstallNoDevices")}</span> : null}
+        </div>
+      </div>
 
       {readme ? (
         <section className="app-detail-readme">
@@ -121,6 +140,7 @@ export function AppStorePage() {
   const { t } = useI18n();
   const localised = useLocalised();
 
+  const { devices } = useDevicesPolling();
   const [items, setItems] = useState<AppCatalogEntry[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [stale, setStale] = useState(false);
@@ -175,7 +195,7 @@ export function AppStorePage() {
   if (active) {
     return (
       <div className="app-store-page">
-        <AppDetail entry={active} onBack={() => navigate("/apps")} />
+        <AppDetail entry={active} onBack={() => navigate("/apps")} devices={devices} />
       </div>
     );
   }

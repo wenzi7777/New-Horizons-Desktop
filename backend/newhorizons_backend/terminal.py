@@ -31,8 +31,16 @@ DEVICE_COMMAND_ALLOWLIST = {
     "app_enable",
     "app_disable",
     "app_revive",
-    "app_load_rules",
-    "app_unload_rules",
+    "app_load_flow",
+    "app_unload_flow",
+    "app_events",
+    "app_list_packages",
+    "app_install",
+    "app_uninstall",
+    "app_activate",
+    "app_deactivate",
+    "app_verify",
+    "app_reindex",
     "calibration_status",
     "calibration_enable",
     "calibration_disable",
@@ -178,28 +186,68 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "app-enable",
-            "description": "Enable an installed app.",
-            "example": "app-enable --name features",
+            "description": "Enable an installed app slot.",
+            "example": "app-enable --name flow",
         },
         {
             "command": "app-disable",
-            "description": "Disable an installed app without uninstalling it.",
-            "example": "app-disable --name rules",
+            "description": "Disable an app slot without uninstalling its package.",
+            "example": "app-disable --name flow1",
         },
         {
             "command": "app-revive",
             "description": "Clear a budget-overrun kill and restart the app.",
-            "example": "app-revive --name rules",
+            "example": "app-revive --name flow",
         },
         {
-            "command": "app-load-rules",
-            "description": "Load a declarative rule graph; rejected at load time if it exceeds the frame budget.",
-            "example": "app-load-rules --path apps/rules.json",
+            "command": "app-events",
+            "description": "Events emitted by apps since a sequence number, with a dropped count.",
+            "example": "app-events --since-seq 0",
         },
         {
-            "command": "app-unload-rules",
-            "description": "Unload the current rule graph.",
-            "example": "app-unload-rules",
+            "command": "app-list-packages",
+            "description": "Installed app packages and which slot each is bound to.",
+            "example": "app-list-packages",
+        },
+        {
+            "command": "app-install",
+            "description": "Install an uploaded .nha package into the registry.",
+            "example": "app-install --path apps/heel_strike.nha",
+        },
+        {
+            "command": "app-uninstall",
+            "description": "Remove a package from the registry and delete its file.",
+            "example": "app-uninstall --id heel_strike",
+        },
+        {
+            "command": "app-activate",
+            "description": "Bind an installed package to a flow slot.",
+            "example": "app-activate --id heel_strike --slot 1",
+        },
+        {
+            "command": "app-deactivate",
+            "description": "Unbind a package from its slot, leaving it installed.",
+            "example": "app-deactivate --id heel_strike",
+        },
+        {
+            "command": "app-verify",
+            "description": "Re-hash an installed package and compare it with the index.",
+            "example": "app-verify --id heel_strike",
+        },
+        {
+            "command": "app-reindex",
+            "description": "Rebuild the package index from the .nha files present.",
+            "example": "app-reindex",
+        },
+        {
+            "command": "app-load-flow",
+            "description": "Load a flow graph into slot 0; rejected at load time if it exceeds the budget.",
+            "example": "app-load-flow --path apps/flow.json",
+        },
+        {
+            "command": "app-unload-flow",
+            "description": "Unload the flow graph in slot 0.",
+            "example": "app-unload-flow",
         },
         {
             "command": "capabilities",
@@ -441,7 +489,9 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "capabilities": "capabilities",
         "config-schema": "config_schema",
         "app-list": "app_list",
-        "app-unload-rules": "app_unload_rules",
+        "app-list-packages": "app_list_packages",
+        "app-reindex": "app_reindex",
+        "app-unload-flow": "app_unload_flow",
     }
     if command in simple_commands:
         payload = {"command": simple_commands[command]}
@@ -680,6 +730,9 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
     if command == "file-write-finish":
         parsed = _parse_options(args)
         payload = {"command": "file_write_finish", "path": parsed["path"]}
+        # Optional: the firmware re-hashes and deletes the file on a mismatch.
+        if "sha256" in parsed:
+            payload["sha256"] = parsed["sha256"]
         _add_scope(payload, parsed)
         return {"command": "file_write_finish", "payload": payload, "argv": argv}
 
@@ -727,13 +780,61 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         payload = {"command": resolved, "name": parsed["name"]}
         return {"command": resolved, "payload": payload, "argv": argv}
 
-    if command == "app-load-rules":
+    if command == "app-load-flow":
         parsed = _parse_options(args)
-        payload = {"command": "app_load_rules"}
-        # The firmware defaults to apps/rules.json when path is omitted.
+        payload = {"command": "app_load_flow"}
+        # The firmware defaults to apps/flow.json when path is omitted.
         if "path" in parsed:
             payload["path"] = parsed["path"]
-        return {"command": "app_load_rules", "payload": payload, "argv": argv}
+        return {"command": "app_load_flow", "payload": payload, "argv": argv}
+
+    if command == "app-events":
+        parsed = _parse_options(args)
+        payload = {"command": "app_events"}
+        if "since_seq" in parsed:
+            payload["since_seq"] = int(parsed["since_seq"])
+        if "limit" in parsed:
+            payload["limit"] = int(parsed["limit"])
+        return {"command": "app_events", "payload": payload, "argv": argv}
+
+    if command == "app-install":
+        parsed = _parse_options(args)
+        payload = {"command": "app_install", "path": parsed["path"]}
+        if "sha256" in parsed:
+            payload["sha256"] = parsed["sha256"]
+        if "replace" in parsed:
+            payload["replace"] = _as_bool(parsed["replace"])
+        return {"command": "app_install", "payload": payload, "argv": argv}
+
+    if command == "app-uninstall":
+        parsed = _parse_options(args)
+        payload = {"command": "app_uninstall", "id": parsed["id"]}
+        if "keep_file" in parsed:
+            payload["keep_file"] = _as_bool(parsed["keep_file"])
+        return {"command": "app_uninstall", "payload": payload, "argv": argv}
+
+    if command == "app-activate":
+        parsed = _parse_options(args)
+        payload = {"command": "app_activate", "id": parsed["id"]}
+        if "slot" in parsed:
+            payload["slot"] = int(parsed["slot"])
+        return {"command": "app_activate", "payload": payload, "argv": argv}
+
+    if command == "app-deactivate":
+        parsed = _parse_options(args)
+        payload = {"command": "app_deactivate"}
+        if "id" in parsed:
+            payload["id"] = parsed["id"]
+        if "slot" in parsed:
+            payload["slot"] = int(parsed["slot"])
+        if "id" not in payload and "slot" not in payload:
+            raise ValueError("id_or_slot_required")
+        return {"command": "app_deactivate", "payload": payload, "argv": argv}
+
+    if command == "app-verify":
+        parsed = _parse_options(args)
+        payload = {"command": "app_verify", "id": parsed["id"]}
+        return {"command": "app_verify", "payload": payload, "argv": argv}
 
     if command == "log-tail":
         parsed = _parse_options(args)

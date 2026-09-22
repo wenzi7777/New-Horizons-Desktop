@@ -9,6 +9,7 @@ import { GatewaysPage } from "./pages/GatewaysPage";
 import { LaunchpadPage } from "./pages/LaunchpadPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AppStorePage } from "./pages/AppStorePage";
+import { DeviceAppsPage } from "./pages/DeviceAppsPage";
 import { PluginsPage } from "./pages/PluginsPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { TerminalPage } from "./pages/TerminalPage";
@@ -218,6 +219,14 @@ function AuthenticatedApp() {
             element={
               <RequireRole roles={["admin"]}>
                 <AppStorePage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/device/:deviceUid/apps"
+            element={
+              <RequireRole roles={["admin"]}>
+                <DeviceAppsPage />
               </RequireRole>
             }
           />

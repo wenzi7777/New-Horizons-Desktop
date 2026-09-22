@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
 import { api, type PressureCalReadings, type PressureCalServerPreset } from "../lib/api";
 
@@ -21,6 +21,8 @@ import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { BoardIoModal } from "./TerminalPage";
 import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { DeviceAppsPanel } from "../components/DeviceAppsPanel";
+import { compareVersions } from "../lib/appLibrary";
 import { Battery, CircleOff, Lightbulb, Power, TriangleAlert } from "lucide-react";
 
 // Spike-validated (firmware/spikes/README.md's "PHY rate config" section,
@@ -52,6 +54,7 @@ type SettingsSection =
   | "maintenance"
   | "diagnostics"
   | "files"
+  | "apps"
   | "experimental";
 
 type OperationLogEntry = {
@@ -2061,6 +2064,10 @@ export function DeviceSettingsPage() {
   // setBusyCommand("...") commits. This ref is checked-and-set
   // synchronously at the top of run(), so at most one command is ever
   // in flight for this device from the frontend at a time.
+  // The package registry arrived in firmware v1.1.0; on anything older the
+  // install and package controls are hidden rather than shown and then failing.
+  const supportsAppRegistry =
+    !normalized?.firmwareVersion || compareVersions(normalized.firmwareVersion, "v1.1.0") >= 0;
   const commandInFlightRef = useRef(false);
   const toastTimerRef = useRef(0);
   const operationLogIdRef = useRef(1);
@@ -2082,6 +2089,7 @@ export function DeviceSettingsPage() {
     { id: "maintenance", label: t("settingsSection_maintenance") },
     { id: "diagnostics", label: t("settingsSection_diagnostics") },
     { id: "files", label: t("settingsSection_files") },
+    { id: "apps", label: t("settingsSection_apps") },
     { id: "experimental", label: t("settingsSection_experimental") },
   ];
   const sections = boardProfile.supportsActionButtonSettings
@@ -3384,6 +3392,31 @@ export function DeviceSettingsPage() {
             <summary>Last response</summary>
             <pre>{pretty(lastResult)}</pre>
           </details>
+        </div>
+      );
+    }
+
+    if (activeSection === "apps") {
+      return (
+        <div className="settings-stack">
+          <div className="settings-detail-header">
+            <div>
+              <h3>{t("settingsSection_apps")}</h3>
+              <p>{t("settingsAppsCopy")}</p>
+            </div>
+            <Link className="button" to={`/device/${encodeURIComponent(deviceUid)}/apps`}>
+              {t("deviceApps")}
+            </Link>
+          </div>
+          <DeviceAppsPanel
+            // This page owns a single-flight mutex over run(); the panel must
+            // share it rather than opening a second pipeline to the device.
+            runner={(payload, timeoutMs) => run(String(payload.command ?? "app"), payload, timeoutMs)}
+            maintenanceMode={normalized?.mode === "maintenance" || normalized?.mode === "safe_maintenance"}
+            supportsRegistry={supportsAppRegistry}
+            busy={Boolean(busyCommand)}
+            compact
+          />
         </div>
       );
     }

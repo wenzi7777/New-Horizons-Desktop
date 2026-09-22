@@ -811,12 +811,19 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("commandParamDefaultValue", source)
 
     def test_device_files_page_uses_arduino_file_read_write_commands(self):
-        source = (ROOT / "frontend" / "src" / "pages" / "DeviceFilesPage.tsx").read_text(encoding="utf-8")
+        page = (ROOT / "frontend" / "src" / "pages" / "DeviceFilesPage.tsx").read_text(encoding="utf-8")
+        # The write half moved into lib/deviceFileTransfer.ts so that uploading
+        # a file and installing an app package are one implementation; the read
+        # half is still the page's own.
+        transfer = (ROOT / "frontend" / "src" / "lib" / "deviceFileTransfer.ts").read_text(encoding="utf-8")
 
-        for command in ("file_read_begin", "file_read_chunk", "file_write_begin", "file_write_chunk", "file_write_finish", "file_delete"):
-            self.assertIn(command, source)
+        for command in ("file_read_begin", "file_read_chunk", "file_delete"):
+            self.assertIn(command, page)
+        for command in ("file_write_begin", "file_write_chunk", "file_write_finish"):
+            self.assertIn(command, transfer)
         for legacy in ("file_download_begin", "file_download_chunk", "file_upload_begin", "file_upload_chunk", "file_upload_finish", "offlineSegmentToCsv"):
-            self.assertNotIn(legacy, source)
+            self.assertNotIn(legacy, page)
+            self.assertNotIn(legacy, transfer)
 
     def test_device_files_page_defaults_to_log_preview_workspace(self):
         source = (ROOT / "frontend" / "src" / "pages" / "DeviceFilesPage.tsx").read_text(encoding="utf-8")

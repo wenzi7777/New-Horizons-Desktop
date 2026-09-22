@@ -46,6 +46,7 @@ CAPABILITIES = {"read_matrix", "read_imu", "emit_event", "drive_led", "write_fil
 
 # Mirrors tools/opset.py. Kept as a flat set because this module's job is to
 # reject the impossible, not to estimate cost -- the device does that.
+# v1.1.0 renamed the engine from "rule" to "flow"; the op names did not change.
 KNOWN_OPS = {
     "total", "peak", "region_sum", "active_cells", "threshold", "debounce", "emit",
     "const", "add", "sub", "mul", "div", "min", "max", "abs", "clamp",
@@ -75,7 +76,7 @@ def validate_package(doc: Any) -> dict[str, Any]:
     """Structural checks, no I/O. Raises AppPackageError, returns a summary."""
     _require(isinstance(doc, dict), "not_a_package")
     _require(doc.get("nhapp") == 1, "unsupported_package_version")
-    _require(str(doc.get("kind") or "rules") == "rules", "unsupported_kind")
+    _require(str(doc.get("kind") or "flow") == "flow", "unsupported_kind")
 
     manifest = doc.get("manifest")
     _require(isinstance(manifest, dict), "missing_manifest")
