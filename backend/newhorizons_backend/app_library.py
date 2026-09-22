@@ -37,12 +37,21 @@ DEVICE_APP_DIR = "apps"
 APP_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
 RESERVED_APP_IDS = {"index"}
 MAX_RULE_NODES = 12
-MAX_PACKAGE_BYTES = 4096
+MAX_PACKAGE_BYTES = 4096  # the firmware's parse buffer, for either kind
 MAX_EVENT_NAME = 23
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 MIN_OS_RE = re.compile(r"^v?\d+\.\d+\.\d+$")
 
 CAPABILITIES = {"read_matrix", "read_imu", "emit_event", "drive_led", "write_file"}
+
+# Commands a readout may poll. Enforced here as well as in the library's CI:
+# a package can arrive from a hand-edited catalog, and nothing that renders in
+# an operator's browser should be able to write to a device.
+READOUT_SOURCES = {
+    "task_list", "service_list", "app_list", "app_list_packages", "app_events",
+    "memory_status", "scan_health", "storage_status", "status", "capabilities",
+}
+READOUT_SECTION_KINDS = {"stats", "table"}
 
 # Mirrors tools/opset.py. Kept as a flat set because this module's job is to
 # reject the impossible, not to estimate cost -- the device does that.
@@ -76,7 +85,8 @@ def validate_package(doc: Any) -> dict[str, Any]:
     """Structural checks, no I/O. Raises AppPackageError, returns a summary."""
     _require(isinstance(doc, dict), "not_a_package")
     _require(doc.get("nhapp") == 1, "unsupported_package_version")
-    _require(str(doc.get("kind") or "flow") == "flow", "unsupported_kind")
+    kind = str(doc.get("kind") or "flow")
+    _require(kind in ("flow", "readout"), "unsupported_kind")
 
     manifest = doc.get("manifest")
     _require(isinstance(manifest, dict), "missing_manifest")
@@ -98,6 +108,31 @@ def validate_package(doc: Any) -> dict[str, Any]:
     for capability in capabilities:
         _require(capability in CAPABILITIES, "unknown_capability")
 
+    if kind == "readout":
+        _require("nodes" not in doc, "readout_must_not_declare_nodes")
+        readout = doc.get("readout")
+        _require(isinstance(readout, dict), "missing_readout")
+        sources = readout.get("sources")
+        _require(isinstance(sources, list) and sources, "missing_sources")
+        for source in sources:
+            _require(isinstance(source, dict), "invalid_source")
+            _require(str(source.get("command")) in READOUT_SOURCES, "readout_source_not_allowed")
+        sections = readout.get("sections")
+        _require(isinstance(sections, list) and sections, "missing_sections")
+        for section in sections:
+            _require(isinstance(section, dict), "invalid_section")
+            _require(str(section.get("kind")) in READOUT_SECTION_KINDS, "unknown_section_kind")
+        return {
+            "id": app_id,
+            "version": str(manifest["version"]),
+            "min_os": min_os,
+            "kind": "readout",
+            "nodes": 0,
+            "capabilities": list(capabilities),
+            "device_path": f"{DEVICE_APP_DIR}/{app_id}.nha",
+        }
+
+    _require("readout" not in doc, "flow_must_not_declare_a_readout")
     nodes = doc.get("nodes")
     _require(isinstance(nodes, list), "missing_nodes")
     _require(len(nodes) > 0, "empty_graph")
@@ -121,6 +156,7 @@ def validate_package(doc: Any) -> dict[str, Any]:
         "id": app_id,
         "version": str(manifest["version"]),
         "min_os": min_os,
+        "kind": "flow",
         "nodes": len(nodes),
         "capabilities": list(capabilities),
         "device_path": f"{DEVICE_APP_DIR}/{app_id}.nha",

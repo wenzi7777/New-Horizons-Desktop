@@ -28,6 +28,8 @@ export type InstalledApp = {
 
 export type AppPackageEntry = {
   id: string;
+  /** "flow" runs on the device; "readout" is a view the Desktop renders. */
+  kind: "flow" | "readout" | string;
   name: string;
   version: string;
   author: string;
@@ -119,6 +121,7 @@ export function parsePackageList(result: Record<string, unknown> | null): AppPac
     const entry = asRecord(item);
     return {
       id: str(entry.id),
+      kind: str(entry.kind, "flow"),
       name: str(entry.name, str(entry.id)),
       version: str(entry.version, "0.0.0"),
       author: str(entry.author),

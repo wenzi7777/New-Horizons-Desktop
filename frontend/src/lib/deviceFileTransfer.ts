@@ -151,3 +151,51 @@ export async function installAppPackage(queue: CommandRunner, options: InstallOp
   onPhase?.("done");
   return installed.result;
 }
+
+export type ReadOptions = {
+  path: string;
+  scope?: string;
+  /** Bytes per request. The device caps a chunk well below this. */
+  chunkBytes?: number;
+};
+
+/**
+ * Read a file back off the device.
+ *
+ * Used to load an installed package from the device that holds it, rather than
+ * from the catalog: the device is the source of truth for what it has, and
+ * this still works for a sideloaded package or an unreachable library.
+ */
+export async function readDeviceFile(
+  queue: CommandRunner,
+  { path, scope = "user", chunkBytes = 256 }: ReadOptions,
+): Promise<Uint8Array> {
+  const begin = await queue({ command: "file_read_begin", scope, path });
+  ensureWriteOk(begin.result);
+  const size = Number((begin.result as Record<string, unknown> | null)?.size ?? 0);
+  if (!size) return new Uint8Array();
+
+  const chunks: Uint8Array[] = [];
+  let offset = 0;
+  while (offset < size) {
+    const response = await queue({
+      command: "file_read_chunk", scope, path, offset, length: chunkBytes,
+    });
+    ensureWriteOk(response.result);
+    const result = (response.result ?? {}) as Record<string, unknown>;
+    const hex = typeof result.data === "string" ? result.data : "";
+    if (!hex) break;
+    const bytes = hexToBytes(hex);
+    chunks.push(bytes);
+    offset = Number(result.next_offset ?? offset + bytes.length);
+    if (result.has_more === false) break;
+  }
+
+  const merged = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+  let cursor = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, cursor);
+    cursor += chunk.length;
+  }
+  return merged;
+}

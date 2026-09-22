@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ReadoutView } from "./ReadoutView";
 import { useI18n } from "../i18n";
 import {
   type AppEventEntry,
@@ -12,7 +13,8 @@ import {
   parseAppList,
   parsePackageList,
 } from "../lib/deviceApps";
-import type { CommandRunner } from "../lib/deviceFileTransfer";
+import { type CommandRunner, readDeviceFile } from "../lib/deviceFileTransfer";
+import { type ReadoutPackage, isReadoutPackage } from "../lib/readout";
 
 export type DeviceAppsPanelProps = {
   /**
@@ -66,6 +68,8 @@ export function DeviceAppsPanel({
   const [dropped, setDropped] = useState(0);
   const [notice, setNotice] = useState<{ text: string; kind: "success" | "error" } | null>(null);
   const [pending, setPending] = useState<string | null>(null);
+  const [openReadout, setOpenReadout] = useState<ReadoutPackage | null>(null);
+  const [openReadoutId, setOpenReadoutId] = useState<string | null>(null);
 
   const describeError = useCallback(
     (raw: string) => {
@@ -119,6 +123,31 @@ export function DeviceAppsPanel({
     [runner, refresh, describeError],
   );
 
+  const openReadoutPackage = useCallback(
+    async (entry: AppPackageEntry) => {
+      setPending(entry.id);
+      setNotice(null);
+      try {
+        // Read it from the DEVICE, not the catalog: the device is the source of
+        // truth for what it has, and this still works for a sideloaded package
+        // or an unreachable library.
+        const bytes = await readDeviceFile(runner, { path: `apps/${entry.id}.nha` });
+        const doc = JSON.parse(new TextDecoder().decode(bytes));
+        if (!isReadoutPackage(doc)) throw new Error("not_a_readout");
+        setOpenReadout(doc);
+        setOpenReadoutId(entry.id);
+      } catch (error) {
+        setNotice({ text: describeError(error instanceof Error ? error.message : String(error)),
+                    kind: "error" });
+      } finally {
+        setPending(null);
+      }
+    },
+    [runner, describeError],
+  );
+
+  const flowPackages = useMemo(() => packages.filter((p) => p.kind !== "readout"), [packages]);
+  const readoutPackages = useMemo(() => packages.filter((p) => p.kind === "readout"), [packages]);
   const available = useMemo(() => freeSlots(apps, packages), [apps, packages]);
   const packageBySlot = useMemo(() => {
     const map = new Map<number, AppPackageEntry>();
@@ -241,7 +270,7 @@ export function DeviceAppsPanel({
             <small>{t("appSlotsUsed", )}: {apps.length - available.length}/{apps.length}</small>
           </header>
           <ul className="app-package-list">
-            {packages.map((entry) => (
+            {flowPackages.map((entry) => (
               <li key={entry.id} className="app-package-row">
                 <div>
                   <strong>{entry.name}</strong> <small>v{entry.version}</small>
@@ -286,8 +315,73 @@ export function DeviceAppsPanel({
                 </div>
               </li>
             ))}
-            {!packages.length ? <li className="app-slot-free">{t("appNoPackages")}</li> : null}
+            {!flowPackages.length ? <li className="app-slot-free">{t("appNoPackages")}</li> : null}
           </ul>
+
+          <header className="device-apps-header">
+            <h3>{t("installedReadouts")}</h3>
+            <small>{t("readoutExplainer")}</small>
+          </header>
+          <ul className="app-package-list">
+            {readoutPackages.map((entry) => (
+              <li key={entry.id} className="app-package-row">
+                <div>
+                  <strong>{entry.name}</strong> <small>v{entry.version}</small>
+                  <div className="app-package-summary">{entry.summary}</div>
+                  <div className="app-package-meta">
+                    <span>{entry.id}</span>
+                    <span>{entry.size} B</span>
+                    <span className="app-readout-badge">{t("appKindReadout")}</span>
+                  </div>
+                </div>
+                <div className="app-package-actions">
+                  <button
+                    type="button"
+                    className="button primary"
+                    disabled={disabled}
+                    onClick={() => void openReadoutPackage(entry)}
+                  >
+                    {openReadoutId === entry.id ? t("readoutReopen") : t("readoutOpen")}
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={disabled || !maintenanceMode}
+                    title={maintenanceMode ? undefined : t("appRequiresMaintenance")}
+                    onClick={() => {
+                      if (!window.confirm(t("appUninstallConfirm"))) return;
+                      if (openReadoutId === entry.id) {
+                        setOpenReadout(null);
+                        setOpenReadoutId(null);
+                      }
+                      void run(entry.id, { command: "app_uninstall", id: entry.id },
+                               t("appUninstalled"));
+                    }}
+                  >
+                    {t("appUninstall")}
+                  </button>
+                </div>
+              </li>
+            ))}
+            {!readoutPackages.length ? (
+              <li className="app-slot-free">{t("appNoReadouts")}</li>
+            ) : null}
+          </ul>
+
+          {openReadout ? (
+            <div className="readout-host">
+              <header className="device-apps-header">
+                <h3>{String((openReadout.manifest as Record<string, unknown>).name ?? openReadoutId)}</h3>
+                <button type="button" className="button" onClick={() => {
+                  setOpenReadout(null);
+                  setOpenReadoutId(null);
+                }}>
+                  {t("readoutClose")}
+                </button>
+              </header>
+              <ReadoutView pkg={openReadout} runner={runner} busy={disabled} />
+            </div>
+          ) : null}
 
           <header className="device-apps-header">
             <h3>{t("appEvents")}</h3>
