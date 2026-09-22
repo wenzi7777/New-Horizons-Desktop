@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from flask import Blueprint, Response, current_app, g, request, send_file
 
+from .app_library import AppLibraryError, AppPackageError, get_library
 from .auth import AuthManager, DEFAULT_TOKEN_EXPIRY_SEC, user_payload
 from .gateway_auth import gateway_expected_token
 from .pressure_cal_client import PressureCalError, PressureCalNotConfigured, get_client
@@ -635,6 +636,76 @@ def create_blueprint(
         except ValueError as exc:
             return json_response({"error": str(exc)}), 400
         return _queue_device_command(device_uid, payload)
+
+    def _library_error(exc: Exception) -> tuple[Response, int]:
+        # A stale catalog is still useful, so only a hard failure lands here.
+        status = 502 if isinstance(exc, AppLibraryError) else 400
+        if str(exc) == "app_not_found":
+            status = 404
+        return json_response({"error": str(exc)}), status
+
+    @bp.get("/api/app-library/index")
+    @auth
+    @_require_roles("admin")
+    def app_library_index() -> Response:
+        refresh = str(request.args.get("refresh") or "") in ("1", "true", "yes")
+        try:
+            index = get_library().fetch_index(force=refresh)
+        except (AppLibraryError, AppPackageError) as exc:
+            return _library_error(exc)
+        return json_response({
+            "items": index.get("apps", []),
+            "generated_at": index.get("generated_at"),
+            "cell_count": index.get("cell_count"),
+            "source": index.get("source"),
+            "stale": bool(index.get("stale")),
+            "error": index.get("error"),
+        })
+
+    @bp.get("/api/app-library/apps/<app_id>")
+    @auth
+    @_require_roles("admin")
+    def app_library_app(app_id: str) -> Response:
+        try:
+            entry = get_library().entry(app_id)
+        except (AppLibraryError, AppPackageError) as exc:
+            return _library_error(exc)
+        return json_response({"app": entry})
+
+    @bp.post("/api/app-library/apps/<app_id>/package")
+    @auth
+    @_require_roles("admin")
+    def app_library_package(app_id: str) -> Response:
+        data = _request_json_data({})
+        version = (data.get("version") or "").strip() or None
+        try:
+            package = get_library().download_package(app_id, version=version)
+        except (AppLibraryError, AppPackageError) as exc:
+            return _library_error(exc)
+        return json_response({"package": package})
+
+    @bp.post("/api/app-library/import")
+    @auth
+    @_require_roles("admin")
+    def app_library_import() -> Response:
+        raw = request.get_data() or b""
+        if not raw:
+            return json_response({"error": "package_required"}), 400
+        try:
+            package = get_library().import_package(raw)
+        except (AppLibraryError, AppPackageError) as exc:
+            return _library_error(exc)
+        return json_response({"package": package})
+
+    @bp.get("/api/app-library/packages/<cache_key>")
+    @auth
+    @_require_roles("admin")
+    def app_library_cached_package(cache_key: str) -> Response:
+        try:
+            package = get_library().cached_package(cache_key)
+        except (AppLibraryError, AppPackageError) as exc:
+            return _library_error(exc)
+        return json_response({"package": package})
 
     @bp.get("/api/profiles")
     @auth

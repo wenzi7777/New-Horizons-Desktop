@@ -5413,3 +5413,167 @@ button:disabled {
     background: var(--panel-solid);
   }
 }
+
+/* --- App store ---------------------------------------------------------- */
+
+.app-store-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.app-store-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.app-store-header h1 {
+  margin: 0 0 4px;
+}
+
+.app-store-subtitle {
+  margin: 0;
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-store-filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.app-store-filters input[type="search"] {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.app-store-empty {
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.app-card {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 16px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.app-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.app-card-icon {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border-radius: 12px;
+}
+
+.app-card-icon-fallback {
+  background: var(--border, rgba(0, 0, 0, 0.12));
+}
+
+.app-card-body {
+  min-width: 0;
+}
+
+.app-card-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.app-card-summary {
+  color: var(--text-muted, #7a7a7a);
+  font-size: 0.9em;
+  margin-bottom: 8px;
+}
+
+.app-card-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.8em;
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-card-minos {
+  font-variant-numeric: tabular-nums;
+}
+
+.app-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.app-detail-hero {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.app-detail-hero h2 {
+  margin: 0 0 4px;
+}
+
+.app-detail-summary {
+  margin: 0;
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.app-detail-facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-detail-facts dt {
+  font-size: 0.8em;
+  color: var(--text-muted, #7a7a7a);
+}
+
+.app-detail-facts dd {
+  margin: 0;
+  font-weight: 500;
+}
+
+.app-detail-install-hint {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-muted, rgba(0, 0, 0, 0.04));
+  color: var(--text-muted, #7a7a7a);
+  margin: 0;
+}
+
+.app-detail-readme pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  background: var(--surface-muted, rgba(0, 0, 0, 0.04));
+  padding: 14px;
+  border-radius: 10px;
+  margin: 0;
+}

@@ -8,6 +8,7 @@ import { FilesPage } from "./pages/FilesPage";
 import { GatewaysPage } from "./pages/GatewaysPage";
 import { LaunchpadPage } from "./pages/LaunchpadPage";
 import { LoginPage } from "./pages/LoginPage";
+import { AppStorePage } from "./pages/AppStorePage";
 import { PluginsPage } from "./pages/PluginsPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { TerminalPage } from "./pages/TerminalPage";
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { to: "/profiles", labelKey: "navProfile", roles: ["admin", "user"] as Role[] },
   { to: "/wiki", labelKey: "navWiki", roles: ["admin", "user"] as Role[] },
   { to: "/csv", labelKey: "csvExport", roles: ["admin"] as Role[] },
+  { to: "/apps", labelKey: "navApps", roles: ["admin"] as Role[] },
   { to: "/plugins", labelKey: "navPlugins", roles: ["admin"] as Role[] },
 ];
 
@@ -208,6 +210,22 @@ function AuthenticatedApp() {
             element={
               <RequireRole roles={["admin"]}>
                 <PluginsPage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/apps"
+            element={
+              <RequireRole roles={["admin"]}>
+                <AppStorePage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/apps/:appId"
+            element={
+              <RequireRole roles={["admin"]}>
+                <AppStorePage />
               </RequireRole>
             }
           />

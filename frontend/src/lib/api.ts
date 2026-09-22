@@ -1,4 +1,5 @@
 import { appHref } from "./runtime";
+import type { AppCatalog, AppCatalogEntry, AppPackage } from "./appLibrary";
 
 export type DeviceEntry = {
   device_uid: string;
@@ -423,6 +424,15 @@ export const api = {
     }),
   visualization: () => request<{ items: VisualizationEntry[] }>("/visualization/latest"),
   terminalHelp: () => request<{ items: TerminalHelpEntry[] }>("/terminal/help"),
+  appLibraryIndex: (refresh = false) =>
+    request<AppCatalog>(`/app-library/index${refresh ? "?refresh=1" : ""}`),
+  appLibraryApp: (appId: string) =>
+    request<{ app: AppCatalogEntry }>(`/app-library/apps/${encodeURIComponent(appId)}`),
+  appLibraryPackage: (appId: string, version?: string) =>
+    request<{ package: AppPackage }>(`/app-library/apps/${encodeURIComponent(appId)}/package`, {
+      method: "POST",
+      body: version ? { version } : {},
+    }),
   queueDeviceCommand: (deviceUid: string, payload: Record<string, unknown>) =>
     request<QueuedCommandResponse>("/device-command", {
       method: "POST",
