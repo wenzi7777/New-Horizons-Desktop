@@ -14,6 +14,7 @@ from typing import Any, Callable
 from .arduino_protocol import CONTROL_PORT, is_arduino_heartbeat_packet, is_arduino_stream_packet, packet_device_uid, send_control_command
 from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_for_hardware_model
 from .packet_parser import PacketParseError, parse_binary_packet
+from .terminal import DEVICE_COMMAND_ALLOWLIST
 from .discovery import DiscoveryResponder
 from .hub_channel_watch import HubChannelWatcher
 from .udp_ingest import UDPIngestServer
@@ -94,6 +95,26 @@ class NewHorizonsService:
         "apply_update",
         "reboot",
         "set_transport",
+        # v1.0.0 kernel layer. The firmware gates none of these on maintenance
+        # mode, so they belong here rather than in MAINTENANCE_COMMANDS.
+        "task_list",
+        "service_list",
+        "service_restart",
+        "dmesg",
+        "crash_log",
+        "crash_clear",
+        "capabilities",
+        "config_schema",
+        "config_get",
+        "config_set",
+        "set_time",
+        "set_power_profile",
+        "app_list",
+        "app_enable",
+        "app_disable",
+        "app_revive",
+        "app_load_rules",
+        "app_unload_rules",
     }
     NORMAL_COMMANDS = SHARED_COMMANDS | {
         "enter_maintenance",
@@ -144,6 +165,13 @@ class NewHorizonsService:
     # concept to gate against.
     HUB_COMMANDS = {"set_config", "factory_reset"}
 
+    # Device commands the backend issues on its own behalf (hub migration, WiFi
+    # provisioning). They are deliberately absent from the terminal allowlist --
+    # users do not type them -- but they are real commands, so the existence
+    # check has to know about them.
+    INTERNAL_DEVICE_COMMANDS = {"set_transport", "set_wifi"}
+    KNOWN_DEVICE_COMMANDS = DEVICE_COMMAND_ALLOWLIST | INTERNAL_DEVICE_COMMANDS
+
     def __init__(self, autostart: bool = False, mock_mode: bool | None = None) -> None:
         self._lock = threading.RLock()
         self._mock_mode = mock_mode if mock_mode is not None else os.getenv("NEWHORIZONS_MOCK_MODE", "0") == "1"
@@ -166,6 +194,12 @@ class NewHorizonsService:
         self._latest_status: dict[str, dict[str, Any]] = {}
         self._latest_result: dict[str, dict[str, Any]] = {}
         self._csv_paths: dict[str, Path] = {}
+        # Mock-mode file uploads in progress, keyed by (device_uid, scope, path).
+        # The mock used to ack writes without storing anything, so an "uploaded"
+        # file never appeared in file_list and nothing could be installed from it.
+        self._mock_write_sessions: dict[tuple[str, str, str], dict[str, Any]] = {}
+        # Mock app roster per device, so the Apps UI is developable without hardware.
+        self._mock_apps: dict[str, list[dict[str, Any]]] = {}
         self._recording_enabled: set[str] = set()
         self._recording_errors: dict[str, str] = {}
         self._pending_commands: dict[str, dict[str, dict[str, Any]]] = {}
@@ -2010,26 +2044,11 @@ class NewHorizonsService:
                     "applied": True,
                     "reboot_required": True,
                 })
-            elif command == "file_write_begin":
-                result_payload.update({
-                    "message": "file_write_started",
-                    "scope": str(payload.get("scope", "user")),
-                    "path": payload.get("path", ""),
-                    "size": int(payload.get("size", 0)),
-                })
-            elif command == "file_write_chunk":
-                result_payload.update({
-                    "message": "file_write_chunk_written",
-                    "scope": str(payload.get("scope", "user")),
-                    "path": payload.get("path", ""),
-                    "written": int(payload.get("offset", 0)) + len(str(payload.get("data", ""))) // 2,
-                })
-            elif command == "file_write_finish":
-                result_payload.update({
-                    "message": "file_write_finished",
-                    "scope": str(payload.get("scope", "user")),
-                    "path": payload.get("path", ""),
-                })
+            elif command in ("app_list", "app_enable", "app_disable", "app_revive",
+                             "app_load_rules", "app_unload_rules"):
+                result_payload.update(self._mock_app_command(device_uid, command, payload))
+            elif command in ("file_write_begin", "file_write_chunk", "file_write_finish"):
+                result_payload.update(self._mock_file_write(device_uid, command, payload))
             elif command == "file_read_begin":
                 result_payload["path"] = payload.get("path", "")
                 result_payload["scope"] = str(payload.get("scope", "user"))
@@ -2043,12 +2062,7 @@ class NewHorizonsService:
                 result_payload["offset"] = offset
                 result_payload["data"] = self._mock_read_file(device_uid, path, str(payload.get("scope", "user")))[offset:offset + length]
             elif command == "file_delete":
-                result_payload.update({
-                    "message": "file_deleted",
-                    "scope": str(payload.get("scope", "user")),
-                    "path": payload.get("path", ""),
-                    "applied": True,
-                })
+                result_payload.update(self._mock_file_delete(device_uid, payload))
             elif command == "log_tail":
                 result_payload["lines"] = ["mock log line 1", "mock log line 2"]
             elif command in ("status", "memory_status"):
@@ -2739,11 +2753,14 @@ class NewHorizonsService:
     def _boot_command_mode_error_for_status(cls, status: dict[str, Any], payload: dict[str, Any]) -> str:
         command = str(payload.get("command") or payload.get("cmd") or "").strip()
         current_mode = cls._mode_from_payload(status)
+        # Existence is the allowlist's question; MODE_COMMANDS only answers
+        # "may it run in this mode". Deriving existence from the mode sets is
+        # what made every v1.0.0 kernel command fail as "unknown_command".
+        if command not in cls.KNOWN_DEVICE_COMMANDS:
+            return "unknown_command" if command else ""
         known_commands = set()
         for commands in cls.MODE_COMMANDS.values():
             known_commands.update(commands)
-        if command not in known_commands:
-            return "unknown_command" if command else ""
         if not current_mode:
             return ""
         if current_mode in ("safe", "safe-maintenance"):
@@ -3224,6 +3241,14 @@ class NewHorizonsService:
             },
         }
 
+        for device_uid in samples:
+            self._mock_apps[device_uid] = self._mock_default_apps()
+        # One device carries a killed app, so the overrun/revive UI has something
+        # real to render against. Killing "rules" rather than inventing a third
+        # app keeps the roster to what a v1.0.0 device actually has.
+        killed = next(a for a in self._mock_apps["NH-MOCK-002"] if a["name"] == "rules")
+        killed.update({"state": "killed", "overruns": 5, "last_us": 2130, "max_us": 2410})
+
         for device_uid, sample in samples.items():
             self._record_status(
                 device_uid,
@@ -3519,7 +3544,34 @@ class NewHorizonsService:
             return root / "calibration"
         return root / "files"
 
+    def _mock_proc_text(self, device_uid: str, path: str) -> str:
+        """Synthesise the firmware's /proc views so `--scope proc` is demoable."""
+        if path == "apps":
+            apps = self._mock_apps.setdefault(device_uid, self._mock_default_apps())
+            lines = ["NAME       STATE      BUDGET_US  LAST_US  MAX_US  OVERRUNS"]
+            for app in apps:
+                lines.append("{:<10} {:<10} {:>9}  {:>7}  {:>6}  {:>8}".format(
+                    app["name"], app["state"], app["budget_us"],
+                    app["last_us"], app["max_us"], app["overruns"]))
+            lines.append("")
+            lines.append("EVENTS")
+            lines.append("[18420] rules contact_begin rise")
+            return "\n".join(lines) + "\n"
+        if path == "tasks":
+            return ("NAME          INVOCATIONS  LAST_US  MAX_US  CPU_PERMILLE\n"
+                    "scan_stream         18422     4210    6100           412\n"
+                    "control              1841       90     220             6\n")
+        if path == "services":
+            return "NAME       STATE\nwifi       running\ncontrol    running\n"
+        return ""
+
     def _mock_files_for_device(self, device_uid: str, scope: str = "user") -> list[dict[str, Any]]:
+        if scope == "proc":
+            return [
+                {"scope": scope, "path": name, "name": name,
+                 "size": len(self._mock_proc_text(device_uid, name))}
+                for name in ("apps", "tasks", "services")
+            ]
         root = self._mock_scope_root(device_uid, scope)
         if not root.exists():
             if scope == "logs":
@@ -3537,6 +3589,154 @@ class NewHorizonsService:
             for path in sorted(root.rglob("*"))
             if path.is_file()
         ]
+
+    @staticmethod
+    def _mock_default_apps() -> list[dict[str, Any]]:
+        """The two apps a v1.0.0 device actually compiles in -- no invented ones.
+
+        Shapes match AppManager::statusJson() so the UI written against the mock
+        works unchanged against hardware.
+        """
+        return [
+            {
+                "name": "features", "version": "1.0.0", "state": "running",
+                "capabilities": 5, "budget_us": 400, "invocations": 18422,
+                "last_us": 244, "max_us": 361, "overruns": 0, "events": 12,
+                "state_detail": {
+                    "total_force": 41.7, "peak": 12.5, "peak01": 0.25, "peak_index": 98,
+                    "active_cells": 9, "centroid_row": 6.4, "centroid_col": 7.1,
+                    "in_contact": True, "contacts": 6, "frames": 18422,
+                },
+            },
+            {
+                "name": "rules", "version": "1.0.0", "state": "running",
+                "capabilities": 5, "budget_us": 1500, "invocations": 18422,
+                "last_us": 900, "max_us": 1180, "overruns": 0, "events": 6,
+                "state_detail": {
+                    "graph": "contact", "source": "apps/rules.json", "nodes": 4,
+                    "estimated_us": 880, "budget_us": 1500, "emissions": 6, "frames": 18422,
+                    "outputs": [{"op": "total", "result": 41.7, "bool": False}],
+                },
+            },
+        ]
+
+    def _mock_app_command(self, device_uid: str, command: str, payload: dict[str, Any]) -> dict[str, Any]:
+        apps = self._mock_apps.setdefault(device_uid, self._mock_default_apps())
+
+        def status_json() -> dict[str, Any]:
+            return {"frames": 18422, "count": len(apps), "apps": apps}
+
+        if command == "app_list":
+            return {"message": "app_list", "data": status_json()}
+
+        if command in ("app_enable", "app_disable", "app_revive"):
+            name = str(payload.get("name") or "")
+            if not name:
+                return {"ok": False, "status": "error", "error": "name_required"}
+            app = next((a for a in apps if a["name"] == name), None)
+            if app is None:
+                return {"ok": False, "status": "error",
+                        "error": "app_revive_failed" if command == "app_revive" else "app_state_change_rejected"}
+            if command == "app_revive":
+                if app["state"] != "killed":
+                    return {"ok": False, "status": "error", "error": "app_revive_failed"}
+                app["state"] = "running"
+                app["overruns"] = 0
+                return {"message": "app_revived", "data": status_json()}
+            # setEnabled() refuses to silently un-kill an app that blew its budget.
+            if app["state"] == "killed":
+                return {"ok": False, "status": "error", "error": "app_state_change_rejected"}
+            app["state"] = "running" if command == "app_enable" else "installed"
+            return {"message": "app_enabled" if command == "app_enable" else "app_disabled",
+                    "data": status_json()}
+
+        rules = next((a for a in apps if a["name"] == "rules"), None)
+        if rules is None:
+            return {"ok": False, "status": "error", "error": "rule_engine_unavailable"}
+
+        if command == "app_load_rules":
+            path = str(payload.get("path") or "apps/rules.json")
+            if self._mock_resolve_scope_path(device_uid, "user", path) is None:
+                return {"ok": False, "status": "error", "error": "rule_load_failed:file_not_found"}
+            rules["state_detail"] = dict(rules["state_detail"], source=path, graph=Path(path).stem)
+            return {"message": "rule_graph_loaded", "data": rules["state_detail"]}
+
+        # app_unload_rules
+        rules["state_detail"] = {"graph": "", "source": "", "nodes": 0, "estimated_us": 0,
+                                 "budget_us": 1500, "emissions": 0, "frames": 0, "outputs": []}
+        return {"message": "rule_graph_unloaded", "data": rules["state_detail"]}
+
+    def _mock_resolve_scope_path(self, device_uid: str, scope: str, raw_path: str) -> Path | None:
+        """Resolve a device-relative path inside a mock scope, or None if it escapes."""
+        if not raw_path or raw_path.startswith("/") or "\\" in raw_path or ".." in raw_path.split("/"):
+            return None
+        root = self._mock_scope_root(device_uid, scope).resolve()
+        target = (root / raw_path).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError:
+            return None
+        return target
+
+    def _mock_file_write(self, device_uid: str, command: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Mirror the firmware's three-step upload, actually storing the bytes.
+
+        The device enforces sequential offsets and a final size match; reproducing
+        that here is what makes the mock useful -- an upload that "succeeds" but
+        leaves no file behind cannot be installed from, and hides real bugs.
+        """
+        scope = str(payload.get("scope") or "user")
+        raw_path = str(payload.get("path") or "")
+        key = (device_uid, scope, raw_path)
+        if scope not in ("user", "logs", "calibration"):
+            return {"ok": False, "status": "error", "error": "read_only_scope"}
+        target = self._mock_resolve_scope_path(device_uid, scope, raw_path)
+        if target is None:
+            return {"ok": False, "status": "error", "error": "invalid_path"}
+        # The firmware caps a user-scope path at 24 chars (SPIFFS 31 minus "/files/").
+        if scope == "user" and len(raw_path) > 24:
+            return {"ok": False, "status": "error", "error": "path_too_long"}
+
+        if command == "file_write_begin":
+            self._mock_write_sessions[key] = {"expected": int(payload.get("size") or 0), "buffer": bytearray()}
+            return {"message": "file_write_started", "scope": scope, "path": raw_path,
+                    "size": int(payload.get("size") or 0)}
+
+        session = self._mock_write_sessions.get(key)
+        if session is None:
+            return {"ok": False, "status": "error", "error": "file_write_not_started"}
+
+        if command == "file_write_chunk":
+            offset = int(payload.get("offset") or 0)
+            if offset != len(session["buffer"]):
+                return {"ok": False, "status": "error", "error": "file_write_offset_mismatch"}
+            try:
+                chunk = bytes.fromhex(str(payload.get("data") or ""))
+            except ValueError:
+                return {"ok": False, "status": "error", "error": "invalid_hex_data"}
+            session["buffer"].extend(chunk)
+            return {"message": "file_write_chunk_written", "scope": scope, "path": raw_path,
+                    "written": len(session["buffer"])}
+
+        # file_write_finish
+        self._mock_write_sessions.pop(key, None)
+        if len(session["buffer"]) != session["expected"]:
+            return {"ok": False, "status": "error", "error": "file_write_incomplete"}
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(bytes(session["buffer"]))
+        return {"message": "file_write_finished", "scope": scope, "path": raw_path,
+                "size": len(session["buffer"])}
+
+    def _mock_file_delete(self, device_uid: str, payload: dict[str, Any]) -> dict[str, Any]:
+        scope = str(payload.get("scope") or "user")
+        raw_path = str(payload.get("path") or "")
+        target = self._mock_resolve_scope_path(device_uid, scope, raw_path)
+        if target is None:
+            return {"ok": False, "status": "error", "error": "invalid_path"}
+        if not target.exists():
+            return {"ok": False, "status": "error", "error": "file_delete_failed"}
+        target.unlink()
+        return {"message": "file_deleted", "scope": scope, "path": raw_path, "applied": True}
 
     def _mock_storage_usage(self, device_uid: str) -> dict[str, Any]:
         scopes: dict[str, int] = {}
@@ -3563,6 +3763,8 @@ class NewHorizonsService:
         }
 
     def _mock_read_file(self, device_uid: str, raw_path: str, scope: str = "user") -> str:
+        if scope == "proc":
+            return self._mock_proc_text(device_uid, raw_path.strip("/"))
         if not raw_path:
             files = self._mock_files_for_device(device_uid)
             raw_path = str(files[0]["path"]) if files else ""

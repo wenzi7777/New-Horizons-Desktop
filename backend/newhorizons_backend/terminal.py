@@ -76,6 +76,13 @@ DEVICE_COMMAND_ALLOWLIST = {
 }
 
 
+# Scopes the firmware's Storage exposes. "proc" is read-only: it is a synthetic
+# view (/proc/apps, /proc/tasks, ...) with no files behind it.
+READABLE_SCOPES = {"user", "logs", "calibration", "proc"}
+WRITABLE_SCOPES = {"user", "logs", "calibration"}
+WRITE_COMMANDS = {"file_write_begin", "file_write_chunk", "file_write_finish", "file_delete"}
+
+
 def validate_device_command_payload(payload: dict[str, Any]) -> dict[str, Any]:
     command = str(payload.get("command") or "").strip()
     if not command or command not in DEVICE_COMMAND_ALLOWLIST:
@@ -91,8 +98,13 @@ def validate_device_command_payload(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("invalid_battery_profile")
     if "scope" in result:
         scope = str(result.get("scope") or "user").strip()
-        if scope not in {"user", "logs", "calibration"}:
+        if scope not in READABLE_SCOPES:
             raise ValueError("invalid_scope")
+        # /proc is synthesised by the firmware and has no backing files, so a
+        # write against it can only ever fail on the device. Reject it here,
+        # where the error can still name the reason.
+        if scope not in WRITABLE_SCOPES and command in WRITE_COMMANDS:
+            raise ValueError("read_only_scope")
         result["scope"] = scope
     return result
 
@@ -421,6 +433,15 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "findme-discover": "findme_discover",
         "log-clear": "log_clear",
         "reboot": "reboot",
+        "task-list": "task_list",
+        "service-list": "service_list",
+        "crash-log": "crash_log",
+        "crash-clear": "crash_clear",
+        "dmesg": "dmesg",
+        "capabilities": "capabilities",
+        "config-schema": "config_schema",
+        "app-list": "app_list",
+        "app-unload-rules": "app_unload_rules",
     }
     if command in simple_commands:
         payload = {"command": simple_commands[command]}
@@ -667,6 +688,52 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         payload = {"command": "file_delete", "path": parsed["path"]}
         _add_scope(payload, parsed)
         return {"command": "file_delete", "payload": payload, "argv": argv}
+
+    if command == "service-restart":
+        parsed = _parse_options(args)
+        payload = {"command": "service_restart", "name": parsed["name"]}
+        return {"command": "service_restart", "payload": payload, "argv": argv}
+
+    if command == "config-get":
+        parsed = _parse_options(args)
+        payload = {"command": "config_get"}
+        # No --path means "dump every value"; the firmware treats an absent
+        # path exactly that way, so don't invent a default here.
+        if "path" in parsed:
+            payload["path"] = parsed["path"]
+        return {"command": "config_get", "payload": payload, "argv": argv}
+
+    if command == "config-set":
+        parsed = _parse_options(args)
+        payload = {"command": "config_set", "path": parsed["path"], "value": parsed["value"]}
+        return {"command": "config_set", "payload": payload, "argv": argv}
+
+    if command == "set-time":
+        parsed = _parse_options(args)
+        raw = parsed.get("epoch_ms", parsed.get("epoch"))
+        if raw is None:
+            raise ValueError("epoch_ms_required")
+        payload = {"command": "set_time", "epoch_ms": int(raw)}
+        return {"command": "set_time", "payload": payload, "argv": argv}
+
+    if command == "set-power-profile":
+        parsed = _parse_options(args)
+        payload = {"command": "set_power_profile", "profile": parsed["profile"]}
+        return {"command": "set_power_profile", "payload": payload, "argv": argv}
+
+    if command in ("app-enable", "app-disable", "app-revive"):
+        parsed = _parse_options(args)
+        resolved = command.replace("-", "_")
+        payload = {"command": resolved, "name": parsed["name"]}
+        return {"command": resolved, "payload": payload, "argv": argv}
+
+    if command == "app-load-rules":
+        parsed = _parse_options(args)
+        payload = {"command": "app_load_rules"}
+        # The firmware defaults to apps/rules.json when path is omitted.
+        if "path" in parsed:
+            payload["path"] = parsed["path"]
+        return {"command": "app_load_rules", "payload": payload, "argv": argv}
 
     if command == "log-tail":
         parsed = _parse_options(args)
