@@ -7,13 +7,16 @@ import {
   exportFiles,
   runtimeShares,
   sha256Hex,
+  type MatrixTarget,
   type SdkProject,
 } from "../../lib/sdkProject";
 import {
   DEFAULT_BUDGET_US,
+  LEGACY_MAX_NODES,
   MAX_NODES,
   MAX_PACKAGE_BYTES,
   WINDOW_POOL,
+  compareVersions,
   type Analysis,
   type Diagnostic,
   type FlowNode,
@@ -22,6 +25,7 @@ import {
 type Props = {
   project: SdkProject;
   analysis: Analysis;
+  target: MatrixTarget;
   onRevealLine: (line: number) => void;
 };
 
@@ -81,7 +85,7 @@ function DiagnosticRow({ diagnostic, onRevealLine }: { diagnostic: Diagnostic; o
   );
 }
 
-export function BuildPanel({ project, analysis, onRevealLine }: Props) {
+export function BuildPanel({ project, analysis, target, onRevealLine }: Props) {
   const { t } = useI18n();
   const [digest, setDigest] = useState<string | null>(null);
 
@@ -109,6 +113,8 @@ export function BuildPanel({ project, analysis, onRevealLine }: Props) {
   const nodes = (analysis.package?.nodes ?? []) as FlowNode[];
   const costByIndex = new Map(report?.breakdown.map((item) => [item.index, item.us]) ?? []);
   const manifestVersion = String(analysis.package?.manifest?.version ?? "");
+  // Accepted by current firmware, but not by the device chosen as the board.
+  const firmwareTooOld = Boolean(validation && target.firmware && compareVersions(target.firmware, validation.minOs) < 0);
 
   // A library app reopened here either still is the published package, or it
   // has been changed -- and a changed package must not reuse its version.
@@ -125,13 +131,29 @@ export function BuildPanel({ project, analysis, onRevealLine }: Props) {
 
   return (
     <div className="sdk-panel-body">
-      <div className={`sdk-verdict ${analysis.ok ? "ok" : "fail"}`}>
-        {analysis.ok ? <CheckCircle2 size={18} strokeWidth={2} /> : <XCircle size={18} strokeWidth={2} />}
+      <div className={`sdk-verdict ${analysis.ok ? (firmwareTooOld ? "warn" : "ok") : "fail"}`}>
+        {analysis.ok ? (firmwareTooOld ? <AlertTriangle size={18} strokeWidth={2} /> : <CheckCircle2 size={18} strokeWidth={2} />) : <XCircle size={18} strokeWidth={2} />}
         <div>
-          <strong>{analysis.ok ? t("sdkVerdictOk") : t("sdkVerdictFail").replace("{count}", String(errors.length))}</strong>
+          <strong>
+            {analysis.ok
+              ? firmwareTooOld && validation ? t("sdkVerdictOkNewer").replace("{minOs}", validation.minOs) : t("sdkVerdictOk")
+              : t("sdkVerdictFail").replace("{count}", String(errors.length))}
+          </strong>
           <p>{analysis.ok ? t("sdkVerdictOkDetail") : t("sdkVerdictFailDetail")}</p>
         </div>
       </div>
+
+      {firmwareTooOld && analysis.validation && target.firmware ? (
+        <p className="notice warning">
+          {t("sdkFirmwareTooOld")
+            .replace("{device}", target.label.split(" · ")[0])
+            .replace("{firmware}", target.firmware)
+            .replace("{minOs}", analysis.validation.minOs)}
+          {analysis.validation.nodes > LEGACY_MAX_NODES
+            ? ` ${t("sdkFirmwareTooOldNodes").replace("{nodes}", String(analysis.validation.nodes))}`
+            : ""}
+        </p>
+      ) : null}
 
       {originNote ? <p className={`notice ${originNote.tone === "neutral" ? "" : originNote.tone}`}>{originNote.text}</p> : null}
 

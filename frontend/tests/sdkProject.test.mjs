@@ -85,11 +85,14 @@ test("nothing is exported while the device would refuse the app", async () => {
 test("device targets come from each device's matrix shape", async () => {
   const { project } = await modules;
   const targets = project.deviceTargets([
-    { uid: "A", displayName: "Left insole", raw: { matrix_shape: { rows: 14, cols: 14 } } },
+    { uid: "A", displayName: "Left insole", firmwareVersion: "v1.2.3", raw: { matrix_shape: { rows: 14, cols: 14 } } },
     { uid: "B", displayName: "Unknown", raw: {} },
     { uid: "C", displayName: "Mat", raw: { last_status: { matrix_shape: { rows: 15, cols: 15 } } } },
   ]);
   assert.deepEqual(targets.map((t) => [t.key, t.rows * t.cols]), [["device:A", 196], ["device:C", 225]]);
+  // Carried so the Build tab can warn before an install would be refused.
+  assert.equal(targets[0].firmware, "v1.2.3");
+  assert.equal(targets[1].firmware, undefined);
 });
 
 test("the runtime share shrinks as more apps run", async () => {

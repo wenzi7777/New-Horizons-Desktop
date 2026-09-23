@@ -116,8 +116,18 @@ class PackageValidationTests(unittest.TestCase):
 
     def test_too_many_nodes(self):
         doc = json.loads(json.dumps(GOOD_PACKAGE))
-        doc["nodes"] = [{"op": "total"}] * 13
+        doc["nodes"] = [{"op": "total"}] * 25
         self.assertRejects(doc, "too_many_nodes")
+
+    def test_a_24_node_graph_is_accepted(self):
+        # Firmware v1.3.0 holds 24 nodes per graph.
+        doc = json.loads(json.dumps(GOOD_PACKAGE))
+        doc["manifest"]["min_os"] = "v1.3.0"
+        doc["nodes"] = [{"op": "total"}] * 22 + [
+            {"op": "threshold", "in": 0, "value": 10.0},
+            {"op": "emit", "in": 22, "event": "hit"},
+        ]
+        self.assertEqual(validate_package(doc)["nodes"], 24)
 
     def test_unknown_op(self):
         doc = json.loads(json.dumps(GOOD_PACKAGE))

@@ -26,6 +26,8 @@ export type MatrixTarget = {
   /** A device uid, or a preset key. */
   key: string;
   label: string;
+  /** The device's firmware, when the target is a device. */
+  firmware?: string;
 };
 
 /** Boards without a connected device to ask. 15x15 is the largest. */
@@ -264,7 +266,7 @@ export function runtimeShares(fps: number): { apps: number; us: number }[] {
  * Matrix shapes of the devices the backend knows, so an app is judged against
  * the board it will run on rather than the largest one.
  */
-export function deviceTargets(devices: { uid: string; displayName: string; raw: Record<string, any> }[]): MatrixTarget[] {
+export function deviceTargets(devices: { uid: string; displayName: string; firmwareVersion?: string; raw: Record<string, any> }[]): MatrixTarget[] {
   const targets: MatrixTarget[] = [];
   for (const device of devices) {
     const raw = device.raw;
@@ -272,7 +274,8 @@ export function deviceTargets(devices: { uid: string; displayName: string; raw: 
     const rows = Number(shape?.rows);
     const cols = Number(shape?.cols);
     if (Number.isInteger(rows) && Number.isInteger(cols) && rows > 0 && cols > 0) {
-      targets.push({ key: `device:${device.uid}`, rows, cols, label: `${device.displayName} · ${rows} × ${cols}` });
+      const firmware = device.firmwareVersion && device.firmwareVersion !== "unknown" ? device.firmwareVersion : undefined;
+      targets.push({ key: `device:${device.uid}`, rows, cols, label: `${device.displayName} · ${rows} × ${cols}`, firmware });
     }
   }
   return targets;

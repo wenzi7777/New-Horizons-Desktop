@@ -18,8 +18,9 @@ import { VisualizationPage } from "./pages/VisualizationPage";
 import { useI18n, type Locale } from "./i18n";
 import { useAuth } from "./lib/auth";
 
-// The SDK page carries a code editor; loaded on first visit so it stays out of
-// the bundle everyone else downloads.
+// App Studio carries a code editor; loaded on first visit so it stays out of
+// the bundle everyone else downloads. (Its files keep the "Sdk" name: the
+// compiler and simulator it runs are the App Library's SDK.)
 const SdkPage = lazy(() => import("./pages/SdkPage"));
 
 type Role = "admin" | "user";
@@ -33,7 +34,7 @@ const NAV_ITEMS = [
   { to: "/wiki", labelKey: "navWiki", roles: ["admin", "user"] as Role[] },
   { to: "/csv", labelKey: "csvExport", roles: ["admin"] as Role[] },
   { to: "/apps", labelKey: "navApps", roles: ["admin"] as Role[] },
-  { to: "/sdk", labelKey: "navSdk", roles: ["admin"] as Role[] },
+  { to: "/studio", labelKey: "navSdk", roles: ["admin"] as Role[] },
   { to: "/plugins", labelKey: "navPlugins", roles: ["admin"] as Role[] },
 ];
 
@@ -244,8 +245,10 @@ function AuthenticatedApp() {
               </RequireRole>
             }
           />
+          {/* v0.10.0 shipped this page at /sdk. */}
+          <Route path="/sdk" element={<Navigate to="/studio" replace />} />
           <Route
-            path="/sdk"
+            path="/studio"
             element={
               <RequireRole roles={["admin"]}>
                 <Suspense fallback={<p className="sdk-hint">{t("loading")}</p>}>

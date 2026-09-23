@@ -148,8 +148,8 @@ export function SdkPage() {
   // has not changed does not recompile the app -- which reset the emulator
   // and re-hashed the package once a second.
   const target = useMemo<MatrixTarget>(
-    () => ({ key: found.key, rows: found.rows, cols: found.cols, label: found.label }),
-    [found.key, found.rows, found.cols, found.label],
+    () => ({ key: found.key, rows: found.rows, cols: found.cols, label: found.label, firmware: found.firmware }),
+    [found.key, found.rows, found.cols, found.label, found.firmware],
   );
   const cellCount = target.rows * target.cols;
 
@@ -317,7 +317,7 @@ export function SdkPage() {
               </button>
             ))}
           </div>
-          {tab === "build" ? <BuildPanel project={active} analysis={analysis} onRevealLine={revealLine} /> : null}
+          {tab === "build" ? <BuildPanel project={active} analysis={analysis} target={target} onRevealLine={revealLine} /> : null}
           {tab === "emulator" ? (
             <EmulatorPanel key={active.id} analysis={analysis} target={target} devices={normalized} onMarkLines={markLines} />
           ) : null}

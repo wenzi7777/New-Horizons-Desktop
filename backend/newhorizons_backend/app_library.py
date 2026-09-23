@@ -36,7 +36,9 @@ DEFAULT_ALLOWED_HOSTS = ("raw.githubusercontent.com",)
 DEVICE_APP_DIR = "apps"
 APP_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
 RESERVED_APP_IDS = {"index"}
-MAX_RULE_NODES = 12
+# FlowApp::kMaxNodes since firmware v1.3.0 (12 before). A graph over 12 also
+# carries min_os v1.3.0, which the device itself checks against its version.
+MAX_RULE_NODES = 24
 MAX_PACKAGE_BYTES = 4096  # the firmware's parse buffer, for either kind
 MAX_EVENT_NAME = 23
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
