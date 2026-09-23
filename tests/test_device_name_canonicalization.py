@@ -47,5 +47,54 @@ class DeviceNameCanonicalizationTest(unittest.TestCase):
         )
 
 
+
+class DeviceNameStabilityTest(unittest.TestCase):
+    """A payload that carries no name must not rename the device.
+
+    Seen in the SDK's readout preview: it polls a device once a second, and
+    each command result (memory_status, app_list...) has no device_name, so
+    the device fell back to its bare UID; the next heartbeat named it
+    "NHOS-<UID>" again. Every device list flipped between the two.
+    """
+
+    def setUp(self):
+        self.service = NewHorizonsService(autostart=False, mock_mode=False)
+        self.names = []
+        original = self.service._emit_event
+
+        def capture(event):
+            if event.get("type") == "device_update":
+                self.names.append(event["item"].get("display_name"))
+            return original(event)
+
+        self.service._emit_event = capture
+        self.service._record_status(UID, {"device_uid": UID, "device_name": "NHOS-{}".format(UID), "mode": "normal"})
+
+    def _assert_name_kept(self):
+        self.assertEqual(self.service._devices[UID]["device_name"], "NHOS-{}".format(UID))
+        self.assertEqual(set(self.names), {"NHOS-{}".format(UID)}, self.names)
+
+    def test_a_command_result_without_a_name_keeps_the_name(self):
+        for command in ("memory_status", "app_list", "scan_health"):
+            self.service._record_result(UID, {
+                "device_uid": UID, "command": command, "status": "ok", "request_id": command,
+                "data": {"heap_free": 1},
+            })
+        self._assert_name_kept()
+
+    def test_a_status_without_a_name_keeps_the_name(self):
+        self.service._record_status(UID, {"device_uid": UID, "mode": "normal"})
+        self._assert_name_kept()
+
+    def test_a_device_seen_first_without_a_name_is_shown_by_its_uid(self):
+        other = "3CDC7545CCD1"
+        self.service._record_result(other, {"device_uid": other, "command": "memory_status", "status": "ok"})
+        self.assertEqual(self.service._decorate_device_entry(self.service._devices[other])["display_name"], other)
+
+    def test_a_real_rename_still_applies(self):
+        self.service._record_status(UID, {"device_uid": UID, "device_name": "Left insole", "mode": "normal"})
+        self.assertEqual(self.service._devices[UID]["device_name"], "Left insole")
+
+
 if __name__ == "__main__":
     unittest.main()

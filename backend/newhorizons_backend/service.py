@@ -2631,9 +2631,6 @@ class NewHorizonsService:
             entry["latest_sample"] = payload
             entry["visualization_source"] = source
             existing = self._devices.get(device_uid, {})
-            if existing.get("device_name") and entry.get("device_name") == device_uid:
-                entry["device_name"] = None
-                entry["display_name"] = None
             merged = self._merge_device_entry(existing, entry)
             # Arduino v5 carries battery telemetry on the high-rate stream.
             # Keep a valid sample in last_status as well as visualization so
@@ -2760,8 +2757,15 @@ class NewHorizonsService:
         update_state = payload.get("update_state")
         if update_state is None and kind == "result":
             update_state = self._update_state_from_result(payload)
-        device_name = str(payload.get("device_name") or system.get("name") or device_uid)
-        device_name = self._canonical_device_name(device_name, device_uid)
+        # A payload that does not name the device -- a stream frame, most
+        # command results -- leaves the name alone. Falling back to the UID
+        # here renamed the device on every such payload, and the next status
+        # named it back: a readout polling once a second made every device
+        # list flip between "NHOS-<UID>" and "<UID>". None is skipped by
+        # _merge_device_entry; a device never named is shown by its UID in
+        # _decorate_device_entry.
+        reported_name = str(payload.get("device_name") or system.get("name") or "")
+        device_name = self._canonical_device_name(reported_name, device_uid) if reported_name else None
         has_system_versions = any(key in payload for key in ("hardware_model", "firmware_version", "protocol"))
         system_summary = None
         if kind == "status" or system or has_system_versions:
