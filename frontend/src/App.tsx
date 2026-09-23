@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import packageJson from "../package.json";
 
@@ -17,6 +18,10 @@ import { VisualizationPage } from "./pages/VisualizationPage";
 import { useI18n, type Locale } from "./i18n";
 import { useAuth } from "./lib/auth";
 
+// The SDK page carries a code editor; loaded on first visit so it stays out of
+// the bundle everyone else downloads.
+const SdkPage = lazy(() => import("./pages/SdkPage"));
+
 type Role = "admin" | "user";
 const APP_VERSION = `v${packageJson.version}`;
 
@@ -28,6 +33,7 @@ const NAV_ITEMS = [
   { to: "/wiki", labelKey: "navWiki", roles: ["admin", "user"] as Role[] },
   { to: "/csv", labelKey: "csvExport", roles: ["admin"] as Role[] },
   { to: "/apps", labelKey: "navApps", roles: ["admin"] as Role[] },
+  { to: "/sdk", labelKey: "navSdk", roles: ["admin"] as Role[] },
   { to: "/plugins", labelKey: "navPlugins", roles: ["admin"] as Role[] },
 ];
 
@@ -235,6 +241,16 @@ function AuthenticatedApp() {
             element={
               <RequireRole roles={["admin"]}>
                 <AppStorePage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/sdk"
+            element={
+              <RequireRole roles={["admin"]}>
+                <Suspense fallback={<p className="sdk-hint">{t("loading")}</p>}>
+                  <SdkPage />
+                </Suspense>
               </RequireRole>
             }
           />

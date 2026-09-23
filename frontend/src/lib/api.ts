@@ -1,5 +1,5 @@
 import { appHref } from "./runtime";
-import type { AppCatalog, AppCatalogEntry, AppPackage } from "./appLibrary";
+import type { AppCatalog, AppCatalogEntry, AppPackage, AppSource } from "./appLibrary";
 
 export type DeviceEntry = {
   device_uid: string;
@@ -428,6 +428,8 @@ export const api = {
     request<AppCatalog>(`/app-library/index${refresh ? "?refresh=1" : ""}`),
   appLibraryApp: (appId: string) =>
     request<{ app: AppCatalogEntry }>(`/app-library/apps/${encodeURIComponent(appId)}`),
+  appLibrarySource: (appId: string) =>
+    request<{ source: AppSource }>(`/app-library/apps/${encodeURIComponent(appId)}/source`),
   appLibraryPackage: (appId: string, version?: string) =>
     request<{ package: AppPackage }>(`/app-library/apps/${encodeURIComponent(appId)}/package`, {
       method: "POST",

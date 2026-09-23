@@ -672,6 +672,16 @@ def create_blueprint(
             return _library_error(exc)
         return json_response({"app": entry})
 
+    @bp.get("/api/app-library/apps/<app_id>/source")
+    @auth
+    @_require_roles("admin")
+    def app_library_source(app_id: str) -> Response:
+        try:
+            source = get_library().fetch_source(app_id)
+        except (AppLibraryError, AppPackageError) as exc:
+            return _library_error(exc)
+        return json_response({"source": source})
+
     @bp.post("/api/app-library/apps/<app_id>/package")
     @auth
     @_require_roles("admin")

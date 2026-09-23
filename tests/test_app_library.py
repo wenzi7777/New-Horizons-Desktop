@@ -244,6 +244,66 @@ class CatalogCacheTests(LibraryTestCase):
         self.assertEqual(str(ctx.exception), "app_not_found")
 
 
+class SourceTests(LibraryTestCase):
+    """The SDK page opens a library app's source to edit it."""
+
+    DIST_URL = "https://raw.githubusercontent.com/x/y/main/dist/demo/demo-1.0.0.nha"
+
+    def test_the_source_is_found_beside_the_package(self):
+        index = make_index(package_bytes(), url=self.DIST_URL)
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            urlopen.side_effect = [FakeResponse(json.dumps(index).encode()), FakeResponse(b"app demo {}\n")]
+            source = self.lib.fetch_source("demo")
+        self.assertEqual(urlopen.call_args_list[1].args[0],
+                         "https://raw.githubusercontent.com/x/y/main/apps/demo/app.nhs")
+        self.assertEqual(source["kind"], "flow")
+        self.assertEqual(source["source"], "app demo {}\n")
+        # The page recompiles the source and checks it against this.
+        self.assertEqual(source["package_sha256"], index["apps"][0]["package"]["sha256"])
+
+    def test_a_readout_source_is_its_json(self):
+        index = make_index(package_bytes(), url=self.DIST_URL)
+        index["apps"][0]["kind"] = "readout"
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            urlopen.side_effect = [FakeResponse(json.dumps(index).encode()), FakeResponse(b"{}")]
+            source = self.lib.fetch_source("demo")
+        self.assertTrue(urlopen.call_args_list[1].args[0].endswith("/apps/demo/readout.json"))
+        self.assertEqual(source["filename"], "readout.json")
+
+    def test_the_source_is_served_from_cache_when_offline(self):
+        index = make_index(package_bytes(), url=self.DIST_URL)
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            urlopen.side_effect = [FakeResponse(json.dumps(index).encode()), FakeResponse(b"cached text")]
+            self.lib.fetch_source("demo")
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            urlopen.side_effect = urllib.error.URLError("offline")
+            self.assertEqual(self.lib.fetch_source("demo")["source"], "cached text")
+
+    def test_an_oversized_source_is_refused(self):
+        index = make_index(package_bytes(), url=self.DIST_URL)
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            urlopen.side_effect = [FakeResponse(json.dumps(index).encode()), FakeResponse(b"x" * (64 * 1024 + 1))]
+            with self.assertRaises(AppPackageError) as ctx:
+                self.lib.fetch_source("demo")
+        self.assertEqual(str(ctx.exception), "source_too_large")
+
+    def test_a_package_url_off_the_library_layout_has_no_source(self):
+        index = make_index(package_bytes())
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            urlopen.return_value = FakeResponse(json.dumps(index).encode())
+            with self.assertRaises(AppLibraryError) as ctx:
+                self.lib.fetch_source("demo")
+        self.assertEqual(str(ctx.exception), "source_unavailable")
+
+    def test_the_source_host_is_allowlisted_like_packages(self):
+        index = make_index(package_bytes(), url="https://evil.example/dist/demo/demo-1.0.0.nha")
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            urlopen.return_value = FakeResponse(json.dumps(index).encode())
+            with self.assertRaises(AppLibraryError) as ctx:
+                self.lib.fetch_source("demo")
+        self.assertEqual(str(ctx.exception), "package_host_not_allowed")
+
+
 class CacheKeyTests(LibraryTestCase):
     def test_a_cache_key_cannot_escape_the_cache_directory(self):
         for key in ("../../etc/passwd", "a/b", "..\\x"):

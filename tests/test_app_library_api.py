@@ -126,6 +126,22 @@ class AppLibraryApiTest(unittest.TestCase):
         self.assertEqual(len(bytes.fromhex(package["data_hex"])), package["size"])
         self.assertEqual(package["device_path"], "apps/demo.nha")
 
+    def test_a_library_app_source_is_served_to_an_admin(self):
+        client = self.create_client()
+        index = json.loads(json.dumps(INDEX))
+        index["apps"][0]["package"]["url"] = "https://raw.githubusercontent.com/x/y/main/dist/demo/demo-1.0.0.nha"
+        with patch("urllib.request.urlopen",
+                   side_effect=[FakeResponse(json.dumps(index).encode()), FakeResponse(b"app demo {}\n")]):
+            response = client.get("/newhorizons/api/app-library/apps/demo/source")
+        self.assertEqual(response.status_code, 200)
+        source = response.get_json()["source"]
+        self.assertEqual(source["source"], "app demo {}\n")
+        self.assertEqual(source["kind"], "flow")
+
+    def test_an_app_source_requires_an_admin(self):
+        client = self.create_client(login_as=None)
+        self.assertEqual(client.get("/newhorizons/api/app-library/apps/demo/source").status_code, 401)
+
     def test_importing_a_malformed_package_is_a_400(self):
         client = self.create_client()
         response = client.post("/newhorizons/api/app-library/import", data=b"{not json")

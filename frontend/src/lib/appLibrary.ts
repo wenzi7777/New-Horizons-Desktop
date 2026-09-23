@@ -19,6 +19,7 @@ export type AppCatalogEntry = {
   license?: string;
   category?: string;
   capabilities?: string[];
+  kind?: "flow" | "readout";
   min_os: string;
   nodes?: number;
   estimated_us?: number;
@@ -53,6 +54,17 @@ export type AppPackage = {
   cache_key: string;
   /** Hex, because `file_write_chunk` takes hex -- no re-encoding on the way out. */
   data_hex: string;
+};
+
+/** A library app's source, for the SDK page to open. */
+export type AppSource = {
+  id: string;
+  version: string;
+  kind: "flow" | "readout";
+  filename: string;
+  source: string;
+  /** What the source must compile to, byte for byte, if it is the published version. */
+  package_sha256?: string;
 };
 
 /** Resolve a localised catalog string, falling back to English. */

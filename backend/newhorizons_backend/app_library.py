@@ -53,7 +53,7 @@ READOUT_SOURCES = {
 }
 READOUT_SECTION_KINDS = {"stats", "table"}
 
-# Mirrors tools/opset.py. Kept as a flat set because this module's job is to
+# Mirrors the App Library's sdk/lib/opset.mjs. Kept as a flat set because this module's job is to
 # reject the impossible, not to estimate cost -- the device does that.
 # v1.1.0 renamed the engine from "rule" to "flow"; the op names did not change.
 KNOWN_OPS = {
@@ -66,6 +66,9 @@ KNOWN_OPS = {
 
 FETCH_TIMEOUT_SEC = 5
 DEFAULT_TTL_SEC = 900
+# An app's source is the text an author edits, not the package a device runs,
+# so it has no firmware limit -- but it is still remote input, so cap it.
+MAX_SOURCE_BYTES = 64 * 1024
 
 
 class AppLibraryError(Exception):
@@ -269,6 +272,49 @@ class AppLibrary:
                 raise AppLibraryError("package_unreachable") from exc
 
         return self._accept(raw, cache_key, expected_sha=expected_sha, expected_size=expected_size)
+
+    def fetch_source(self, app_id: str) -> dict[str, Any]:
+        """The source an app's package was built from, for the SDK page to open.
+
+        The catalog has no URL for it, so it is found where the library keeps
+        it: `apps/<id>/app.nhs` (or `readout.json`) under the same base as the
+        package. There is no checksum for source; the SDK page recompiles it
+        and compares the result against the package's sha256 instead, which is
+        a stronger check than a second hash would be.
+        """
+        _require(bool(APP_ID_RE.match(app_id)), "invalid_id")
+        entry = self.entry(app_id)
+        kind = "readout" if entry.get("kind") == "readout" else "flow"
+        filename = "readout.json" if kind == "readout" else "app.nhs"
+        package_url = str((entry.get("package") or {}).get("url") or "")
+        if "/dist/" not in package_url:
+            raise AppLibraryError("source_unavailable")
+        url = f"{package_url.split('/dist/', 1)[0]}/apps/{app_id}/{filename}"
+        self._check_host(url)
+
+        cache = self._cache_root / "sources" / f"{app_id}-{entry.get('version')}-{filename}"
+        try:
+            with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_SEC) as response:
+                raw = response.read(MAX_SOURCE_BYTES + 1)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            if not cache.exists():
+                raise AppLibraryError("source_unreachable") from exc
+            raw = cache.read_bytes()
+        _require(len(raw) <= MAX_SOURCE_BYTES, "source_too_large")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise AppPackageError("malformed_source") from exc
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_bytes(raw)
+        return {
+            "id": app_id,
+            "version": entry.get("version"),
+            "kind": kind,
+            "filename": filename,
+            "source": text,
+            "package_sha256": (entry.get("package") or {}).get("sha256"),
+        }
 
     def import_package(self, raw: bytes) -> dict[str, Any]:
         digest = hashlib.sha256(raw).hexdigest()
