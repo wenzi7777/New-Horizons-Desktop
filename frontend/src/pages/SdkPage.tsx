@@ -3,6 +3,7 @@ import { BookOpen, FilePlus2, FolderOpen, Library, Trash2, X } from "lucide-reac
 
 import { BuildPanel } from "../components/sdk/BuildPanel";
 import { CodeEditor, type CodeEditorHandle } from "../components/sdk/CodeEditor";
+import { EmulatorPanel } from "../components/sdk/EmulatorPanel";
 import { ReferencePanel } from "../components/sdk/ReferencePanel";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { useI18n } from "../i18n";
@@ -29,7 +30,7 @@ import {
 } from "../lib/sdkProject";
 import { analyzeFlow, analyzeReadout, type Analysis } from "../sdk/lib/index.mjs";
 
-type Tab = "build" | "reference";
+type Tab = "build" | "emulator" | "reference";
 
 const ANALYZE_DELAY_MS = 150;
 const SAVE_DELAY_MS = 400;
@@ -132,6 +133,11 @@ export function SdkPage() {
   const [confirmDelete, setConfirmDelete] = useState<SdkProject | null>(null);
   const [storageFailed, setStorageFailed] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [markedLines, setMarkedLines] = useState<Set<number>>(() => new Set());
+  const markLines = useCallback((lines: Set<number>) => {
+    // Most frames emit nothing; skip the editor update when nothing changes.
+    setMarkedLines((current) => (current.size === 0 && lines.size === 0 ? current : lines));
+  }, []);
 
   const active = projects.find((project) => project.id === activeId) ?? projects[0];
 
@@ -204,6 +210,7 @@ export function SdkPage() {
   const revealLine = (line: number) => editorRef.current?.revealLine(line);
   const tabs: { id: Tab; label: string }[] = [
     { id: "build", label: t("sdkTabBuild") },
+    { id: "emulator", label: t("sdkTabEmulator") },
     { id: "reference", label: t("sdkTabReference") },
   ];
 
@@ -287,6 +294,7 @@ export function SdkPage() {
             language={active.kind === "flow" ? "nhs" : "json"}
             diagnostics={pending.id === active.id && pending.source === active.source ? analysis.diagnostics : []}
             symbols={lastGoodReport.current}
+            markedLines={tab === "emulator" ? markedLines : undefined}
             onChange={updateSource}
             ariaLabel={t("sdkEditor")}
           />
@@ -301,6 +309,9 @@ export function SdkPage() {
             ))}
           </div>
           {tab === "build" ? <BuildPanel project={active} analysis={analysis} onRevealLine={revealLine} /> : null}
+          {tab === "emulator" ? (
+            <EmulatorPanel key={active.id} analysis={analysis} target={target} devices={normalized} onMarkLines={markLines} />
+          ) : null}
           {tab === "reference" ? <ReferencePanel kind={active.kind} /> : null}
         </section>
       </div>

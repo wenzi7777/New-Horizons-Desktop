@@ -63,6 +63,8 @@ export type BackendHealth = {
 export type VisualizationEntry = {
   dn: string;
   sn: number;
+  /** The device's own frame sequence number (frame.seq); app events carry the same one. */
+  frame_id?: number;
   p: number[];
   raw_adc?: number[] | null;
   ts?: number;

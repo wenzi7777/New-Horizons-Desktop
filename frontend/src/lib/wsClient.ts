@@ -33,6 +33,10 @@ const pendingCommands = new Map<string, PendingCommand>();
 const pendingGatewayCommands = new Map<string, PendingGatewayCommand>();
 const subscribedVisualizations = new Set<string>();
 const pendingVisualizationFrames = new Map<string, VisualizationEntry>();
+// Every sample as it arrives, before the UI batching below keeps only the
+// latest per device. The SDK's live emulator needs each one: a debounce or a
+// window evaluated over a thinned stream is a different computation.
+const visualizationListeners = new Set<(item: VisualizationEntry) => void>();
 const VISUALIZATION_UI_TARGET_FPS = 60;
 const VISUALIZATION_UI_FRAME_INTERVAL_MS = 1000 / VISUALIZATION_UI_TARGET_FPS;
 
@@ -126,6 +130,7 @@ function mergeVisualization(item: VisualizationEntry) {
   const stamped = { ...item, received_at_ms: receivedAt };
   const deviceUid = normalizeUid(stamped.dn);
   if (!deviceUid) return;
+  visualizationListeners.forEach((listener) => listener(stamped));
   pendingVisualizationFrames.set(deviceUid, stamped);
   scheduleVisualizationFlush();
 }
@@ -402,6 +407,14 @@ export function unsubscribeVisualization(deviceUid: string) {
   if (socket && socket.readyState === WebSocket.OPEN) {
     send({ type: "unsubscribe_visualization", device_uid: deviceUid });
   }
+}
+
+/** Receive every visualization sample, unbatched. Returns an unsubscribe. */
+export function addVisualizationListener(listener: (item: VisualizationEntry) => void): () => void {
+  visualizationListeners.add(listener);
+  return () => {
+    visualizationListeners.delete(listener);
+  };
 }
 
 export function setRecording(deviceUid: string, enabled: boolean) {

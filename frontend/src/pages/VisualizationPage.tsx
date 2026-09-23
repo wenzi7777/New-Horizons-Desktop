@@ -9,6 +9,7 @@ import { boardProfileForHardwareModel } from "../lib/boardProfile";
 import { isHubRelayed, normalizeDevice } from "../lib/device";
 import { connectionRank, connectionStateLabel, deviceClassName, statusDot } from "../lib/deviceStatus";
 import { fitProfileRect, profilePointToScreen, profilePointToWorld, type FittedProfileRect } from "../lib/profileLayout";
+import { cssColorForValue, valueRatio } from "../lib/pressureColor";
 import { useI18n } from "../i18n";
 import { useWsState } from "../lib/wsClient";
 
@@ -176,11 +177,6 @@ function profileMatrixShape(profile: ProfileData | null | undefined) {
   return null;
 }
 
-function valueRatio(value: number, range: { min: number; max: number }) {
-  const span = Math.max(range.max - range.min, 1);
-  return clamp((value - range.min) / span, 0, 1);
-}
-
 function rangeForProfile(profile: ProfileData | null | undefined, fallback: { min: number; max: number }) {
   const min = asFiniteNumber(profile?.display?.pressureMin, fallback.min);
   const max = asFiniteNumber(profile?.display?.pressureMax, fallback.max);
@@ -254,13 +250,6 @@ function calibrationDisplayRange(calibrationState: CalibrationStateSummary, fall
     return fallback;
   }
   return { min: 0, max: Math.max(maxLevel, 1) };
-}
-
-function cssColorForValue(value: number, range: { min: number; max: number }) {
-  const ratio = valueRatio(value, range);
-  const hue = 154 - ratio * 108;
-  const lightness = 78 - ratio * 30;
-  return `hsl(${hue}deg 58% ${lightness}%)`;
 }
 
 function threeColorForValue(value: number, range: { min: number; max: number }) {
