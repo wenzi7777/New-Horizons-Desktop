@@ -44,8 +44,9 @@ MAX_EVENT_NAME = 23
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 MIN_OS_RE = re.compile(r"^v?\d+\.\d+\.\d+$")
 
-# button and display since firmware v1.4.0 (the OLED and the action button).
-CAPABILITIES = {"read_matrix", "read_imu", "emit_event", "drive_led", "write_file", "button", "display"}
+# button and display since firmware v1.4.0 (the OLED and the action button);
+# drive_ext_led since v1.5.0 (the external LED strip).
+CAPABILITIES = {"read_matrix", "read_imu", "emit_event", "drive_led", "write_file", "button", "display", "drive_ext_led"}
 
 # Commands a readout may poll. Enforced here as well as in the library's CI:
 # a package can arrive from a hand-edited catalog, and nothing that renders in
@@ -67,6 +68,8 @@ KNOWN_OPS = {
     "led", "emit_value", "select", "gate", "budget_load", "grace_left",
     # v1.4.0: the OLED and the action button
     "mod", "button", "oled_text", "oled_bar",
+    # v1.5.0: the external LED strip
+    "ext_pixel", "ext_meter",
 }
 
 FETCH_TIMEOUT_SEC = 5

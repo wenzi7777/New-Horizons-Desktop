@@ -2,8 +2,9 @@
 // samples into frames, noticing the frames the browser never saw, and moving
 // a simulation to any point of a recording.
 
-import { Simulator, type Frame, type SimEvent } from "../sdk/lib/index.mjs";
+import { PRESSURE_FULL_SCALE, Simulator, type Frame, type SimEvent } from "../sdk/lib/index.mjs";
 import type { VisualizationEntry } from "./api";
+import type { SynthPattern } from "./sdkProject";
 
 /** A live sample as a simulator frame, or null if it carries no pressures. */
 export function frameFromSample(entry: VisualizationEntry, shape: { rows: number; cols: number }, fallbackSeq: number): Frame | null {
@@ -161,4 +162,159 @@ export function linesForEvents(pkg: Record<string, any>, nodeLines: readonly num
     }
   });
   return lines;
+}
+
+// --- generated frames ----------------------------------------------------------
+
+/** The scan rate a virtual device runs at, as the Build tab assumes. */
+export const SYNTH_FPS = 60;
+/** Peak of a generated press: firm, clear of any sensible threshold's floor. */
+const PRESS_PEAK = 0.7;
+/** Top of the noise slider, as a share of full scale. */
+const NOISE_CEILING = 0.1;
+/** A held mouse press reaches its peak after this long; a release fades in RELEASE_MS. */
+const MOUSE_RISE_MS = 600;
+const MOUSE_PEAK = 0.9;
+const RELEASE_MS = 200;
+
+type Blob = { row: number; col: number; amp: number };
+
+/** Seeded, so a test (or a reset) sees the same noise again. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** A smooth 0 -> 1 -> 0 over `length`, flat at 1 between the two ramps. */
+function envelope(t: number, length: number, ramp: number): number {
+  if (t < 0 || t > length) return 0;
+  if (t < ramp) return t / ramp;
+  if (t > length - ramp) return (length - t) / ramp;
+  return 1;
+}
+
+/**
+ * Where a preset pattern presses at `t` ms into its run, or null between
+ * presses. Every pattern repeats, so a debounce or a window sees it more than
+ * once without the author restarting.
+ */
+export function patternBlob(pattern: SynthPattern, t: number, rows: number, cols: number): Blob | null {
+  const row = (rows - 1) / 2;
+  const col = (cols - 1) / 2;
+  switch (pattern) {
+    case "tap": {
+      // A 250 ms tap every 2 s.
+      const at = t % 2000;
+      return at < 250 ? { row, col, amp: PRESS_PEAK * Math.sin((Math.PI * at) / 250) } : null;
+    }
+    case "hold": {
+      // Half a second free, then held for 3 s.
+      const at = (t % 4000) - 500;
+      const amp = envelope(at, 3000, 150);
+      return amp > 0 ? { row, col, amp: PRESS_PEAK * amp } : null;
+    }
+    case "swipe": {
+      // Across the middle row, edge to edge in 2 s, then a second free.
+      const at = t % 3000;
+      if (at >= 2000) return null;
+      return { row, col: -0.5 + (cols * at) / 2000, amp: PRESS_PEAK * envelope(at, 2000, 100) };
+    }
+    case "ramp": {
+      // From nothing to full scale over 4 s, then released.
+      const at = t % 5000;
+      return at < 4000 ? { row, col, amp: at / 4000 } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Frames for a virtual device: a preset pattern, a press the author makes
+ * with the mouse, and background noise, summed and clipped to full scale.
+ */
+export class SyntheticFeed {
+  private seq = 0;
+  private startMs: number | null = null;
+  private held: { row: number; col: number; since: number } | null = null;
+  private fading: { row: number; col: number; at: number; amp: number } | null = null;
+  private random: () => number;
+  private currentPattern: SynthPattern;
+  /** Background noise, 0..1 of the noise ceiling. */
+  noise: number;
+
+  constructor(
+    readonly rows: number,
+    readonly cols: number,
+    options: { pattern: SynthPattern; noise: number; seed?: number },
+  ) {
+    this.random = mulberry32(options.seed ?? 1);
+    this.currentPattern = options.pattern;
+    this.noise = options.noise;
+  }
+
+  get pattern(): SynthPattern {
+    return this.currentPattern;
+  }
+
+  /** Changing the pattern starts it from its beginning on the next frame. */
+  set pattern(pattern: SynthPattern) {
+    if (pattern === this.currentPattern) return;
+    this.currentPattern = pattern;
+    this.startMs = null;
+  }
+
+  /** Press at a cell, move there while pressed, or release with null. */
+  press(cell: { row: number; col: number } | null, nowMs: number) {
+    if (cell) {
+      this.held = this.held ? { ...this.held, row: cell.row, col: cell.col } : { ...cell, since: nowMs };
+      this.fading = null;
+    } else if (this.held) {
+      this.fading = { row: this.held.row, col: this.held.col, at: nowMs, amp: this.mouseAmp(nowMs) };
+      this.held = null;
+    }
+  }
+
+  private mouseAmp(nowMs: number): number {
+    // Frames are made in batches, some stamped a little before the press.
+    const unit = (value: number) => Math.min(1, Math.max(0, value));
+    if (this.held) return MOUSE_PEAK * unit((nowMs - this.held.since) / MOUSE_RISE_MS);
+    if (this.fading) return this.fading.amp * unit(1 - (nowMs - this.fading.at) / RELEASE_MS);
+    return 0;
+  }
+
+  frame(nowMs: number): Frame {
+    if (this.startMs === null) this.startMs = nowMs;
+    const { rows, cols } = this;
+    const values = new Float32Array(rows * cols);
+    // About a sixth of the short side, so a press covers a few cells on any board.
+    const sigma = Math.max(0.8, Math.min(rows, cols) / 6);
+    const blobs: Blob[] = [];
+    const preset = patternBlob(this.currentPattern, nowMs - this.startMs, rows, cols);
+    if (preset) blobs.push(preset);
+    const mouse = this.mouseAmp(nowMs);
+    const at = this.held ?? this.fading;
+    if (mouse > 0 && at) blobs.push({ row: at.row, col: at.col, amp: mouse });
+    else if (!this.held) this.fading = null;
+    const noise = this.noise * NOISE_CEILING * PRESSURE_FULL_SCALE;
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        let value = noise > 0 ? noise * this.random() : 0;
+        for (const blob of blobs) {
+          const d2 = (r - blob.row) ** 2 + (c - blob.col) ** 2;
+          value += PRESSURE_FULL_SCALE * blob.amp * Math.exp(-d2 / (2 * sigma * sigma));
+        }
+        values[r * cols + c] = Math.min(PRESSURE_FULL_SCALE, value);
+      }
+    }
+    const frame = { seq: this.seq, timestampMs: Math.trunc(nowMs), values, rows, cols };
+    this.seq += 1;
+    return frame;
+  }
 }

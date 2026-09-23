@@ -95,6 +95,42 @@ test("device targets come from each device's matrix shape", async () => {
   assert.equal(targets[1].firmware, undefined);
 });
 
+test("device targets name the board when its hardware model is known", async () => {
+  const { project } = await modules;
+  const [known, unknown] = project.deviceTargets([
+    { uid: "A", displayName: "NHOS-A", hardwareModel: "VD-CTL/R v1.5.F 2026.7", raw: { matrix_shape: { rows: 2, cols: 2 } } },
+    { uid: "B", displayName: "NHOS-B", hardwareModel: "VD-CTL/R v9.9 2027.1", raw: { matrix_shape: { rows: 5, cols: 5 } } },
+  ]);
+  assert.equal(known.label, "NHOS-A · v1.5.F · 2 × 2");
+  assert.equal(known.board.externalLeds, 9);
+  // A board this list does not know yet still gets a short name.
+  assert.equal(unknown.label, "NHOS-B · v9.9 · 5 × 5");
+  assert.equal(unknown.board, undefined);
+});
+
+test("boards mirror the firmware's BoardConfig.h", async () => {
+  const { project } = await modules;
+  const shapes = Object.fromEntries(project.BOARDS.map((b) => [b.id, [b.rows, b.cols, b.oled, b.button, b.externalLeds]]));
+  assert.deepEqual(shapes, {
+    v23d: [15, 15, false, false, 0],
+    v10f: [10, 21, true, true, 3],
+    v15f: [14, 14, true, true, 9],
+    v22c: [11, 13, false, false, 0],
+    v21: [10, 12, false, false, 0],
+  });
+});
+
+test("a virtual device's matrix stays within its board", async () => {
+  const { project } = await modules;
+  const board = project.boardById("v21");
+  assert.deepEqual(project.clampShape(board, 40, 0), { rows: 10, cols: 1 });
+  assert.deepEqual(project.clampShape(board, 3.7, 5), { rows: 3, cols: 5 });
+  const target = project.virtualTarget({ ...project.defaultVirtualDevice(), boardId: "v21", rows: 4, cols: 6 }, "Virtual");
+  assert.equal(target.key, project.VIRTUAL_TARGET_KEY);
+  assert.equal(target.label, "Virtual · v2.1 GCU LTS · 4 × 6");
+  assert.equal(target.rows * target.cols, 24);
+});
+
 test("the runtime share shrinks as more apps run", async () => {
   const { project } = await modules;
   const shares = project.runtimeShares(60);

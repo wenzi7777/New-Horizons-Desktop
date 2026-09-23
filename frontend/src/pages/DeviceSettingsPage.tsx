@@ -2811,6 +2811,7 @@ export function DeviceSettingsPage() {
                       <option value="identify">{t("indicatorPreset_identify")}</option>
                       <option value="off">{t("indicatorPreset_off")}</option>
                     </select>
+                    <p className="service-muted">{t("externalLedAppPriority")}</p>
                   </div>
                   <div className="field">
                     <label>{t("paramBrightness")}</label>
@@ -2837,11 +2838,12 @@ export function DeviceSettingsPage() {
                     </div>
                   ) : null}
                 </div>
+                {externalLed.active_preset === "app" ? <p className="notice">{t("externalLedAppActive")}</p> : null}
                 <div className="metric-row">
                   <Metric label={t("externalLedPin")} value={externalLed.pin ?? "-"} />
                   <Metric label={t("externalLedCount")} value={externalLed.count ?? "-"} />
                   <Metric label={t("externalLedInitialized")} value={boolString(externalLed.initialized)} />
-                  <Metric label={t("activePreset")} value={externalLed.active_preset ?? "-"} />
+                  <Metric label={t("activePreset")} value={externalLed.active_preset === "app" ? t("indicatorPreset_app") : externalLed.active_preset ?? "-"} />
                   <Metric label={t("externalLedLastShow")} value={externalLed.last_show_ms ?? "-"} />
                   <Metric label={t("externalLedLastError")} value={externalLed.last_error ?? "-"} />
                 </div>

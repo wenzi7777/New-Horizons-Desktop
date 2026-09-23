@@ -40,9 +40,10 @@ export const nhsLanguage = StreamLanguage.define<State>({
       }
       if (STATEMENTS.has(text)) {
         // The word after `region`, `signal`, `event` and `emit` names
-        // something; after `app` it names the app. `show` and `bar` start
-        // with a row number, so their first word is a value, not a name.
-        state.afterDeclarator = !["led", "gate", "show", "bar"].includes(text);
+        // something; after `app` it names the app. `show`, `bar` and `pixel`
+        // start with a number and `meter` with an expression, so their first
+        // word is a value, not a name.
+        state.afterDeclarator = !["led", "gate", "show", "bar", "pixel", "meter"].includes(text);
         return "keyword";
       }
       if (KEYWORDS.has(text)) return "keyword";

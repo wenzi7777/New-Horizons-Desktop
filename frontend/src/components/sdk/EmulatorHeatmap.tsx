@@ -11,6 +11,11 @@ type Props = {
   /** The app's regions, drawn in device coordinates -- row 0 at the top. */
   regions: Record<string, Region>;
   ariaLabel: string;
+  /**
+   * Makes the matrix pressable: called with the cell under a held pointer as
+   * it moves, and with null when it lifts.
+   */
+  onPress?: (cell: { row: number; col: number } | null) => void;
 };
 
 const GAP = 2;
@@ -21,7 +26,7 @@ const REGION_COLOURS = ["#0a84ff", "#ff9f0a", "#bf5af2", "#30b0c7", "#ff375f", "
  * with no mirroring or profile layout, so a region drawn here covers exactly
  * the cells its sum() adds up.
  */
-export function EmulatorHeatmap({ frame, rows, cols, range, regions, ariaLabel }: Props) {
+export function EmulatorHeatmap({ frame, rows, cols, range, regions, ariaLabel, onPress }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
   const [width, setWidth] = useState(0);
@@ -98,22 +103,43 @@ export function EmulatorHeatmap({ frame, rows, cols, range, regions, ariaLabel }
     });
   }, [frame, rows, cols, range, regions, cell, cssWidth, cssHeight]);
 
+  const cellAt = (event: { clientX: number; clientY: number; currentTarget: HTMLCanvasElement }) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const col = Math.floor((event.clientX - bounds.left - GAP / 2) / (cell + GAP));
+    const row = Math.floor((event.clientY - bounds.top - GAP / 2) / (cell + GAP));
+    return row >= 0 && row < rows && col >= 0 && col < cols ? { row, col } : null;
+  };
+  const pressing = useRef(false);
+  const release = () => {
+    if (!pressing.current) return;
+    pressing.current = false;
+    onPress?.(null);
+  };
+
   const hoverValue = hover && frame ? Number(frame.values[hover.row * cols + hover.col] ?? 0) : null;
 
   return (
-    <div className="sdk-heatmap">
+    <div className={`sdk-heatmap${onPress ? " pressable" : ""}`}>
       <canvas
         ref={canvasRef}
         style={{ width: `${cssWidth}px`, height: `${cssHeight}px` }}
         role="img"
         aria-label={ariaLabel}
-        onMouseMove={(event) => {
-          const bounds = event.currentTarget.getBoundingClientRect();
-          const col = Math.floor((event.clientX - bounds.left - GAP / 2) / (cell + GAP));
-          const row = Math.floor((event.clientY - bounds.top - GAP / 2) / (cell + GAP));
-          setHover(row >= 0 && row < rows && col >= 0 && col < cols ? { row, col } : null);
+        onPointerDown={onPress ? (event) => {
+          const at = cellAt(event);
+          if (!at) return;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          pressing.current = true;
+          onPress(at);
+        } : undefined}
+        onPointerMove={(event) => {
+          const at = cellAt(event);
+          setHover(at);
+          if (pressing.current && at) onPress?.(at);
         }}
-        onMouseLeave={() => setHover(null)}
+        onPointerUp={release}
+        onPointerCancel={release}
+        onPointerLeave={() => setHover(null)}
       />
       <div className="sdk-heatmap-caption sdk-mono">
         {hover ? `row ${hover.row}, col ${hover.col} · #${hover.row * cols + hover.col}${hoverValue !== null ? ` = ${hoverValue.toFixed(1)}` : ""}` : `${rows} × ${cols}`}

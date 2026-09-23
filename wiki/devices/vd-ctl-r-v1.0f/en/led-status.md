@@ -88,6 +88,7 @@ The external WS2812B strip (3 pixels, GPIO 12) operates independently from the o
 - Soft-off sleep forces the strip off until the board wakes again.
 - Power transition animations override the preset: shutdown plays a white step/fade sequence and wake plays a cyan fill handoff.
 - A one-shot `identify` trigger temporarily overrides the current preset, then returns to the configured preset when the chase finishes.
+- From firmware v1.5.0, a running app that uses `pixel` or `meter` takes the strip over from the preset (`active_preset` reads `app`) and hands it back when the app stops. `mode` and brightness still apply: with the strip `off`, an app shows nothing.
 
 ### Design Notes
 

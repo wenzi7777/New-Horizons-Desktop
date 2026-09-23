@@ -6844,13 +6844,28 @@ button:disabled {
   flex: none;
 }
 
-.sdk-target select {
+button.sdk-target {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--panel-solid);
-  padding: 4px 6px;
-  font-size: 12px;
-  max-width: 220px;
+  padding: 4px 8px;
+  min-width: 0;
+  cursor: pointer;
+  flex: 0 1 auto;
+  transition: border-color var(--dur-fast, 120ms) var(--ease-out);
+}
+
+button.sdk-target:hover {
+  border-color: var(--accent);
+}
+
+.sdk-target strong {
+  font-weight: 600;
+  color: var(--text);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sdk-editor-host {
@@ -7337,6 +7352,7 @@ button.sdk-diagnostic:hover {
 }
 
 .sdk-field select,
+.sdk-shape-inputs input,
 .sdk-transport select {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
@@ -7439,6 +7455,78 @@ button.sdk-diagnostic:hover {
 .sdk-heatmap canvas {
   display: block;
   border-radius: var(--radius-md);
+}
+
+.sdk-heatmap.pressable canvas {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.sdk-field-shape {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.sdk-shape-inputs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+}
+
+.sdk-shape-inputs input {
+  width: 58px;
+}
+
+.sdk-shape-inputs input:disabled {
+  opacity: 0.6;
+}
+
+.sdk-field input[type="range"] {
+  width: 100%;
+}
+
+.sdk-board-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.sdk-chip.off {
+  opacity: 0.55;
+}
+
+.sdk-strip {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: #101317;
+  width: fit-content;
+}
+
+.sdk-strip-pixel {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #2c2c2e;
+  color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sdk-strip-pixel.lit {
+  box-shadow: 0 0 10px 1px currentColor;
+}
+
+.sdk-strip-pixel small {
+  font-size: 9px;
+  color: #8e8e93;
+  mix-blend-mode: difference;
 }
 
 .sdk-heatmap-caption {

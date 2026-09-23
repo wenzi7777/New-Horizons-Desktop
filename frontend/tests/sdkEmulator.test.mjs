@@ -135,3 +135,56 @@ test("the whole-run timeline sees the same presses", async () => {
   assert.deepEqual(emu.simulateAll(pkg, frames([0, 0, 0]), new Set([2])).map((e) => e.frameSeq), [102]);
   assert.deepEqual(emu.simulateAll(pkg, frames([0, 0, 0])), []);
 });
+
+test("generated patterns press and release on their schedule", async () => {
+  const { emu } = await modules;
+  // A tap: pressed at 125 ms, free again by 500 ms, pressed again next cycle.
+  assert.ok(emu.patternBlob("tap", 125, 15, 15).amp > 0.6);
+  assert.equal(emu.patternBlob("tap", 500, 15, 15), null);
+  assert.ok(emu.patternBlob("tap", 2125, 15, 15).amp > 0.6);
+  // A swipe crosses the columns left to right.
+  const early = emu.patternBlob("swipe", 300, 5, 7);
+  const late = emu.patternBlob("swipe", 1700, 5, 7);
+  assert.ok(early.col < late.col);
+  assert.equal(emu.patternBlob("none", 100, 5, 5), null);
+});
+
+test("a synthetic feed makes frames of its shape, within full scale", async () => {
+  const { emu, sdk } = await modules;
+  const feed = new emu.SyntheticFeed(3, 4, { pattern: "ramp", noise: 1, seed: 7 });
+  const first = feed.frame(0);
+  assert.equal(first.values.length, 12);
+  assert.deepEqual([first.rows, first.cols, first.seq], [3, 4, 0]);
+  const peak = feed.frame(3999);
+  assert.equal(peak.seq, 1);
+  for (const value of peak.values) assert.ok(value >= 0 && value <= sdk.PRESSURE_FULL_SCALE);
+  assert.ok(Math.max(...peak.values) > Math.max(...first.values));
+  // Seeded: the same feed from the start makes the same noise.
+  const again = new emu.SyntheticFeed(3, 4, { pattern: "ramp", noise: 1, seed: 7 });
+  assert.deepEqual([...again.frame(0).values], [...first.values]);
+});
+
+test("a mouse press builds up while held and fades after release", async () => {
+  const { emu } = await modules;
+  const feed = new emu.SyntheticFeed(5, 5, { pattern: "none", noise: 0 });
+  assert.equal(Math.max(...feed.frame(0).values), 0);
+  feed.press({ row: 1, col: 3 }, 0);
+  const soon = feed.frame(100).values[1 * 5 + 3];
+  const later = feed.frame(600).values[1 * 5 + 3];
+  assert.ok(soon > 0 && later > soon);
+  // The press is centred where it was made.
+  assert.ok(later > feed.frame(600).values[4 * 5 + 0]);
+  feed.press(null, 600);
+  assert.ok(feed.frame(700).values[1 * 5 + 3] > 0);
+  assert.equal(Math.max(...feed.frame(900).values), 0);
+});
+
+test("a generated frame runs through the simulator", async () => {
+  const { emu, sdk } = await modules;
+  const pkg = await compile("signal a = total()\nevent pressed when a > 100\n");
+  const sim = new sdk.Simulator(pkg);
+  const feed = new emu.SyntheticFeed(4, 4, { pattern: "hold", noise: 0 });
+  const period = 1000 / emu.SYNTH_FPS;
+  for (let t = 0; t < 2000; t += period) sim.step(feed.frame(t));
+  assert.ok(sim.events.some((event) => event.event === "pressed"));
+});

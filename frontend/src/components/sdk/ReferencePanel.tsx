@@ -11,6 +11,7 @@ import {
   LED_COLOURS,
   MAX_DEBOUNCE_MS,
   MAX_EVENT_NAME,
+  MAX_EXT_LEDS,
   MAX_NODES,
   MAX_OLED_DIGITS,
   MAX_OLED_LABEL,
@@ -34,7 +35,9 @@ const STATEMENTS = [
   ["led", "led <colour> when <event>"],
   ["show", 'show <row> "<label>" <expression> [digits <n>]'],
   ["bar", 'bar <row> "<label>" <expression> range <lo>..<hi>'],
-  ["gate", "gate (<expression> < <number>) { signal / event / emit / led / show / bar … }"],
+  ["pixel", "pixel <index> <colour> when <event>"],
+  ["meter", "meter <expression> range <lo>..<hi>"],
+  ["gate", "gate (<expression> < <number>) { signal / event / emit / led / show / bar / pixel / meter … }"],
 ] as const;
 
 export function ReferencePanel({ kind }: { kind: SdkKind }) {
@@ -57,6 +60,7 @@ export function ReferencePanel({ kind }: { kind: SdkKind }) {
     [t("sdkLimitOledRows"), `0–${OLED_ROWS - 1}`],
     [t("sdkLimitOledLabel"), `${MAX_OLED_LABEL}`],
     [t("sdkLimitOledDigits"), `0–${MAX_OLED_DIGITS}`],
+    [t("sdkLimitExtPixel"), `0–${MAX_EXT_LEDS - 1}`],
   ];
 
   return (

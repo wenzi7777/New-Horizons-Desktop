@@ -145,6 +145,18 @@ class PackageValidationTests(unittest.TestCase):
         ]
         self.assertEqual(validate_package(doc)["nodes"], 6)
 
+    def test_an_external_led_package_is_accepted(self):
+        # Firmware v1.5.0: pixel/meter compile to these, and declare drive_ext_led.
+        doc = json.loads(json.dumps(GOOD_PACKAGE))
+        doc["manifest"].update(min_os="v1.5.0", capabilities=["drive_ext_led", "read_matrix"])
+        doc["nodes"] = [
+            {"op": "total"},
+            {"op": "threshold", "in": 0, "value": 10.0},
+            {"op": "ext_pixel", "in": 1, "index": 0, "rgb": "blue"},
+            {"op": "ext_meter", "in": 0, "lo": 0.0, "hi": 100.0},
+        ]
+        self.assertEqual(validate_package(doc)["nodes"], 4)
+
     def test_every_op_and_capability_the_sdk_knows_is_known_here(self):
         # The vendored SDK is what App Studio compiles with; an op it can emit
         # that this module does not know is an app the Desktop builds and then

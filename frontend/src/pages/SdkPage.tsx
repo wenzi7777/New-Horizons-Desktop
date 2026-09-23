@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, FilePlus2, FolderOpen, Library, Trash2, X } from "lucide-react";
+import { BookOpen, Cpu, FilePlus2, FolderOpen, Library, Trash2, X } from "lucide-react";
 
 import { BuildPanel } from "../components/sdk/BuildPanel";
 import { CodeEditor, type CodeEditorHandle } from "../components/sdk/CodeEditor";
@@ -12,7 +12,6 @@ import { useLocalised, type AppCatalogEntry } from "../lib/appLibrary";
 import { useAuth } from "../lib/auth";
 import { useDevicesPolling } from "../lib/device";
 import {
-  TARGET_PRESETS,
   appIdOf,
   deviceTargets,
   flowTemplate,
@@ -20,10 +19,15 @@ import {
   kindOfFile,
   loadActiveProjectId,
   loadProjects,
+  loadTargetKey,
+  loadVirtualDevice,
   newProject,
   readoutTemplate,
   saveActiveProjectId,
   saveProjects,
+  saveTargetKey,
+  saveVirtualDevice,
+  virtualTarget,
   type MatrixTarget,
   type SdkKind,
   type SdkProject,
@@ -128,7 +132,8 @@ export function SdkPage() {
     return remembered ?? "";
   });
   const [tab, setTab] = useState<Tab>("build");
-  const [targetKey, setTargetKey] = useState(TARGET_PRESETS[0].key);
+  const [targetKey, setTargetKey] = useState(loadTargetKey);
+  const [virtual, setVirtual] = useState(loadVirtualDevice);
   const [picking, setPicking] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<SdkProject | null>(null);
   const [storageFailed, setStorageFailed] = useState(false);
@@ -141,15 +146,25 @@ export function SdkPage() {
 
   const active = projects.find((project) => project.id === activeId) ?? projects[0];
 
-  const targets = useMemo(() => [...deviceTargets(normalized), ...TARGET_PRESETS], [normalized]);
-  const found = targets.find((item) => item.key === targetKey) ?? TARGET_PRESETS[0];
+  useEffect(() => { saveVirtualDevice(virtual); }, [virtual]);
+  const selectTarget = useCallback((key: string) => {
+    setTargetKey(key);
+    saveTargetKey(key);
+  }, []);
+
+  // One device, picked in the Emulator, is what the app runs on there and what
+  // the Build tab judges it against. A remembered device that is not (yet)
+  // listed falls back to the virtual one without being forgotten.
+  const targets = useMemo(() => deviceTargets(normalized), [normalized]);
+  const found = targets.find((item) => item.key === targetKey)
+    ?? (targetKey === "" && targets[0] ? targets[0] : virtualTarget(virtual, t("sdkEmuVirtual")));
   // The device list is re-derived every second (for "last seen" times), which
   // makes a new target object each time. Keyed on its values, so a board that
   // has not changed does not recompile the app -- which reset the emulator
   // and re-hashed the package once a second.
   const target = useMemo<MatrixTarget>(
-    () => ({ key: found.key, rows: found.rows, cols: found.cols, label: found.label, firmware: found.firmware }),
-    [found.key, found.rows, found.cols, found.label, found.firmware],
+    () => ({ key: found.key, rows: found.rows, cols: found.cols, label: found.label, firmware: found.firmware, board: found.board }),
+    [found.key, found.rows, found.cols, found.label, found.firmware, found.board],
   );
   const cellCount = target.rows * target.cols;
 
@@ -289,12 +304,11 @@ export function SdkPage() {
             <span className="sdk-hint">
               {analysis.ok ? t("sdkStatusOk") : t("sdkStatusErrors").replace("{count}", String(errorCount))}
             </span>
-            <label className="sdk-target">
+            <button type="button" className="sdk-target" onClick={() => setTab("emulator")} title={t("sdkTargetHint")}>
+              <Cpu size={13} strokeWidth={2} aria-hidden="true" />
               <span>{t("sdkTarget")}</span>
-              <select value={target.key} onChange={(event) => setTargetKey(event.target.value)}>
-                {targets.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
-              </select>
-            </label>
+              <strong>{target.label}</strong>
+            </button>
           </div>
           <CodeEditor
             ref={editorRef}
@@ -319,7 +333,17 @@ export function SdkPage() {
           </div>
           {tab === "build" ? <BuildPanel project={active} analysis={analysis} target={target} onRevealLine={revealLine} /> : null}
           {tab === "emulator" ? (
-            <EmulatorPanel key={active.id} analysis={analysis} target={target} devices={normalized} onMarkLines={markLines} />
+            <EmulatorPanel
+              key={active.id}
+              analysis={analysis}
+              target={target}
+              targets={targets}
+              devices={normalized}
+              virtual={virtual}
+              onVirtualChange={setVirtual}
+              onSelectTarget={selectTarget}
+              onMarkLines={markLines}
+            />
           ) : null}
           {tab === "reference" ? <ReferencePanel kind={active.kind} /> : null}
         </section>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, CircleDot, FolderOpen, Pause, Play, Radio, RotateCcw, SkipBack, Square } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleDot, FolderOpen, Pause, Play, Radio, RotateCcw, SkipBack, Square, Upload } from "lucide-react";
 
 import { useI18n } from "../../i18n";
 import { api, type CsvExplorerEntry } from "../../lib/api";
@@ -8,7 +8,9 @@ import type { NormalizedDevice } from "../../lib/device";
 import type { ReadoutPackage } from "../../lib/readout";
 import {
   RecordingCursor,
+  SYNTH_FPS,
   SeqGapTracker,
+  SyntheticFeed,
   frameFromSample,
   isSidecar,
   linesForEvents,
@@ -16,9 +18,21 @@ import {
   sidecarPathFor,
   simulateAll,
 } from "../../lib/sdkEmulator";
-import type { MatrixTarget } from "../../lib/sdkProject";
+import {
+  BOARDS,
+  SYNTH_PATTERNS,
+  VIRTUAL_TARGET_KEY,
+  boardById,
+  clampShape,
+  downloadFile,
+  type BoardSpec,
+  type MatrixTarget,
+  type SynthPattern,
+  type VirtualDevice,
+} from "../../lib/sdkProject";
 import { addVisualizationListener, subscribeVisualization, unsubscribeVisualization } from "../../lib/wsClient";
 import {
+  MAX_EXT_LEDS,
   OLED_ROWS,
   OLED_ROW_PX,
   OLED_WIDTH_PX,
@@ -37,17 +51,25 @@ import {
 } from "../../sdk/lib/index.mjs";
 import { ReadoutView } from "../ReadoutView";
 import { EmulatorHeatmap } from "./EmulatorHeatmap";
-import { downloadFile } from "../../lib/sdkProject";
 
 type Props = {
   analysis: Analysis;
+  /** The device the app runs on here, and the Build tab judges it against. */
   target: MatrixTarget;
+  /** Real devices with a known matrix, to pick from. */
+  targets: MatrixTarget[];
   devices: NormalizedDevice[];
+  virtual: VirtualDevice;
+  onVirtualChange: (device: VirtualDevice) => void;
+  onSelectTarget: (key: string) => void;
   /** Source lines whose statements emitted on the frame being shown. */
   onMarkLines: (lines: Set<number>) => void;
 };
 
-type Source = "recording" | "live";
+/** What each way of running an app needs from the panel. */
+type RunProps = Pick<Props, "analysis" | "target" | "devices" | "onMarkLines">;
+
+type DeviceSource = "live" | "recording";
 const SPEEDS = [0.25, 1, 4, 16] as const;
 const MAX_EVENTS_SHOWN = 200;
 /** Nodes with an effect but no value of their own. */
@@ -65,6 +87,17 @@ async function fetchText(path: string): Promise<string> {
   const response = await fetch(api.downloadCsvUrl(path), { credentials: "same-origin" });
   if (!response.ok) throw new Error(`http_${response.status}`);
   return response.text();
+}
+
+/**
+ * A recording's frames in the first shape that holds all its cells. A CSV
+ * carries only P1..Pn, so its rows and columns come from the device that
+ * made it, or the board it is played on; failing both, a square or a row.
+ */
+function reshape(frames: Frame[], candidates: ({ rows: number; cols: number } | null | undefined)[]): Frame[] {
+  const count = frames[0]?.values.length ?? 0;
+  const fit = candidates.find((shape) => shape && shape.rows * shape.cols === count);
+  return fit ? frames.map((frame) => ({ ...frame, rows: fit.rows, cols: fit.cols })) : frames;
 }
 
 /** Every node's value, labelled with the signal or event it is, if any. */
@@ -180,22 +213,28 @@ function OledPanel({ rows }: { rows: readonly (OledRow | null)[] }) {
   );
 }
 
-/** The OLED and the action button, for a package that uses either. */
-function OledSection({ sim, rows, onPress, pressDisabled, extra }: {
+/**
+ * The OLED and the action button, for a package that uses either -- and only
+ * as far as the board has them: a board without an OLED draws nothing.
+ */
+function OledSection({ sim, board, rows, onPress, pressDisabled, extra }: {
   sim: Simulator | null;
+  board: BoardSpec | undefined;
   rows: readonly (OledRow | null)[];
   onPress: () => void;
   pressDisabled?: boolean;
   extra?: ReactNode;
 }) {
   const { t } = useI18n();
-  if (!sim || (!sim.canDisplay && !sim.hearsButton)) return null;
+  const display = Boolean(sim?.canDisplay && (board?.oled ?? true));
+  const button = Boolean(sim?.hearsButton && (board?.button ?? true));
+  if (!display && !button) return null;
   return (
     <section className="sdk-section sdk-oled">
       <h3>{t("sdkEmuOled")}</h3>
-      {sim.canDisplay ? <OledPanel rows={rows} /> : null}
-      {sim.canDisplay ? <p className="sdk-hint">{t("sdkEmuOledHint")}</p> : null}
-      {sim.hearsButton ? (
+      {display ? <OledPanel rows={rows} /> : null}
+      {display ? <p className="sdk-hint">{t("sdkEmuOledHint")}</p> : null}
+      {button ? (
         <div className="sdk-oled-row">
           <button type="button" className="button compact" onClick={onPress} disabled={pressDisabled} title={t("sdkEmuPressHint")}>
             <CircleDot size={13} strokeWidth={2} />{t("sdkEmuPress")}
@@ -203,6 +242,37 @@ function OledSection({ sim, rows, onPress, pressDisabled, extra }: {
           {extra}
         </div>
       ) : null}
+    </section>
+  );
+}
+
+/** Pixels to preview: the board's own, or every pixel an app may address. */
+function stripLength(board: BoardSpec | undefined): number {
+  return board ? board.externalLeds : MAX_EXT_LEDS;
+}
+
+/**
+ * The external LED strip as the board shows it, for a package that drives it.
+ * Nothing on a board without one; BoardFit says why.
+ */
+function ExtLedStrip({ sim, board, pixels }: { sim: Simulator | null; board: BoardSpec | undefined; pixels: readonly (readonly number[])[] | null }) {
+  const { t } = useI18n();
+  if (!sim?.canDriveExtLed || stripLength(board) === 0) return null;
+  const shown = pixels ?? Array.from({ length: stripLength(board) }, () => [0, 0, 0]);
+  return (
+    <section className="sdk-section sdk-ext-strip">
+      <h3>{t("sdkEmuExtLed")}</h3>
+      <div className="sdk-strip" role="img" aria-label={t("sdkEmuExtLed")}>
+        {shown.map((rgb, index) => {
+          const lit = rgb.some((channel) => channel > 0);
+          return (
+            <span key={index} className={`sdk-strip-pixel${lit ? " lit" : ""}`} title={`${index}`} style={lit ? { background: `rgb(${rgb.join(",")})`, color: `rgb(${rgb.join(",")})` } : undefined}>
+              <small>{index}</small>
+            </span>
+          );
+        })}
+      </div>
+      <p className="sdk-hint">{t("sdkEmuExtLedHint")}</p>
     </section>
   );
 }
@@ -243,11 +313,18 @@ function useLabels(analysis: Analysis) {
 
 // --- recordings ---------------------------------------------------------------
 
-function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
+function RecordingEmulator({ analysis, target, devices, onMarkLines, deviceUid: fixedUid, onShape }: RunProps & {
+  /** Only this device's recordings; otherwise any device's, or a local file. */
+  deviceUid?: string;
+  /** The loaded recording's shape, for a virtual device to take on. */
+  onShape?: (rows: number, cols: number) => void;
+}) {
   const { t } = useI18n();
   const pkg = useStablePackage(analysis);
   const labels = useLabels(analysis);
-  const [deviceUid, setDeviceUid] = useState(devices[0]?.uid ?? "");
+  const [browseUid, setBrowseUid] = useState(devices[0]?.uid ?? "");
+  const deviceUid = fixedUid ?? browseUid;
+  const upload = useRef<HTMLInputElement | null>(null);
   const [dir, setDir] = useState("");
   const [entries, setEntries] = useState<CsvExplorerEntry[]>([]);
   const [listError, setListError] = useState<string | null>(null);
@@ -266,8 +343,8 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
   const shape = shapeOf(device) ?? { rows: target.rows, cols: target.cols };
 
   useEffect(() => {
-    if (!deviceUid && devices[0]) setDeviceUid(devices[0].uid);
-  }, [deviceUid, devices]);
+    if (!browseUid && devices[0]) setBrowseUid(devices[0].uid);
+  }, [browseUid, devices]);
 
   useEffect(() => {
     if (!deviceUid) return;
@@ -279,20 +356,34 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
     return () => { cancelled = true; };
   }, [deviceUid, dir]);
 
+  const show = (parsed: Frame[], name: string, events: SimEvent[] | null) => {
+    setFrames(parsed);
+    setFile(name);
+    setIndex(0);
+    setPresses(new Set());
+    setRecorded(events);
+    if (parsed[0]) onShape?.(parsed[0].rows, parsed[0].cols);
+  };
+
   const load = async (entry: CsvExplorerEntry) => {
     setLoadError(null);
     setPlaying(false);
     try {
-      const text = await fetchText(entry.path);
-      const parsed = parseSamplesCsv(text, shape);
-      setFrames(parsed);
-      setFile(entry.path);
-      setIndex(0);
-      setPresses(new Set());
+      const parsed = reshape(parseSamplesCsv(await fetchText(entry.path)), [shapeOf(device), target]);
       const sidecar = entries.find((item) => item.path === sidecarPathFor(entry.path));
-      setRecorded(sidecar ? parseEventsCsv(await fetchText(sidecar.path)) : null);
+      show(parsed, entry.path, sidecar ? parseEventsCsv(await fetchText(sidecar.path)) : null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "request_failed");
+    }
+  };
+
+  const loadFile = async (picked: File) => {
+    setLoadError(null);
+    setPlaying(false);
+    try {
+      show(reshape(parseSamplesCsv(await picked.text()), [target]), picked.name, null);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "parse_failed");
     }
   };
 
@@ -300,7 +391,7 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
   // stepping. Both follow every edit of the source.
   const allEvents = useMemo(() => (pkg && frames.length ? simulateAll(pkg, frames, presses) : []), [pkg, frames, presses]);
   const cursor = useMemo(() => (pkg && frames.length ? new RecordingCursor(pkg, frames, presses) : null), [pkg, frames, presses]);
-  const [shown, setShown] = useState<{ values: NodeValue[]; frameEvents: SimEvent[]; led: readonly [number, number, number]; oled: (OledRow | null)[] } | null>(null);
+  const [shown, setShown] = useState<{ values: NodeValue[]; frameEvents: SimEvent[]; led: readonly [number, number, number]; oled: (OledRow | null)[]; strip: number[][] | null } | null>(null);
 
   useEffect(() => {
     if (!cursor) {
@@ -309,9 +400,9 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
     }
     cursor.setBudget(budget.load, budget.grace);
     const frameEvents = cursor.seek(index);
-    setShown({ values: cursor.simulator.nodeValues(), frameEvents, led: cursor.simulator.led, oled: cursor.simulator.oledRows() });
+    setShown({ values: cursor.simulator.nodeValues(), frameEvents, led: cursor.simulator.led, oled: cursor.simulator.oledRows(), strip: cursor.simulator.extLeds(stripLength(target.board)) });
     onMarkLines(pkg && analysis.report ? linesForEvents(pkg, analysis.report.nodeLines, frameEvents) : new Set());
-  }, [cursor, index, budget, pkg, analysis.report, onMarkLines]);
+  }, [cursor, index, budget, pkg, analysis.report, onMarkLines, target.board]);
 
   useEffect(() => () => onMarkLines(new Set()), [onMarkLines]);
 
@@ -368,12 +459,30 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
     <>
       <section className="sdk-section sdk-picker">
         <div className="sdk-picker-row">
-          <label className="sdk-field">
-            <span>{t("sdkEmuDevice")}</span>
-            <select value={deviceUid} onChange={(event) => { setDeviceUid(event.target.value); setDir(""); }}>
-              {devices.map((item) => <option key={item.uid} value={item.uid}>{item.displayName}</option>)}
-            </select>
-          </label>
+          {fixedUid === undefined ? (
+            <>
+              <label className="sdk-field">
+                <span>{t("sdkEmuRecordingsOf")}</span>
+                <select value={browseUid} onChange={(event) => { setBrowseUid(event.target.value); setDir(""); }}>
+                  {devices.map((item) => <option key={item.uid} value={item.uid}>{item.displayName}</option>)}
+                </select>
+              </label>
+              <button type="button" className="button compact" onClick={() => upload.current?.click()}>
+                <Upload size={13} strokeWidth={2} />{t("sdkEmuUploadCsv")}
+              </button>
+              <input
+                ref={upload}
+                type="file"
+                accept=".csv,text/csv"
+                hidden
+                onChange={(event) => {
+                  const picked = event.target.files?.[0];
+                  event.target.value = "";
+                  if (picked) void loadFile(picked);
+                }}
+              />
+            </>
+          ) : null}
           {dir ? (
             <button type="button" className="button compact" onClick={() => setDir(dir.split("/").slice(0, -1).join("/"))}>
               <ChevronLeft size={14} strokeWidth={2} />{dir.split("/").pop()}
@@ -394,7 +503,7 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
               {!entry.is_dir && entries.some((item) => item.path === sidecarPathFor(entry.path)) ? <span className="sdk-chip">{t("sdkEmuHasEvents")}</span> : null}
             </button>
           ))}
-          {!visibleEntries.length && !listError ? <p className="sdk-hint">{t("sdkEmuNoRecordings")}</p> : null}
+          {!visibleEntries.length && !listError && deviceUid ? <p className="sdk-hint">{t("sdkEmuNoRecordings")}</p> : null}
         </div>
         {loadError ? <p className="notice error">{loadError}</p> : null}
       </section>
@@ -431,6 +540,7 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
 
           <OledSection
             sim={cursor?.simulator ?? null}
+            board={target.board}
             rows={shown?.oled ?? NO_ROWS}
             // Seen by the next frame, as on the device; stepping there shows it.
             onPress={() => {
@@ -446,6 +556,8 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
               </>
             ) : null}
           />
+
+          <ExtLedStrip sim={cursor?.simulator ?? null} board={target.board} pixels={shown?.strip ?? null} />
 
           <BudgetControls load={budget.load} grace={budget.grace} onChange={(load, grace) => setBudget({ load, grace })} />
 
@@ -487,7 +599,7 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
 
 // --- live ---------------------------------------------------------------------
 
-function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
+function LiveEmulator({ analysis, target, devices, onMarkLines, deviceUid }: RunProps & { deviceUid: string }) {
   const { t } = useI18n();
   const pkg = useStablePackage(analysis);
   // Read by the stream listener, which is subscribed once per start/stop.
@@ -498,11 +610,9 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
   const onMarkLinesRef = useRef(onMarkLines);
   onMarkLinesRef.current = onMarkLines;
   const labels = useLabels(analysis);
-  const online = devices.filter((device) => device.connectionState === "online");
-  const [deviceUid, setDeviceUid] = useState(online[0]?.uid ?? devices[0]?.uid ?? "");
   const [running, setRunning] = useState(false);
   const [budget, setBudget] = useState({ load: 0, grace: 0 });
-  const [view, setView] = useState<{ frame: Frame | null; values: NodeValue[]; events: SimEvent[]; led: readonly [number, number, number]; oled: (OledRow | null)[]; coverage: number; missed: number; received: number } | null>(null);
+  const [view, setView] = useState<{ frame: Frame | null; values: NodeValue[]; events: SimEvent[]; led: readonly [number, number, number]; oled: (OledRow | null)[]; strip: number[][] | null; coverage: number; missed: number; received: number } | null>(null);
   const simRef = useRef<Simulator | null>(null);
   const gapsRef = useRef(new SeqGapTracker());
   const fallbackSeq = useRef(0);
@@ -512,6 +622,8 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
   const shape = shapeOf(device) ?? { rows: target.rows, cols: target.cols };
   const shapeRef = useRef(shape);
   shapeRef.current = shape;
+  const stripRef = useRef(stripLength(target.board));
+  stripRef.current = stripLength(target.board);
 
   const reset = useCallback(() => {
     simRef.current = pkg ? new Simulator(pkg) : null;
@@ -548,7 +660,7 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
       if (!sim || !latest) return;
       pending.current = null;
       const gaps = gapsRef.current;
-      setView({ frame: latest.frame, values: sim.nodeValues(), events: sim.events.slice(-MAX_EVENTS_SHOWN), led: sim.led, oled: sim.oledRows(), coverage: gaps.coverage, missed: gaps.missed, received: gaps.received });
+      setView({ frame: latest.frame, values: sim.nodeValues(), events: sim.events.slice(-MAX_EVENTS_SHOWN), led: sim.led, oled: sim.oledRows(), strip: sim.extLeds(stripRef.current), coverage: gaps.coverage, missed: gaps.missed, received: gaps.received });
       const report = reportRef.current;
       const currentPkg = pkgRef.current;
       if (currentPkg && report && latest.events.length) onMarkLinesRef.current(linesForEvents(currentPkg, report.nodeLines, latest.events));
@@ -567,14 +679,6 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
     <>
       <section className="sdk-section sdk-picker">
         <div className="sdk-picker-row">
-          <label className="sdk-field">
-            <span>{t("sdkEmuDevice")}</span>
-            <select value={deviceUid} disabled={running} onChange={(event) => setDeviceUid(event.target.value)}>
-              {devices.map((item) => (
-                <option key={item.uid} value={item.uid}>{item.displayName}{item.connectionState === "online" ? "" : ` (${item.connectionState})`}</option>
-              ))}
-            </select>
-          </label>
           <button type="button" className={`button compact${running ? "" : " primary"}`} disabled={!deviceUid || !pkg} onClick={() => setRunning(!running)}>
             {running ? <Square size={13} /> : <Radio size={13} />}
             {running ? t("sdkEmuStop") : t("sdkEmuStart")}
@@ -585,6 +689,7 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
           {view ? <LedDot rgb={view.led} /> : null}
         </div>
         <p className="sdk-hint">{t("sdkEmuLiveHint")}</p>
+        {device && device.connectionState !== "online" ? <p className="notice warning">{t("sdkEmuOffline").replace("{state}", device.connectionState)}</p> : null}
       </section>
 
       {running && !view ? <p className="sdk-hint">{t("sdkEmuWaiting")}</p> : null}
@@ -599,7 +704,142 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
           <EmulatorHeatmap frame={view.frame} rows={view.frame?.rows ?? shape.rows} cols={view.frame?.cols ?? shape.cols} range={range} regions={analysis.report?.regions ?? NO_REGIONS} ariaLabel={t("sdkEmuHeatmap")} />
           <p className="sdk-hint sdk-mono">{t("sdkEmuReceived").replace("{n}", String(view.received))} · f{view.frame?.seq}</p>
           {/* Delivered to the next frame the stream brings, as a real press is. */}
-          <OledSection sim={simRef.current} rows={view.oled} onPress={() => simRef.current?.pressButton()} />
+          <OledSection sim={simRef.current} board={target.board} rows={view.oled} onPress={() => simRef.current?.pressButton()} />
+          <ExtLedStrip sim={simRef.current} board={target.board} pixels={view.strip} />
+          <BudgetControls load={budget.load} grace={budget.grace} onChange={(load, grace) => setBudget({ load, grace })} />
+          <section className="sdk-section">
+            <h3>{t("sdkEmuNodes")}</h3>
+            <NodeTrace values={view.values} labels={labels} />
+          </section>
+          <section className="sdk-section">
+            <h3>{t("sdkEmuEvents").replace("{count}", String(view.events.length))}</h3>
+            <EventList events={view.events} />
+          </section>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+// --- generated ----------------------------------------------------------------
+
+const PATTERN_LABELS: Record<SynthPattern, string> = {
+  none: "sdkEmuPatternNone",
+  tap: "sdkEmuPatternTap",
+  hold: "sdkEmuPatternHold",
+  swipe: "sdkEmuPatternSwipe",
+  ramp: "sdkEmuPatternRamp",
+};
+
+/** A virtual device's own frames: a preset pattern, the mouse, and noise. */
+function GeneratedEmulator({ analysis, target, onMarkLines, virtual, onVirtualChange }: RunProps & {
+  virtual: VirtualDevice;
+  onVirtualChange: (device: VirtualDevice) => void;
+}) {
+  const { t } = useI18n();
+  const pkg = useStablePackage(analysis);
+  const pkgRef = useRef(pkg);
+  pkgRef.current = pkg;
+  const reportRef = useRef(analysis.report);
+  reportRef.current = analysis.report;
+  const onMarkLinesRef = useRef(onMarkLines);
+  onMarkLinesRef.current = onMarkLines;
+  const labels = useLabels(analysis);
+  // Nothing to wait for or disturb, so it runs as soon as it is shown.
+  const [running, setRunning] = useState(true);
+  const [budget, setBudget] = useState({ load: 0, grace: 0 });
+  const [view, setView] = useState<{ frame: Frame | null; values: NodeValue[]; events: SimEvent[]; led: readonly [number, number, number]; oled: (OledRow | null)[]; strip: number[][] | null; frames: number } | null>(null);
+  const simRef = useRef<Simulator | null>(null);
+  // The panel is keyed on the shape, so one feed serves this mount.
+  const feedRef = useRef(new SyntheticFeed(target.rows, target.cols, { pattern: virtual.pattern, noise: virtual.noise }));
+  const framesRef = useRef(0);
+  const boardRef = useRef(target.board);
+  boardRef.current = target.board;
+
+  const reset = useCallback(() => {
+    simRef.current = pkg ? new Simulator(pkg) : null;
+    simRef.current?.setBudget(budget.load, budget.grace);
+    framesRef.current = 0;
+    setView(null);
+  }, [pkg, budget.load, budget.grace]);
+
+  useEffect(() => { reset(); }, [pkg]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { simRef.current?.setBudget(budget.load, budget.grace); }, [budget]);
+  useEffect(() => {
+    feedRef.current.pattern = virtual.pattern;
+    feedRef.current.noise = virtual.noise;
+  }, [virtual.pattern, virtual.noise]);
+
+  useEffect(() => {
+    if (!running) return undefined;
+    const period = 1000 / SYNTH_FPS;
+    let clock = performance.now();
+    // Frames are made at the scan rate in device time; the screen is redrawn
+    // on the live view's timer, with every frame in between evaluated.
+    const timer = window.setInterval(() => {
+      const sim = simRef.current;
+      if (!sim) return;
+      const now = performance.now();
+      let frame: Frame | null = null;
+      const events: SimEvent[] = [];
+      for (let made = 0; clock <= now && made < SYNTH_FPS; made += 1) {
+        frame = feedRef.current.frame(clock);
+        events.push(...sim.step(frame));
+        framesRef.current += 1;
+        clock += period;
+      }
+      // A backgrounded tab skips ahead rather than replaying the gap.
+      if (clock < now) clock = now;
+      if (!frame) return;
+      setView({ frame, values: sim.nodeValues(), events: sim.events.slice(-MAX_EVENTS_SHOWN), led: sim.led, oled: sim.oledRows(), strip: sim.extLeds(stripLength(boardRef.current)), frames: framesRef.current });
+      const report = reportRef.current;
+      const currentPkg = pkgRef.current;
+      if (currentPkg && report && events.length) onMarkLinesRef.current(linesForEvents(currentPkg, report.nodeLines, events));
+    }, LIVE_PAINT_MS);
+    return () => {
+      window.clearInterval(timer);
+      onMarkLinesRef.current(new Set());
+    };
+  }, [running]);
+
+  const range = useMemo(() => ({ min: 0, max: PRESSURE_FULL_SCALE }), []);
+  const press = useCallback((cell: { row: number; col: number } | null) => feedRef.current.press(cell, performance.now()), []);
+
+  return (
+    <>
+      <section className="sdk-section sdk-picker">
+        <div className="sdk-picker-row">
+          <label className="sdk-field">
+            <span>{t("sdkEmuPattern")}</span>
+            <select value={virtual.pattern} onChange={(event) => onVirtualChange({ ...virtual, pattern: event.target.value as SynthPattern })}>
+              {SYNTH_PATTERNS.map((pattern) => <option key={pattern} value={pattern}>{t(PATTERN_LABELS[pattern])}</option>)}
+            </select>
+          </label>
+          <label className="sdk-field">
+            <span>{t("sdkEmuNoise")} <strong className="sdk-mono">{Math.round(virtual.noise * 100)}%</strong></span>
+            <input type="range" min={0} max={1} step={0.05} value={virtual.noise} onChange={(event) => onVirtualChange({ ...virtual, noise: Number(event.target.value) })} />
+          </label>
+        </div>
+        <div className="sdk-picker-row">
+          <button type="button" className={`button compact${running ? "" : " primary"}`} disabled={!pkg} onClick={() => setRunning(!running)}>
+            {running ? <Square size={13} /> : <Play size={13} />}
+            {running ? t("sdkEmuStop") : t("sdkEmuStart")}
+          </button>
+          <button type="button" className="button compact" onClick={reset} disabled={!pkg}>
+            <RotateCcw size={13} />{t("sdkEmuReset")}
+          </button>
+          {view ? <LedDot rgb={view.led} /> : null}
+        </div>
+        <p className="sdk-hint">{t("sdkEmuPressMatrix")}</p>
+      </section>
+
+      <EmulatorHeatmap frame={view?.frame ?? null} rows={target.rows} cols={target.cols} range={range} regions={analysis.report?.regions ?? NO_REGIONS} ariaLabel={t("sdkEmuHeatmap")} onPress={running ? press : undefined} />
+      {view ? <p className="sdk-hint sdk-mono">{t("sdkEmuReceived").replace("{n}", String(view.frames))} · {SYNTH_FPS} fps</p> : null}
+
+      {view ? (
+        <>
+          <OledSection sim={simRef.current} board={target.board} rows={view.oled} onPress={() => simRef.current?.pressButton()} />
+          <ExtLedStrip sim={simRef.current} board={target.board} pixels={view.strip} />
           <BudgetControls load={budget.load} grace={budget.grace} onChange={(load, grace) => setBudget({ load, grace })} />
           <section className="sdk-section">
             <h3>{t("sdkEmuNodes")}</h3>
@@ -617,10 +857,8 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
 
 // --- readouts -----------------------------------------------------------------
 
-function ReadoutPreview({ analysis, devices }: Props) {
+function ReadoutPreview({ analysis, deviceUid }: { analysis: Analysis; deviceUid: string }) {
   const { t } = useI18n();
-  const online = devices.filter((device) => device.connectionState === "online");
-  const [deviceUid, setDeviceUid] = useState(online[0]?.uid ?? devices[0]?.uid ?? "");
   const { queue } = useDeviceCommand(deviceUid);
   // The preview only runs a package the validator accepted: it polls a real
   // device, and an allowlist is only a guarantee once it has been checked.
@@ -628,17 +866,101 @@ function ReadoutPreview({ analysis, devices }: Props) {
 
   return (
     <>
-      <section className="sdk-section sdk-picker">
+      <p className="sdk-hint">{t("sdkEmuReadoutHint")}</p>
+      {!pkg ? <p className="notice warning">{t("sdkEmuFixFirst")}</p> : null}
+      {pkg ? <ReadoutView key={`${deviceUid}-${analysis.validation?.size}`} pkg={pkg} runner={queue} /> : null}
+    </>
+  );
+}
+
+// --- devices ------------------------------------------------------------------
+
+function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { id: T; label: string }[]; onChange: (value: T) => void }) {
+  return (
+    <div className="segmented-control sdk-source" role="tablist" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+      {options.map((option) => (
+        <button key={option.id} type="button" role="tab" aria-selected={value === option.id} className={value === option.id ? "active" : undefined} onClick={() => onChange(option.id)}>
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The board a virtual device is, and how much of its matrix it scans. */
+function VirtualSetup({ virtual, onChange }: { virtual: VirtualDevice; onChange: (device: VirtualDevice) => void }) {
+  const { t } = useI18n();
+  const board = boardById(virtual.boardId);
+  // A recording brings its own shape; the author sets it otherwise.
+  const locked = virtual.source === "recording";
+  const setShape = (rows: number, cols: number) => onChange({ ...virtual, ...clampShape(board, rows, cols) });
+  const tooLarge = virtual.rows > board.rows || virtual.cols > board.cols;
+
+  return (
+    <>
+      <div className="sdk-picker-row">
         <label className="sdk-field">
-          <span>{t("sdkEmuDevice")}</span>
-          <select value={deviceUid} onChange={(event) => setDeviceUid(event.target.value)}>
-            {devices.map((item) => <option key={item.uid} value={item.uid}>{item.displayName}</option>)}
+          <span>{t("sdkEmuBoard")}</span>
+          <select
+            value={board.id}
+            onChange={(event) => {
+              const next = boardById(event.target.value);
+              // A new board starts at its whole matrix; a recording's shape stays.
+              onChange({ ...virtual, boardId: next.id, ...(locked ? {} : { rows: next.rows, cols: next.cols }) });
+            }}
+          >
+            {BOARDS.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.rows} × {item.cols}</option>)}
           </select>
         </label>
-        <p className="sdk-hint">{t("sdkEmuReadoutHint")}</p>
-      </section>
-      {!pkg ? <p className="notice warning">{t("sdkEmuFixFirst")}</p> : null}
-      {pkg && deviceUid ? <ReadoutView key={`${deviceUid}-${analysis.validation?.size}`} pkg={pkg} runner={queue} /> : null}
+        <label className="sdk-field sdk-field-shape">
+          <span>{t("sdkEmuMatrix")}</span>
+          <span className="sdk-shape-inputs">
+            <input type="number" min={1} max={board.rows} value={virtual.rows} disabled={locked} aria-label={t("sdkEmuRows")} onChange={(event) => setShape(Number(event.target.value), virtual.cols)} />
+            <span aria-hidden="true">×</span>
+            <input type="number" min={1} max={board.cols} value={virtual.cols} disabled={locked} aria-label={t("sdkEmuCols")} onChange={(event) => setShape(virtual.rows, Number(event.target.value))} />
+          </span>
+        </label>
+      </div>
+      <div className="sdk-board-caps" aria-label={t("sdkEmuPeripherals")}>
+        <span className={`sdk-chip${board.oled ? "" : " off"}`}>OLED {board.oled ? "✓" : "—"}</span>
+        <span className={`sdk-chip${board.button ? "" : " off"}`}>{t("sdkEmuCapButton")} {board.button ? "✓" : "—"}</span>
+        <span className={`sdk-chip${board.externalLeds ? "" : " off"}`}>{t("sdkEmuCapExtLed")} {board.externalLeds ? `× ${board.externalLeds}` : "—"}</span>
+      </div>
+      {locked ? <p className="sdk-hint">{t("sdkEmuShapeFromRecording")}</p> : null}
+      {tooLarge ? (
+        <p className="notice warning">
+          {t("sdkEmuShapeTooLarge").replace("{shape}", `${virtual.rows} × ${virtual.cols}`).replace("{board}", board.name).replace("{max}", `${board.rows} × ${board.cols}`)}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** What the app uses that the chosen board does not have. */
+function BoardFit({ analysis, board }: { analysis: Analysis; board: BoardSpec | undefined }) {
+  const { t } = useI18n();
+  if (!board) return null;
+  const caps = new Set<string>(analysis.package?.manifest?.capabilities ?? []);
+  const missing = [
+    caps.has("display") && !board.oled ? "OLED" : null,
+    caps.has("button") && !board.button ? t("sdkEmuCapButton") : null,
+    caps.has("drive_ext_led") && !board.externalLeds ? t("sdkEmuCapExtLed") : null,
+  ].filter(Boolean);
+  // Accepted by the device and never shown: past this board's own strip.
+  const unseen = board.externalLeds
+    ? [...new Set<number>((analysis.package?.nodes ?? [])
+      .filter((node: { op: string; index?: number }) => node.op === "ext_pixel" && Number(node.index) >= board.externalLeds)
+      .map((node: { index: number }) => Number(node.index)))].sort((a, b) => a - b)
+    : [];
+  if (!missing.length && !unseen.length) return null;
+  return (
+    <>
+      {missing.length ? <p className="notice warning">{t("sdkEmuBoardLacks").replace("{board}", board.name).replace("{parts}", missing.join(", "))}</p> : null}
+      {unseen.length ? (
+        <p className="notice warning">
+          {t("sdkEmuPixelsUnseen").replace("{pixels}", unseen.join(", ")).replace("{board}", board.name).replace("{count}", String(board.externalLeds))}
+        </p>
+      ) : null}
     </>
   );
 }
@@ -647,26 +969,70 @@ function ReadoutPreview({ analysis, devices }: Props) {
 
 export function EmulatorPanel(props: Props) {
   const { t } = useI18n();
-  const [source, setSource] = useState<Source>("recording");
+  const { analysis, target, targets, devices, virtual, onVirtualChange, onSelectTarget } = props;
+  const deviceUid = target.key === VIRTUAL_TARGET_KEY ? null : target.key.replace(/^device:/, "");
+  const device = devices.find((item) => item.uid === deviceUid);
+  const [deviceSource, setDeviceSource] = useState<DeviceSource>(device?.connectionState === "online" ? "live" : "recording");
+  const run: RunProps = { analysis, target, devices, onMarkLines: props.onMarkLines };
 
-  if (props.analysis.kind === "readout") {
-    return <div className="sdk-panel-body"><ReadoutPreview {...props} /></div>;
+  const picker = (
+    <section className="sdk-section sdk-picker">
+      <label className="sdk-field">
+        <span>{t("sdkEmuDevice")}</span>
+        <select value={target.key} onChange={(event) => onSelectTarget(event.target.value)}>
+          {targets.map((item) => {
+            const state = devices.find((d) => `device:${d.uid}` === item.key)?.connectionState;
+            return <option key={item.key} value={item.key}>{item.label}{state && state !== "online" ? ` (${state})` : ""}</option>;
+          })}
+          <option value={VIRTUAL_TARGET_KEY}>{t("sdkEmuVirtual")}</option>
+        </select>
+      </label>
+      {deviceUid === null && analysis.kind !== "readout" ? <VirtualSetup virtual={virtual} onChange={onVirtualChange} /> : null}
+    </section>
+  );
+
+  if (analysis.kind === "readout") {
+    return (
+      <div className="sdk-panel-body">
+        {picker}
+        {deviceUid ? <ReadoutPreview key={deviceUid} analysis={analysis} deviceUid={deviceUid} /> : <p className="notice warning">{t("sdkEmuReadoutNeedsDevice")}</p>}
+      </div>
+    );
   }
-  if (!props.analysis.package) {
-    return <div className="sdk-panel-body"><p className="notice warning">{t("sdkEmuFixFirst")}</p></div>;
+  if (!analysis.package) {
+    return <div className="sdk-panel-body">{picker}<p className="notice warning">{t("sdkEmuFixFirst")}</p></div>;
   }
   return (
     <div className="sdk-panel-body">
-      <div className="segmented-control sdk-source" role="tablist" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
-        <button type="button" role="tab" aria-selected={source === "recording"} className={source === "recording" ? "active" : undefined} onClick={() => setSource("recording")}>
-          {t("sdkEmuRecording")}
-        </button>
-        <button type="button" role="tab" aria-selected={source === "live"} className={source === "live" ? "active" : undefined} onClick={() => setSource("live")}>
-          {t("sdkEmuLive")}
-        </button>
-      </div>
-      {!props.analysis.ok ? <p className="notice warning">{t("sdkEmuRunsAnyway")}</p> : null}
-      {source === "recording" ? <RecordingEmulator {...props} /> : <LiveEmulator {...props} />}
+      {picker}
+      <BoardFit analysis={analysis} board={target.board} />
+      {deviceUid ? (
+        <Segmented
+          value={deviceSource}
+          onChange={setDeviceSource}
+          options={[{ id: "live", label: t("sdkEmuLive") }, { id: "recording", label: t("sdkEmuRecording") }]}
+        />
+      ) : (
+        <Segmented
+          value={virtual.source}
+          onChange={(source) => {
+            const board = boardById(virtual.boardId);
+            // Back to generated frames, a recording's shape is held to the board.
+            onVirtualChange({ ...virtual, source, ...(source === "generated" ? clampShape(board, virtual.rows, virtual.cols) : {}) });
+          }}
+          options={[{ id: "generated", label: t("sdkEmuGenerated") }, { id: "recording", label: t("sdkEmuRecording") }]}
+        />
+      )}
+      {!analysis.ok ? <p className="notice warning">{t("sdkEmuRunsAnyway")}</p> : null}
+      {deviceUid ? (
+        deviceSource === "live"
+          ? <LiveEmulator key={deviceUid} {...run} deviceUid={deviceUid} />
+          : <RecordingEmulator key={deviceUid} {...run} deviceUid={deviceUid} />
+      ) : virtual.source === "generated" ? (
+        <GeneratedEmulator key={`${target.rows}x${target.cols}`} {...run} virtual={virtual} onVirtualChange={onVirtualChange} />
+      ) : (
+        <RecordingEmulator key="virtual" {...run} onShape={(rows, cols) => onVirtualChange({ ...virtual, rows, cols })} />
+      )}
     </div>
   );
 }
