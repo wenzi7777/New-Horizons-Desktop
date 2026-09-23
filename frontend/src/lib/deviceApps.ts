@@ -23,6 +23,8 @@ export type InstalledApp = {
   graph: string;
   nodes: number;
   estimatedUs: number;
+  /** Enabled but with nothing to run (no graph bound). */
+  idle: boolean;
   degraded: boolean;
 };
 
@@ -108,6 +110,9 @@ export function parseAppList(result: Record<string, unknown> | null): InstalledA
       graph: str(detail.graph),
       nodes: num(detail.nodes),
       estimatedUs: num(detail.estimated_us),
+      // v1.2.3+ reports it; before that an empty flow slot shows as zero nodes.
+      idle: entry.idle !== undefined ? entry.idle === true
+        : detail.nodes !== undefined && num(detail.nodes) === 0,
       degraded: detail.degraded === true,
     };
   });

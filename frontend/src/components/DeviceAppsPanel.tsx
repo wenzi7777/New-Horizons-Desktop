@@ -307,15 +307,17 @@ export function DeviceAppsPanel({
       <div className="app-slot-grid">
         {apps.map((app, index) => {
           const bound = packageBySlot.get(index);
-          // With a registry, an empty slot has nothing to run: its state and an
-          // Enable button are noise. Pre-registry firmware has no bindings, so
-          // every slot keeps its controls there.
-          const empty = supportsRegistry && !bound;
+          // An empty slot has nothing to run. It may still be *enabled* -- the
+          // firmware keeps that so binding a package starts it -- but showing
+          // that as "Running" with a Disable button read as a ghost app. The
+          // device says whether a graph is loaded; the registry binding alone
+          // would miss a legacy apps/flow.json loaded without a package.
+          const empty = app.idle;
           return (
-            <article key={app.name} className={`app-slot-card state-${app.state}${bound ? "" : " free"}`}>
+            <article key={app.name} className={`app-slot-card state-${app.state}${empty ? " free" : ""}`}>
               <header className="app-slot-head">
                 <span className="app-slot-name">{app.name}</span>
-                {empty && app.state !== "running" ? null : (
+                {empty ? null : (
                   <span className={`app-state-pill ${app.state}`}>
                     <i aria-hidden="true" />
                     {t(`appState_${app.state}`)}
@@ -329,12 +331,14 @@ export function DeviceAppsPanel({
                     <strong title={bound.summary}>{bound.name}</strong>
                     <span className="app-row-version">v{bound.version}</span>
                   </>
+                ) : !empty && app.graph ? (
+                  <strong>{app.graph}</strong>
                 ) : (
                   <span className="app-slot-free">{t("appSlotFree")}</span>
                 )}
               </div>
 
-              {bound || app.lastUs > 0 ? <AppBudgetMeter app={app} /> : null}
+              {!empty ? <AppBudgetMeter app={app} /> : null}
 
               {app.degraded || app.overruns > 0 ? (
                 <div className="app-slot-flags">
@@ -365,7 +369,7 @@ export function DeviceAppsPanel({
                   >
                     {t("appRevive")}
                   </button>
-                ) : app.state === "running" ? (
+                ) : empty ? null : app.state === "running" ? (
                   <button
                     type="button"
                     className="button compact"
@@ -375,7 +379,7 @@ export function DeviceAppsPanel({
                   >
                     {t("appDisable")}
                   </button>
-                ) : app.state === "suspended" || empty ? null : (
+                ) : app.state === "suspended" ? null : (
                   <button
                     type="button"
                     className="button compact"

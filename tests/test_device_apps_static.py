@@ -72,6 +72,15 @@ class PanelWiringTests(unittest.TestCase):
         # already_installed after the new file had already been written.
         self.assertIn("replace: true,", call)
 
+    def test_an_empty_slot_is_not_shown_as_running(self):
+        panel = read("components/DeviceAppsPanel.tsx")
+        lib = read("lib/deviceApps.ts")
+        # After uninstalling every package all four slots still said Running
+        # with a Disable button: enabled, but with nothing to run.
+        self.assertIn("const empty = app.idle;", panel)
+        self.assertIn("entry.idle !== undefined ? entry.idle === true", lib)
+        self.assertIn("num(detail.nodes) === 0", lib)
+
     def test_rolled_off_history_is_not_reported_as_loss(self):
         panel = read("components/DeviceAppsPanel.tsx")
         # The firmware's dropped counter is cumulative since boot, and a
