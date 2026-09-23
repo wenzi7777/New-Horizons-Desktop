@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, FolderOpen, Pause, Play, Radio, RotateCcw, SkipBack, Square } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, CircleDot, FolderOpen, Pause, Play, Radio, RotateCcw, SkipBack, Square } from "lucide-react";
 
 import { useI18n } from "../../i18n";
 import { api, type CsvExplorerEntry } from "../../lib/api";
@@ -19,6 +19,9 @@ import {
 import type { MatrixTarget } from "../../lib/sdkProject";
 import { addVisualizationListener, subscribeVisualization, unsubscribeVisualization } from "../../lib/wsClient";
 import {
+  OLED_ROWS,
+  OLED_ROW_PX,
+  OLED_WIDTH_PX,
   PRESSURE_FULL_SCALE,
   Simulator,
   canonicalText,
@@ -29,6 +32,7 @@ import {
   type Analysis,
   type Frame,
   type NodeValue,
+  type OledRow,
   type SimEvent,
 } from "../../sdk/lib/index.mjs";
 import { ReadoutView } from "../ReadoutView";
@@ -80,7 +84,7 @@ function NodeTrace({ values, labels }: { values: NodeValue[]; labels: Map<number
             <td className="num sdk-mono">
               {value.skipped
                 ? t("sdkEmuSkipped")
-                : ["threshold", "debounce", "gate"].includes(value.op)
+                : ["threshold", "debounce", "gate", "button"].includes(value.op)
                   ? (value.bool ? "true" : "false")
                   : OUTPUT_OPS.has(value.op) ? "" : value.result.toFixed(3)}
             </td>
@@ -139,6 +143,72 @@ function LedDot({ rgb }: { rgb: readonly [number, number, number] }) {
   );
 }
 
+const GLYPH_PX = 6;
+
+/**
+ * The OLED as the device's "app" page draws it. Rows come from the SDK's
+ * oled.mjs, which mirrors the firmware to the character and the pixel; only
+ * the glyphs here are the browser's font rather than the panel's.
+ */
+function OledPanel({ rows }: { rows: readonly (OledRow | null)[] }) {
+  const { t } = useI18n();
+  return (
+    <div className="sdk-oled-panel">
+      <svg viewBox={`0 0 ${OLED_WIDTH_PX} ${OLED_ROWS * OLED_ROW_PX}`} role="img" aria-label={t("sdkEmuOled")}>
+        {rows.map((row, index) => {
+          if (!row) return null;
+          const y = index * OLED_ROW_PX;
+          const text = row.kind === "text" ? row.text ?? "" : row.label;
+          return (
+            <g key={index}>
+              {text ? (
+                <text x={0} y={y + 7} fontSize={8} fill="currentColor" textLength={text.length * GLYPH_PX} lengthAdjust="spacingAndGlyphs" style={{ whiteSpace: "pre" }}>
+                  {text}
+                </text>
+              ) : null}
+              {row.kind === "bar" && row.bar ? (
+                <>
+                  <rect x={row.bar.x0 + 0.5} y={y + 0.5} width={row.bar.width - 1} height={OLED_ROW_PX - 2} fill="none" stroke="currentColor" strokeWidth={1} />
+                  {row.bar.fillPx > 0 ? <rect x={row.bar.x0 + 1} y={y + 1} width={row.bar.fillPx} height={OLED_ROW_PX - 3} fill="currentColor" /> : null}
+                </>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+/** The OLED and the action button, for a package that uses either. */
+function OledSection({ sim, rows, onPress, pressDisabled, extra }: {
+  sim: Simulator | null;
+  rows: readonly (OledRow | null)[];
+  onPress: () => void;
+  pressDisabled?: boolean;
+  extra?: ReactNode;
+}) {
+  const { t } = useI18n();
+  if (!sim || (!sim.canDisplay && !sim.hearsButton)) return null;
+  return (
+    <section className="sdk-section sdk-oled">
+      <h3>{t("sdkEmuOled")}</h3>
+      {sim.canDisplay ? <OledPanel rows={rows} /> : null}
+      {sim.canDisplay ? <p className="sdk-hint">{t("sdkEmuOledHint")}</p> : null}
+      {sim.hearsButton ? (
+        <div className="sdk-oled-row">
+          <button type="button" className="button compact" onClick={onPress} disabled={pressDisabled} title={t("sdkEmuPressHint")}>
+            <CircleDot size={13} strokeWidth={2} />{t("sdkEmuPress")}
+          </button>
+          {extra}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+const NO_ROWS: readonly (OledRow | null)[] = [];
+
 /**
  * The compiled package, kept as the same object while its content is the same.
  * Editing a comment or re-analysing for any other reason must not restart a
@@ -163,8 +233,9 @@ function useLabels(analysis: Analysis) {
     if (!report) return labels;
     for (const [name, index] of Object.entries(report.signals)) labels.set(index, name);
     for (const [name, index] of Object.entries(report.events)) if (!labels.has(index)) labels.set(index, name);
-    (analysis.package?.nodes ?? []).forEach((node: { op: string; event?: string }, index: number) => {
+    (analysis.package?.nodes ?? []).forEach((node: { op: string; event?: string; row?: number; label?: string }, index: number) => {
       if (node.event && !labels.has(index)) labels.set(index, `→ ${node.event}`);
+      if (node.row !== undefined && !labels.has(index)) labels.set(index, `▭ ${node.row} "${node.label ?? ""}"`);
     });
     return labels;
   }, [analysis]);
@@ -188,6 +259,8 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<number>(1);
   const [budget, setBudget] = useState({ load: 0, grace: 0 });
+  // Frame indices a press is delivered before, so they replay with the run.
+  const [presses, setPresses] = useState<ReadonlySet<number>>(() => new Set());
 
   const device = devices.find((item) => item.uid === deviceUid);
   const shape = shapeOf(device) ?? { rows: target.rows, cols: target.cols };
@@ -215,6 +288,7 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
       setFrames(parsed);
       setFile(entry.path);
       setIndex(0);
+      setPresses(new Set());
       const sidecar = entries.find((item) => item.path === sidecarPathFor(entry.path));
       setRecorded(sidecar ? parseEventsCsv(await fetchText(sidecar.path)) : null);
     } catch (error) {
@@ -224,9 +298,9 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
 
   // The whole run, for the timeline and the comparison; a fresh cursor for
   // stepping. Both follow every edit of the source.
-  const allEvents = useMemo(() => (pkg && frames.length ? simulateAll(pkg, frames) : []), [pkg, frames]);
-  const cursor = useMemo(() => (pkg && frames.length ? new RecordingCursor(pkg, frames) : null), [pkg, frames]);
-  const [shown, setShown] = useState<{ values: NodeValue[]; frameEvents: SimEvent[]; led: readonly [number, number, number] } | null>(null);
+  const allEvents = useMemo(() => (pkg && frames.length ? simulateAll(pkg, frames, presses) : []), [pkg, frames, presses]);
+  const cursor = useMemo(() => (pkg && frames.length ? new RecordingCursor(pkg, frames, presses) : null), [pkg, frames, presses]);
+  const [shown, setShown] = useState<{ values: NodeValue[]; frameEvents: SimEvent[]; led: readonly [number, number, number]; oled: (OledRow | null)[] } | null>(null);
 
   useEffect(() => {
     if (!cursor) {
@@ -235,7 +309,7 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
     }
     cursor.setBudget(budget.load, budget.grace);
     const frameEvents = cursor.seek(index);
-    setShown({ values: cursor.simulator.nodeValues(), frameEvents, led: cursor.simulator.led });
+    setShown({ values: cursor.simulator.nodeValues(), frameEvents, led: cursor.simulator.led, oled: cursor.simulator.oledRows() });
     onMarkLines(pkg && analysis.report ? linesForEvents(pkg, analysis.report.nodeLines, frameEvents) : new Set());
   }, [cursor, index, budget, pkg, analysis.report, onMarkLines]);
 
@@ -355,6 +429,24 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
             <p className="notice warning">{t("sdkEmuShapeMismatch").replace("{rec}", `${frame.rows} × ${frame.cols}`).replace("{target}", `${target.rows} × ${target.cols}`)}</p>
           ) : null}
 
+          <OledSection
+            sim={cursor?.simulator ?? null}
+            rows={shown?.oled ?? NO_ROWS}
+            // Seen by the next frame, as on the device; stepping there shows it.
+            onPress={() => {
+              setPlaying(false);
+              setPresses(new Set([...presses, index + 1]));
+              setIndex(Math.min(frames.length - 1, index + 1));
+            }}
+            pressDisabled={index >= frames.length - 1}
+            extra={presses.size ? (
+              <>
+                <span className="sdk-hint">{t("sdkEmuPresses").replace("{count}", String(presses.size))}</span>
+                <button type="button" className="button compact" onClick={() => setPresses(new Set())}>{t("sdkEmuClearPresses")}</button>
+              </>
+            ) : null}
+          />
+
           <BudgetControls load={budget.load} grace={budget.grace} onChange={(load, grace) => setBudget({ load, grace })} />
 
           <section className="sdk-section">
@@ -410,7 +502,7 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
   const [deviceUid, setDeviceUid] = useState(online[0]?.uid ?? devices[0]?.uid ?? "");
   const [running, setRunning] = useState(false);
   const [budget, setBudget] = useState({ load: 0, grace: 0 });
-  const [view, setView] = useState<{ frame: Frame | null; values: NodeValue[]; events: SimEvent[]; led: readonly [number, number, number]; coverage: number; missed: number; received: number } | null>(null);
+  const [view, setView] = useState<{ frame: Frame | null; values: NodeValue[]; events: SimEvent[]; led: readonly [number, number, number]; oled: (OledRow | null)[]; coverage: number; missed: number; received: number } | null>(null);
   const simRef = useRef<Simulator | null>(null);
   const gapsRef = useRef(new SeqGapTracker());
   const fallbackSeq = useRef(0);
@@ -456,7 +548,7 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
       if (!sim || !latest) return;
       pending.current = null;
       const gaps = gapsRef.current;
-      setView({ frame: latest.frame, values: sim.nodeValues(), events: sim.events.slice(-MAX_EVENTS_SHOWN), led: sim.led, coverage: gaps.coverage, missed: gaps.missed, received: gaps.received });
+      setView({ frame: latest.frame, values: sim.nodeValues(), events: sim.events.slice(-MAX_EVENTS_SHOWN), led: sim.led, oled: sim.oledRows(), coverage: gaps.coverage, missed: gaps.missed, received: gaps.received });
       const report = reportRef.current;
       const currentPkg = pkgRef.current;
       if (currentPkg && report && latest.events.length) onMarkLinesRef.current(linesForEvents(currentPkg, report.nodeLines, latest.events));
@@ -506,6 +598,8 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
         <>
           <EmulatorHeatmap frame={view.frame} rows={view.frame?.rows ?? shape.rows} cols={view.frame?.cols ?? shape.cols} range={range} regions={analysis.report?.regions ?? NO_REGIONS} ariaLabel={t("sdkEmuHeatmap")} />
           <p className="sdk-hint sdk-mono">{t("sdkEmuReceived").replace("{n}", String(view.received))} · f{view.frame?.seq}</p>
+          {/* Delivered to the next frame the stream brings, as a real press is. */}
+          <OledSection sim={simRef.current} rows={view.oled} onPress={() => simRef.current?.pressButton()} />
           <BudgetControls load={budget.load} grace={budget.grace} onChange={(load, grace) => setBudget({ load, grace })} />
           <section className="sdk-section">
             <h3>{t("sdkEmuNodes")}</h3>

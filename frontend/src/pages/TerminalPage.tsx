@@ -440,6 +440,7 @@ const COMMAND_BLOCKS: CommandBlock[] = [
           { labelKey: "oledPage_live_status", value: "live_status" },
           { labelKey: "oledPage_sensor_snapshot", value: "sensor_snapshot" },
           { labelKey: "oledPage_recording_status", value: "recording_status" },
+          { labelKey: "oledPage_app", value: "app" },
         ],
       },
       { key: "oled-update-hz", labelKey: "paramOledUpdateHz", type: "number" },

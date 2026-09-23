@@ -2886,6 +2886,7 @@ export function DeviceSettingsPage() {
                       <option value="live_status">{t("oledPage_live_status")}</option>
                       <option value="sensor_snapshot">{t("oledPage_sensor_snapshot")}</option>
                       <option value="recording_status">{t("oledPage_recording_status")}</option>
+                      <option value="app">{t("oledPage_app")}</option>
                     </select>
                   </div>
                   <div className="field">

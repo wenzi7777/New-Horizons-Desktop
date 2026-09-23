@@ -129,6 +129,36 @@ class PackageValidationTests(unittest.TestCase):
         ]
         self.assertEqual(validate_package(doc)["nodes"], 24)
 
+    def test_an_oled_and_button_package_is_accepted(self):
+        # Firmware v1.4.0: show/bar/button()/% compile to these, and declare
+        # display and button. Refusing them here would stop every such app at
+        # install, with a code that says nothing about why.
+        doc = json.loads(json.dumps(GOOD_PACKAGE))
+        doc["manifest"].update(min_os="v1.4.0", capabilities=["button", "display", "read_matrix"])
+        doc["nodes"] = [
+            {"op": "button"},
+            {"op": "counter", "in": 0},
+            {"op": "const", "value": 2.0},
+            {"op": "mod", "in": [1, 2]},
+            {"op": "oled_text", "in": 3, "row": 0, "label": "page"},
+            {"op": "oled_bar", "in": 3, "row": 1, "label": "p", "lo": 0.0, "hi": 1.0},
+        ]
+        self.assertEqual(validate_package(doc)["nodes"], 6)
+
+    def test_every_op_and_capability_the_sdk_knows_is_known_here(self):
+        # The vendored SDK is what App Studio compiles with; an op it can emit
+        # that this module does not know is an app the Desktop builds and then
+        # refuses to install.
+        from newhorizons_backend.app_library import CAPABILITIES, KNOWN_OPS
+        import re
+        opset = (ROOT / "frontend" / "src" / "sdk" / "lib" / "opset.mjs").read_text(encoding="utf-8")
+        sdk_ops = set(re.findall(r'^\s*op\("([a-z_0-9]+)"', opset, re.M))
+        self.assertTrue(sdk_ops)
+        self.assertEqual(sdk_ops, KNOWN_OPS)
+        block = re.search(r"export const CAPABILITIES = Object\.freeze\(\{(.*?)\}\);", opset, re.S)
+        sdk_caps = set(re.findall(r"^\s*([a-z_]+):", block.group(1), re.M))
+        self.assertEqual(sdk_caps, CAPABILITIES)
+
     def test_unknown_op(self):
         doc = json.loads(json.dumps(GOOD_PACKAGE))
         doc["nodes"] = [{"op": "rm_rf"}]

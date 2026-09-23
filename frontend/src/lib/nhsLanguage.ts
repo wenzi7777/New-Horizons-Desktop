@@ -40,8 +40,9 @@ export const nhsLanguage = StreamLanguage.define<State>({
       }
       if (STATEMENTS.has(text)) {
         // The word after `region`, `signal`, `event` and `emit` names
-        // something; after `app` it names the app.
-        state.afterDeclarator = text !== "led" && text !== "gate";
+        // something; after `app` it names the app. `show` and `bar` start
+        // with a row number, so their first word is a value, not a name.
+        state.afterDeclarator = !["led", "gate", "show", "bar"].includes(text);
         return "keyword";
       }
       if (KEYWORDS.has(text)) return "keyword";
@@ -49,7 +50,7 @@ export const nhsLanguage = StreamLanguage.define<State>({
       if (LITERAL_NAMES.has(text)) return "atom";
       return "variableName";
     }
-    if (stream.match(/^(<=|>=|[<>=+\-*/])/)) return "operator";
+    if (stream.match(/^(<=|>=|[<>=+\-*/%])/)) return "operator";
     stream.next();
     return "punctuation";
   },
@@ -76,6 +77,7 @@ const FUNCTION_DOCS: Record<string, { args: string; info: string }> = {
   clamp: { args: "(x, lo, hi)", info: OPS.clamp.summary },
   budget_load: { args: "()", info: OPS.budget_load.summary },
   grace_left: { args: "()", info: OPS.grace_left.summary },
+  button: { args: "()", info: OPS.button.summary },
 };
 
 export function functionDoc(name: string) {

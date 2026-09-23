@@ -64,6 +64,10 @@ export class SeqGapTracker {
  * Moving forward steps on from where it is. Moving backward replays from the
  * start: a debounce's timer and a window's ring are the history, so there is
  * no other way to know their state at an earlier frame.
+ *
+ * Button presses are part of that history, so they are kept by frame index
+ * and replayed with it -- a press sent straight to the simulator would vanish
+ * the first time the operator scrubbed backwards past it.
  */
 export class RecordingCursor {
   private sim: Simulator;
@@ -71,7 +75,11 @@ export class RecordingCursor {
   position = -1;
   private budget = { load: 0, graceLeft: 0 };
 
-  constructor(private readonly pkg: Record<string, any>, private readonly frames: readonly Frame[]) {
+  constructor(
+    private readonly pkg: Record<string, any>,
+    private readonly frames: readonly Frame[],
+    private readonly presses: ReadonlySet<number> = new Set(),
+  ) {
     this.sim = new Simulator(pkg);
   }
 
@@ -99,6 +107,7 @@ export class RecordingCursor {
     let last: SimEvent[] = [];
     while (this.position < target) {
       this.position += 1;
+      if (this.presses.has(this.position)) this.sim.pressButton();
       last = this.sim.step(this.frames[this.position]);
     }
     return last;
@@ -110,8 +119,13 @@ export class RecordingCursor {
 }
 
 /** Every event a package produces over a whole recording, for the timeline. */
-export function simulateAll(pkg: Record<string, any>, frames: readonly Frame[]): SimEvent[] {
-  return new Simulator(pkg).run(frames).events;
+export function simulateAll(pkg: Record<string, any>, frames: readonly Frame[], presses: ReadonlySet<number> = new Set()): SimEvent[] {
+  const sim = new Simulator(pkg);
+  frames.forEach((frame, index) => {
+    if (presses.has(index)) sim.pressButton();
+    sim.step(frame);
+  });
+  return sim.events;
 }
 
 /** Largest cell value across frames: the default top of the colour scale. */

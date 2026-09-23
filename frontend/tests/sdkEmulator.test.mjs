@@ -113,3 +113,25 @@ test("a recording's sidecar is found by name and kept out of the file list", asy
   assert.equal(emu.isSidecar("143000.events.csv"), true);
   assert.equal(emu.isSidecar("143000.csv"), false);
 });
+
+test("a button press in a recording survives scrubbing back past it", async () => {
+  // Stepping backwards replays from the start; a press that was only sent to
+  // the simulator would be lost the first time that happened.
+  const { emu } = await modules;
+  const pkg = await compile('show 0 "n" counter(button())\n');
+  const run = frames([0, 0, 0, 0, 0]);
+  const cursor = new emu.RecordingCursor(pkg, run, new Set([1, 3]));
+  cursor.seek(4);
+  assert.equal(cursor.simulator.oledRows()[0].value, 2);
+  cursor.seek(2);
+  assert.equal(cursor.simulator.oledRows()[0].value, 1);
+  cursor.seek(4);
+  assert.equal(cursor.simulator.oledRows()[0].value, 2);
+});
+
+test("the whole-run timeline sees the same presses", async () => {
+  const { emu } = await modules;
+  const pkg = await compile("event pressed when counter(button()) > 0.5\n");
+  assert.deepEqual(emu.simulateAll(pkg, frames([0, 0, 0]), new Set([2])).map((e) => e.frameSeq), [102]);
+  assert.deepEqual(emu.simulateAll(pkg, frames([0, 0, 0])), []);
+});

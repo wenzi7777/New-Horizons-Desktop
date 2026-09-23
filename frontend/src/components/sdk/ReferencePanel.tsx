@@ -12,8 +12,11 @@ import {
   MAX_DEBOUNCE_MS,
   MAX_EVENT_NAME,
   MAX_NODES,
+  MAX_OLED_DIGITS,
+  MAX_OLED_LABEL,
   MAX_PACKAGE_BYTES,
   MAX_WINDOW,
+  OLED_ROWS,
   OPS,
   WINDOW_POOL,
   readoutset,
@@ -29,7 +32,9 @@ const STATEMENTS = [
   ["event", "event <name> when <expression> > <number> [hyst <n>] [for <n>ms]"],
   ["emit", "emit <name> value <expression> on rise(<event>)"],
   ["led", "led <colour> when <event>"],
-  ["gate", "gate (<expression> < <number>) { signal / event / emit / led … }"],
+  ["show", 'show <row> "<label>" <expression> [digits <n>]'],
+  ["bar", 'bar <row> "<label>" <expression> range <lo>..<hi>'],
+  ["gate", "gate (<expression> < <number>) { signal / event / emit / led / show / bar … }"],
 ] as const;
 
 export function ReferencePanel({ kind }: { kind: SdkKind }) {
@@ -49,6 +54,9 @@ export function ReferencePanel({ kind }: { kind: SdkKind }) {
     [t("sdkLimitEvent"), `${MAX_EVENT_NAME}`],
     [t("sdkLimitDebounce"), `${MAX_DEBOUNCE_MS} ms`],
     [t("sdkLimitPackage"), `${MAX_PACKAGE_BYTES} B`],
+    [t("sdkLimitOledRows"), `0–${OLED_ROWS - 1}`],
+    [t("sdkLimitOledLabel"), `${MAX_OLED_LABEL}`],
+    [t("sdkLimitOledDigits"), `0–${MAX_OLED_DIGITS}`],
   ];
 
   return (
