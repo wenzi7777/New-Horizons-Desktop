@@ -51,6 +51,10 @@ DEFAULT_DEVICE_NAME_PREFIXES = (
 ) + LEGACY_DEFAULT_DEVICE_NAME_PREFIXES
 
 
+# The mock seeds the v1.1+ app slot/package model, so it has to report a
+# firmware new enough for the UI to show it; v0.5.0 hid the whole Apps UI.
+MOCK_FIRMWARE_VERSION = "v1.2.2"
+
 class NewHorizonsService:
     COMMAND_TTL_MS = 15000
     BOOT_GRACE_SEC = 90.0
@@ -3494,13 +3498,13 @@ class NewHorizonsService:
             "device_name": device_uid,
             "mode": mode,
             "protocol": "NHO/Arduino/1",
-            "firmware_version": "v0.5.0",
+            "firmware_version": MOCK_FIRMWARE_VERSION,
             "hardware_model": str(profile["hardware_model"]),
             "system": {
                 "name": device_uid,
                 "hardware_model": str(profile["hardware_model"]),
                 "mode": mode,
-                "firmware_version": "v0.5.0",
+                "firmware_version": MOCK_FIRMWARE_VERSION,
                 "protocol": "NHO/Arduino/1",
             },
             "matrix_shape": shape,

@@ -149,5 +149,33 @@ class TranslationParityTests(unittest.TestCase):
                 self.assertEqual(sorted(keys - have), [])
 
 
+class RunnerIdentityTests(unittest.TestCase):
+    """The injected runner must never drive an effect.
+
+    DeviceSettingsPage passes an inline arrow, so the runner is a new function
+    on every render. When refresh() depended on it, every command re-rendered
+    the page, which re-created refresh(), which re-ran the effect -- the Apps
+    tab cycled app_list / app_list_packages / app_events forever. ReadoutView's
+    polling restarted the same way.
+    """
+
+    def callback_deps(self, source: str, name: str) -> str:
+        start = source.index(f"const {name} = useCallback(")
+        deps = re.search(r"\n  \}, \[([^\]]*)\]\);", source[start:])
+        self.assertIsNotNone(deps, name)
+        return deps.group(1)
+
+    def test_panel_refresh_ignores_runner_identity(self):
+        panel = read("components/DeviceAppsPanel.tsx")
+        self.assertIn("runnerRef.current = runner;", panel)
+        self.assertNotIn("runner", self.callback_deps(panel, "refresh"))
+        self.assertNotIn("await runner(", panel)
+
+    def test_readout_poll_ignores_runner_identity(self):
+        view = read("components/ReadoutView.tsx")
+        self.assertIn("runnerRef.current = runner;", view)
+        self.assertNotIn("runner", self.callback_deps(view, "poll"))
+
+
 if __name__ == "__main__":
     unittest.main()

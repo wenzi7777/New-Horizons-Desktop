@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Download, Store, Wrench } from "lucide-react";
 import { DeviceAppsPanel } from "../components/DeviceAppsPanel";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
@@ -99,8 +100,6 @@ export function DeviceAppsPage() {
 
   const toggleMaintenance = useCallback(
     async (enable: boolean) => {
-      // Never silent: entering maintenance stops the scan, which on a
-      // recording device is not something to do behind the operator's back.
       await queue({ command: enable ? "enter_maintenance" : "exit_maintenance",
                     ...(enable ? { reason: "app_install" } : {}) });
     },
@@ -115,24 +114,54 @@ export function DeviceAppsPage() {
     <div className="device-apps-page">
       <header className="device-apps-page-header">
         <div>
+          <p className="device-apps-eyebrow">{normalized?.displayName || deviceUid}</p>
           <h1>{t("deviceApps")}</h1>
-          <p className="device-apps-subtitle">
-            {normalized?.displayName || deviceUid}
-            <span className={`mode-badge ${maintenanceMode ? "maintenance" : "normal"}`}>
-              {maintenanceMode ? t("maintenanceModeLabel") : t("normalModeLabel")}
-            </span>
-          </p>
         </div>
-        <Link className="button" to="/apps">{t("appStoreTitle")}</Link>
+        <Link className="button" to="/apps">
+          <Store size={15} strokeWidth={2} />
+          {t("appStoreTitle")}
+        </Link>
       </header>
+
+      {supportsRegistry ? (
+        <div className={`app-maintenance-banner${maintenanceMode ? " active" : ""}`}>
+          <span className="app-maintenance-icon" aria-hidden="true">
+            <Wrench size={18} strokeWidth={1.75} />
+          </span>
+          <div className="app-maintenance-copy">
+            <strong>{maintenanceMode ? t("maintenanceModeLabel") : t("normalModeLabel")}</strong>
+            <span>{maintenanceMode ? t("appMaintenanceActive") : t("appMaintenanceNeeded")}</span>
+          </div>
+          {/* Never silent: entering maintenance stops the scan, so it is always
+              the operator's explicit step. */}
+          <button
+            type="button"
+            className={`button compact${maintenanceMode ? "" : " primary"}`}
+            disabled={running}
+            onClick={() => void toggleMaintenance(!maintenanceMode)}
+          >
+            {maintenanceMode ? t("appInstallExitMaintenance") : t("appInstallEnterMaintenance")}
+          </button>
+        </div>
+      ) : null}
 
       {errorMessage ? <p className="notice error">{errorMessage}</p> : null}
       {notice ? <p className={`notice ${notice.kind}`}>{notice.text}</p> : null}
 
       {catalogEntry ? (
         <section className="app-install-panel">
-          <h3>{t("appInstallTitle")}: {localised(catalogEntry.name)} v{catalogEntry.version}</h3>
-          <p className="app-install-summary">{localised(catalogEntry.summary)}</p>
+          <div className="app-install-hero">
+            {catalogEntry.icon_url ? (
+              <img className="app-card-icon" src={catalogEntry.icon_url} alt="" />
+            ) : (
+              <div className="app-card-icon app-card-icon-fallback" aria-hidden="true" />
+            )}
+            <div>
+              <span className="app-install-eyebrow">{t("appInstallTitle")}</span>
+              <h3>{localised(catalogEntry.name)} <span className="app-row-version">v{catalogEntry.version}</span></h3>
+              <p className="app-install-summary">{localised(catalogEntry.summary)}</p>
+            </div>
+          </div>
           <dl className="app-detail-facts">
             <div><dt>{t("appMinOs")}</dt><dd>{catalogEntry.min_os}</dd></div>
             <div><dt>{t("appSize")}</dt><dd>{catalogEntry.package.size} B</dd></div>
@@ -143,42 +172,39 @@ export function DeviceAppsPage() {
           {!supportsRegistry ? (
             <p className="notice error">{t("appRegistryUnsupported")}</p>
           ) : !maintenanceMode ? (
-            <p className="notice warning">
-              {t("appInstallRequiresMaintenance")}{" "}
-              <button type="button" className="button" disabled={running}
-                      onClick={() => void toggleMaintenance(true)}>
-                {t("appInstallEnterMaintenance")}
-              </button>
-            </p>
+            <p className="app-install-note">{t("appInstallRequiresMaintenance")}</p>
           ) : null}
 
           {phase ? (
             <div className="app-install-progress">
-              <span>{t(`appInstallPhase_${phase}`)}</span>
+              <div className="app-install-progress-label">
+                <span>{t(`appInstallPhase_${phase}`)}</span>
+                <span className="app-mono">{percent}%</span>
+              </div>
               <div className="progress-track">
                 <div className="progress-bar" style={{ width: `${percent}%` }} />
               </div>
-              <span>{percent}%</span>
-              <button type="button" className="button"
+              <button type="button" className="button ghost compact"
                       onClick={() => { abortRef.current.current = true; }}>
                 {t("appInstallCancel")}
               </button>
             </div>
           ) : (
             <div className="app-install-actions">
+              <button type="button" className="button ghost" onClick={() => {
+                params.delete("install");
+                setParams(params, { replace: true });
+              }}>
+                {t("cancel")}
+              </button>
               <button
                 type="button"
                 className="button primary"
                 disabled={running || !maintenanceMode || !supportsRegistry}
                 onClick={() => void install()}
               >
+                <Download size={15} strokeWidth={2} />
                 {t("appInstall")}
-              </button>
-              <button type="button" className="button" onClick={() => {
-                params.delete("install");
-                setParams(params, { replace: true });
-              }}>
-                {t("cancel")}
               </button>
             </div>
           )}
@@ -191,15 +217,6 @@ export function DeviceAppsPage() {
         supportsRegistry={supportsRegistry}
         busy={running}
       />
-
-      {maintenanceMode ? (
-        <p className="app-exit-maintenance">
-          <button type="button" className="button" disabled={running}
-                  onClick={() => void toggleMaintenance(false)}>
-            {t("appInstallExitMaintenance")}
-          </button>
-        </p>
-      ) : null}
     </div>
   );
 }

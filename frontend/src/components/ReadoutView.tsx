@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Pause, Play, RefreshCw } from "lucide-react";
 import { useI18n } from "../i18n";
 import {
   type ReadoutPackage,
@@ -98,6 +99,10 @@ export function ReadoutView({ pkg, runner, busy = false }: ReadoutViewProps) {
   const [live, setLive] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const inFlight = useRef(false);
+  // Read through a ref: a caller that passes a fresh runner each render would
+  // otherwise restart the polling effect -- and fire a pass -- on every render.
+  const runnerRef = useRef(runner);
+  runnerRef.current = runner;
 
   const poll = useCallback(async () => {
     // One pass at a time: the device answers one command per connection, and
@@ -110,7 +115,7 @@ export function ReadoutView({ pkg, runner, busy = false }: ReadoutViewProps) {
       const byCommand = new Map<string, Record<string, unknown> | null>();
       for (const source of spec.sources) {
         if (!byCommand.has(source.command)) {
-          const response = await runner({ command: source.command });
+          const response = await runnerRef.current({ command: source.command });
           byCommand.set(source.command, response.result as Record<string, unknown> | null);
         }
         next[source.id] = extractSource(byCommand.get(source.command) ?? null, source);
@@ -123,7 +128,7 @@ export function ReadoutView({ pkg, runner, busy = false }: ReadoutViewProps) {
     } finally {
       inFlight.current = false;
     }
-  }, [runner, spec.sources, rejection]);
+  }, [spec.sources, rejection]);
 
   useEffect(() => {
     if (!live || rejection) return;
@@ -140,16 +145,33 @@ export function ReadoutView({ pkg, runner, busy = false }: ReadoutViewProps) {
     <section className="readout-view">
       <header className="readout-header">
         <div className="readout-header-meta">
+          <span className={`readout-live${live ? " on" : ""}`}>
+            <i aria-hidden="true" />
+            {live ? t("readoutLive") : t("readoutPaused")}
+          </span>
           {updatedAt ? (
-            <span>{t("readoutUpdated")}: {new Date(updatedAt).toLocaleTimeString()}</span>
+            <span>{t("readoutUpdated")} {new Date(updatedAt).toLocaleTimeString()}</span>
           ) : <span>{t("loading")}</span>}
-          <span>{t("readoutInterval")}: {refreshInterval(spec)} ms</span>
+          <span>{t("readoutInterval")} {refreshInterval(spec)} ms</span>
         </div>
         <div className="readout-header-actions">
-          <button type="button" className="button" disabled={busy} onClick={() => void poll()}>
-            {t("refresh")}
+          <button
+            type="button"
+            className="button ghost compact icon-button"
+            disabled={busy}
+            aria-label={t("refresh")}
+            title={t("refresh")}
+            onClick={() => void poll()}
+          >
+            <RefreshCw size={15} strokeWidth={2} />
           </button>
-          <button type="button" className="button" onClick={() => setLive((value) => !value)}>
+          <button
+            type="button"
+            className="button compact"
+            aria-pressed={!live}
+            onClick={() => setLive((value) => !value)}
+          >
+            {live ? <Pause size={14} strokeWidth={2} /> : <Play size={14} strokeWidth={2} />}
             {live ? t("readoutPause") : t("readoutResume")}
           </button>
         </div>

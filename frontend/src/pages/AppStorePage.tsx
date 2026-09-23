@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react";
 import { api, type DeviceEntry } from "../lib/api";
 import { useDevicesPolling } from "../lib/device";
 import {
@@ -7,6 +8,7 @@ import {
   categoriesOf,
   useLocalised,
 } from "../lib/appLibrary";
+import { Markdown } from "../components/Markdown";
 import { useI18n } from "../i18n";
 
 const ALL_CATEGORIES = "__all__";
@@ -37,11 +39,12 @@ function AppCard({ entry, onOpen }: { entry: AppCatalogEntry; onOpen: () => void
         <div className="app-card-title">{localised(entry.name)}</div>
         <div className="app-card-summary">{localised(entry.summary)}</div>
         <div className="app-card-meta">
-          <span>v{entry.version}</span>
           <span>{entry.author}</span>
+          <span>v{entry.version}</span>
           <span className="app-card-minos">{t("appMinOs")} {entry.min_os}</span>
         </div>
       </div>
+      <span className="app-card-get" aria-hidden="true">{t("appView")}</span>
     </button>
   );
 }
@@ -79,55 +82,68 @@ function AppDetail({ entry, onBack, devices }: {
 
   return (
     <div className="app-detail">
-      <div className="app-detail-header">
-        <button type="button" className="button" onClick={onBack}>
-          ← {t("appStoreTitle")}
-        </button>
-      </div>
+      <button type="button" className="button ghost compact app-back" onClick={onBack}>
+        <ChevronLeft size={16} strokeWidth={2} />
+        {t("appStoreTitle")}
+      </button>
+
       <div className="app-detail-hero">
         <AppIcon entry={entry} />
-        <div>
+        <div className="app-detail-hero-text">
           <h2>{localised(entry.name)}</h2>
+          <p className="app-detail-author">{entry.author}</p>
           <p className="app-detail-summary">{localised(entry.summary)}</p>
         </div>
       </div>
 
       <dl className="app-detail-facts">
         <div><dt>{t("appVersion")}</dt><dd>v{entry.version}</dd></div>
-        <div><dt>{t("appAuthor")}</dt><dd>{entry.author}</dd></div>
         <div><dt>{t("appMinOs")}</dt><dd>{entry.min_os}</dd></div>
-        {entry.license ? <div><dt>{t("appLicense")}</dt><dd>{entry.license}</dd></div> : null}
-        {entry.category ? <div><dt>{t("appCategory")}</dt><dd>{entry.category}</dd></div> : null}
-        {typeof entry.nodes === "number"
-          ? <div><dt>{t("appNodes")}</dt><dd>{entry.nodes}</dd></div> : null}
         {typeof entry.estimated_us === "number"
           ? <div><dt>{t("appEstimatedCost")}</dt><dd>~{entry.estimated_us} µs</dd></div> : null}
+        {typeof entry.nodes === "number"
+          ? <div><dt>{t("appNodes")}</dt><dd>{entry.nodes}</dd></div> : null}
         <div><dt>{t("appSize")}</dt><dd>{entry.package.size} B</dd></div>
-        {entry.capabilities?.length
-          ? <div><dt>{t("appCapabilities")}</dt><dd>{entry.capabilities.join(", ")}</dd></div>
-          : null}
+        {entry.category ? <div><dt>{t("appCategory")}</dt><dd>{entry.category}</dd></div> : null}
+        {entry.license ? <div><dt>{t("appLicense")}</dt><dd>{entry.license}</dd></div> : null}
       </dl>
 
-      <div className="app-detail-install">
-        <span className="app-detail-install-hint">{t("appInstallPickDevice")}</span>
-        <div className="app-detail-device-list">
-          {devices.map((device) => (
-            <Link
-              key={device.device_uid}
-              className="button"
-              to={`/device/${encodeURIComponent(device.device_uid)}/apps?install=${encodeURIComponent(entry.id)}`}
-            >
-              {device.display_name || device.device_name || device.device_uid}
-            </Link>
-          ))}
-          {!devices.length ? <span className="app-slot-free">{t("appInstallNoDevices")}</span> : null}
+      {entry.capabilities?.length ? (
+        <div className="app-detail-capabilities">
+          <span>{t("appCapabilities")}</span>
+          {entry.capabilities.map((name) => <span key={name} className="app-pill">{name}</span>)}
         </div>
-      </div>
+      ) : null}
+
+      <section className="app-detail-install">
+        <h3>{t("appInstallPickDevice")}</h3>
+        <ul className="app-group-list">
+          {devices.map((device) => (
+            <li key={device.device_uid}>
+              <Link
+                className="app-device-row"
+                to={`/device/${encodeURIComponent(device.device_uid)}/apps?install=${encodeURIComponent(entry.id)}`}
+              >
+                <span className="app-device-name">
+                  {device.display_name || device.device_name || device.device_uid}
+                </span>
+                <span className="app-mono">
+                  {(device.display_name || device.device_name) &&
+                   (device.display_name || device.device_name) !== device.device_uid
+                    ? device.device_uid : ""}
+                </span>
+                <ChevronRight size={16} strokeWidth={2} aria-hidden="true" />
+              </Link>
+            </li>
+          ))}
+          {!devices.length ? <li className="app-empty">{t("appInstallNoDevices")}</li> : null}
+        </ul>
+      </section>
 
       {readme ? (
         <section className="app-detail-readme">
           <h3>{t("appReadme")}</h3>
-          <pre>{readme}</pre>
+          <Markdown source={readme} />
         </section>
       ) : null}
     </div>
@@ -185,8 +201,9 @@ export function AppStorePage() {
     return (
       <div className="app-store-page">
         <p className="notice error">{t("appNotFound")}</p>
-        <button type="button" className="button" onClick={() => navigate("/apps")}>
-          ← {t("appStoreTitle")}
+        <button type="button" className="button ghost compact app-back" onClick={() => navigate("/apps")}>
+          <ChevronLeft size={16} strokeWidth={2} />
+          {t("appStoreTitle")}
         </button>
       </div>
     );
@@ -207,8 +224,15 @@ export function AppStorePage() {
           <h1>{t("appStoreTitle")}</h1>
           <p className="app-store-subtitle">{t("appStoreSubtitle")}</p>
         </div>
-        <button type="button" className="button" onClick={() => void load(true)}>
-          {t("appLibraryRefresh")}
+        <button
+          type="button"
+          className="button ghost compact icon-button"
+          onClick={() => void load(true)}
+          disabled={status === "loading"}
+          aria-label={t("appLibraryRefresh")}
+          title={t("appLibraryRefresh")}
+        >
+          <RefreshCw size={15} strokeWidth={2} className={status === "loading" ? "spinning" : undefined} />
         </button>
       </header>
 
@@ -218,21 +242,39 @@ export function AppStorePage() {
       ) : null}
 
       <div className="app-store-filters">
-        <input
-          type="search"
-          value={query}
-          placeholder={t("appLibrarySearch")}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <select value={category} onChange={(event) => setCategory(event.target.value)}>
-          <option value={ALL_CATEGORIES}>{t("appCategoryAll")}</option>
-          {categories.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
+        <label className="app-search">
+          <Search size={15} strokeWidth={2} aria-hidden="true" />
+          <input
+            type="search"
+            value={query}
+            placeholder={t("appLibrarySearch")}
+            aria-label={t("appLibrarySearch")}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        {categories.length > 1 ? (
+          <div className="app-category-chips" role="tablist" aria-label={t("appCategory")}>
+            {[ALL_CATEGORIES, ...categories].map((name) => (
+              <button
+                key={name}
+                type="button"
+                role="tab"
+                aria-selected={category === name}
+                className={`app-chip${category === name ? " active" : ""}`}
+                onClick={() => setCategory(name)}
+              >
+                {name === ALL_CATEGORIES ? t("appCategoryAll") : name}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
-      {status === "loading" && !items.length ? <p>{t("loading")}</p> : null}
+      {status === "loading" && !items.length ? (
+        <div className="app-card-grid" aria-busy="true">
+          {[0, 1, 2, 3].map((index) => <div key={index} className="app-card skeleton" />)}
+        </div>
+      ) : null}
       {status !== "loading" && !visible.length ? (
         <p className="app-store-empty">{t("appLibraryEmpty")}</p>
       ) : null}
