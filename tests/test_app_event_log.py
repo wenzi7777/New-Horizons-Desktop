@@ -21,6 +21,7 @@ from newhorizons_backend.app_event_log import (  # noqa: E402
     EVENT_COLUMNS,
     append_dropped_marker,
     append_events,
+    events_lost_since,
     sidecar_path_for,
 )
 
@@ -114,6 +115,46 @@ class SampleAlignmentTests(unittest.TestCase):
         writer = source[source.index("def _write_csv_sample"):source.index("def _normalize_device_entry")]
         header = writer[writer.index('["timestamp_ms"]'):writer.index("writer.writerow(\n                [timestamp]")]
         self.assertLess(header.index('"Acc_z"'), header.index('"frame_seq"'))
+
+
+class LossAccountingTests(unittest.TestCase):
+    """Loss is a gap in sequence numbers, not the firmware's dropped counter.
+
+    The firmware counts every event pushed out of its ring since boot, read or
+    not. Using it as "lost" stamped an events_dropped row into the sidecar on
+    every poll once the ring had wrapped once -- data loss that never happened.
+    """
+
+    @staticmethod
+    def page(*seqs):
+        return [{"seq": seq} for seq in seqs]
+
+    def test_contiguous_reads_lose_nothing(self):
+        self.assertEqual(events_lost_since(10, 13, self.page(11, 12, 13)), 0)
+
+    def test_nothing_new_loses_nothing(self):
+        self.assertEqual(events_lost_since(10, 10, []), 0)
+
+    def test_a_gap_is_counted(self):
+        # 11..14 were overwritten before this read.
+        self.assertEqual(events_lost_since(10, 20, self.page(15, 16, 20)), 4)
+
+    def test_everything_rolled_off(self):
+        self.assertEqual(events_lost_since(10, 60, []), 50)
+
+    def test_the_first_read_has_no_baseline(self):
+        self.assertEqual(events_lost_since(0, 900, self.page(869, 900)), 0)
+
+    def test_the_cumulative_counter_is_not_used(self):
+        source = (BACKEND_ROOT / "newhorizons_backend" / "service.py").read_text(encoding="utf-8")
+        capture = source[source.index("def _capture_app_events"):source.index("def _record_result")]
+        self.assertIn("events_lost_since(previous, device_seq, events)", capture)
+        self.assertNotIn('dropped = int(data.get("dropped")', capture)
+
+    def test_a_device_restart_resets_the_baseline(self):
+        source = (BACKEND_ROOT / "newhorizons_backend" / "service.py").read_text(encoding="utf-8")
+        capture = source[source.index("def _capture_app_events"):source.index("def _record_result")]
+        self.assertIn("if previous and device_seq < previous:", capture)
 
 
 class PollerTests(unittest.TestCase):

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .app_event_log import append_dropped_marker, append_events
+from .app_event_log import append_dropped_marker, append_events, events_lost_since
 from .arduino_protocol import CONTROL_PORT, is_arduino_heartbeat_packet, is_arduino_stream_packet, packet_device_uid, send_control_command
 from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_for_hardware_model
 from .packet_parser import PacketParseError, parse_binary_packet
@@ -2445,11 +2445,23 @@ class NewHorizonsService:
             return
 
         try:
+            device_seq = int(data.get("seq") or 0)
+        except (TypeError, ValueError):
+            device_seq = 0
+        previous = self._app_event_seq.get(device_uid, 0)
+        if previous and device_seq < previous:
+            # The device restarted and its sequence began again. Keeping the old
+            # high-water mark would filter out every new event from now on.
+            previous = 0
+            self._app_event_seq[device_uid] = 0
+
+        try:
             written = append_events(sample_path, events)
-            dropped = int(data.get("dropped") or 0)
-            previous = self._app_event_seq.get(device_uid, 0)
-            if dropped and previous:
-                append_dropped_marker(sample_path, previous, dropped)
+            # Not data["dropped"]: that is cumulative since boot and would mark
+            # a loss on every poll once the ring had wrapped even once.
+            lost = events_lost_since(previous, device_seq, events)
+            if lost:
+                append_dropped_marker(sample_path, previous, lost)
         except OSError:
             # A failed sidecar write must never interrupt the sample recording,
             # which is the thing actually being measured.
@@ -2464,8 +2476,10 @@ class NewHorizonsService:
                     continue
         if highest:
             self._app_event_seq[device_uid] = highest
-        elif written == 0 and not self._app_event_seq.get(device_uid):
-            self._app_event_seq[device_uid] = int(data.get("seq") or 0)
+        elif device_seq > previous:
+            # Nothing returned but the device moved on (first poll, or all of it
+            # rolled off): advance, or the same loss is counted again next poll.
+            self._app_event_seq[device_uid] = device_seq
 
     def _record_result(self, device_uid: str, payload: Any) -> None:
         if not isinstance(payload, dict):

@@ -44,6 +44,31 @@ def append_events(sample_path: Path, events: Iterable[dict[str, Any]]) -> int:
     return len(rows)
 
 
+def events_lost_since(previous_seq: int, device_seq: int, events: list[Any]) -> int:
+    """How many events fell out of the device's ring between two reads.
+
+    The firmware's own ``dropped`` counts every event ever pushed out of its
+    ring since boot, read or not, so it grows forever once the ring has wrapped
+    and says nothing about *this* reader. The honest measure is the gap in
+    sequence numbers: everything after ``previous_seq`` should have come back,
+    so whatever is missing before the oldest returned event was overwritten
+    before we asked.
+    """
+    if previous_seq <= 0:
+        return 0
+    seqs = []
+    for event in events:
+        if isinstance(event, dict):
+            try:
+                seqs.append(int(event.get("seq") or 0))
+            except (TypeError, ValueError):
+                continue
+    seqs = [seq for seq in seqs if seq > previous_seq]
+    # Nothing came back although the device moved on: all of it rolled off.
+    oldest = min(seqs) if seqs else device_seq + 1
+    return max(0, oldest - previous_seq - 1)
+
+
 def append_dropped_marker(sample_path: Path, seq: int, dropped: int) -> None:
     """Record that events were lost before anyone read them.
 

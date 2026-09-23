@@ -64,10 +64,26 @@ class PanelWiringTests(unittest.TestCase):
         self.assertIn('t("appSuspendedHint")', panel)
         self.assertIn('t("appKilledHint")', panel)
 
-    def test_dropped_events_are_surfaced(self):
+    def test_installing_an_installed_app_updates_it(self):
+        page = read("pages/DeviceAppsPage.tsx")
+        call = page[page.index("await installAppPackage(queue, {"):]
+        call = call[:call.index("});")]
+        # Without it, updating features 1.0.0 -> 1.1.0 failed with
+        # already_installed after the new file had already been written.
+        self.assertIn("replace: true,", call)
+
+    def test_rolled_off_history_is_not_reported_as_loss(self):
         panel = read("components/DeviceAppsPanel.tsx")
-        # A lost event and an event that never happened must not look the same.
-        self.assertIn('t("appEventsDropped")', panel)
+        # The firmware's dropped counter is cumulative since boot, and a
+        # one-shot read cannot lose anything: showing it as "lost" told the
+        # operator hundreds of events were missing when none were.
+        self.assertIn('t("appEventsRolledOff")', panel)
+        self.assertNotIn("parsed.dropped", panel)
+        self.assertIn("parsed.seq - parsed.events.length", panel)
+
+    def test_newest_events_come_first(self):
+        panel = read("components/DeviceAppsPanel.tsx")
+        self.assertIn("sort((a, b) => b.seq - a.seq)", panel)
 
     def test_events_show_the_frame_they_belong_to(self):
         panel = read("components/DeviceAppsPanel.tsx")

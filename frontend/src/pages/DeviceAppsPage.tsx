@@ -82,6 +82,11 @@ export function DeviceAppsPage() {
         devicePath: pkg.device_path,
         dataHex: pkg.data_hex,
         sha256: pkg.sha256,
+        // Always replace. The upload has already overwritten apps/<id>.nha by
+        // the time app_install runs, so refusing an installed id would leave
+        // the index describing the old package while the file is the new one.
+        // Replacing keeps the slot binding and rebinds the new graph.
+        replace: true,
         onPhase: setPhase,
         onProgress: setProgress,
         abortRef: abortRef.current,

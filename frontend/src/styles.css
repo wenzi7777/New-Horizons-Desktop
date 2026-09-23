@@ -6336,7 +6336,7 @@ button:disabled {
 
 .app-event-list > li {
   display: grid;
-  grid-template-columns: 52px 60px minmax(64px, auto) minmax(0, 1fr) auto auto;
+  grid-template-columns: 52px 64px 60px minmax(64px, auto) minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   padding: 8px 14px;
@@ -6346,6 +6346,7 @@ button:disabled {
 .app-event-list > li.app-empty { display: block; }
 
 .app-event-seq,
+.app-event-gap,
 .app-event-frame,
 .app-event-value {
   font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
@@ -6379,7 +6380,12 @@ button:disabled {
 .app-event-detail.rise { background: rgba(36, 138, 61, 0.1); color: var(--success); }
 .app-event-detail.fall { background: rgba(118, 118, 128, 0.14); }
 
-.app-events-dropped { margin: 0; }
+.app-events-note {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
 
 /* --- Readouts ----------------------------------------------------------- */
 
@@ -6619,7 +6625,7 @@ button:disabled {
   .app-maintenance-banner { grid-template-columns: auto minmax(0, 1fr); }
   .app-maintenance-banner .button { grid-column: 1 / -1; }
 
-  .app-event-list > li { grid-template-columns: 44px minmax(0, 1fr) auto auto; }
+  .app-event-list > li { grid-template-columns: 44px 56px minmax(0, 1fr) auto auto; }
   .app-event-frame,
   .app-event-app { display: none; }
 }

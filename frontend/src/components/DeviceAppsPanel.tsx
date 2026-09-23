@@ -63,6 +63,14 @@ function AppBudgetMeter({ app }: { app: InstalledApp }) {
   );
 }
 
+/** Time since the previous event, from the device's own clock. */
+function formatGap(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return `+${Math.round(ms)} ms`;
+  if (ms < 60000) return `+${(ms / 1000).toFixed(1)} s`;
+  return `+${Math.round(ms / 60000)} min`;
+}
+
 /** A rounded tile standing in for a package icon; the kind decides the glyph. */
 function PackageGlyph({ kind }: { kind: string }) {
   const readout = kind === "readout";
@@ -84,7 +92,9 @@ export function DeviceAppsPanel({
   const [apps, setApps] = useState<InstalledApp[]>([]);
   const [packages, setPackages] = useState<AppPackageEntry[]>([]);
   const [events, setEvents] = useState<AppEventEntry[]>([]);
-  const [dropped, setDropped] = useState(0);
+  // Events older than the device's ring holds. A one-shot read cannot "lose"
+  // anything, so this is reported as history that rolled off, not as loss.
+  const [rolledOff, setRolledOff] = useState(0);
   const [notice, setNotice] = useState<{ text: string; kind: "success" | "error" } | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -117,8 +127,10 @@ export function DeviceAppsPanel({
         setPackages(parsePackageList(registry.result));
         const page = await runnerRef.current({ command: "app_events", since_seq: 0 });
         const parsed = parseAppEvents(page.result);
-        setEvents(parsed.events);
-        setDropped(parsed.dropped);
+        // The device returns oldest first; the newest is what the operator is
+        // looking for.
+        setEvents([...parsed.events].sort((a, b) => b.seq - a.seq));
+        setRolledOff(Math.max(0, parsed.seq - parsed.events.length));
       }
     } catch (error) {
       setNotice({ text: describeError(error instanceof Error ? error.message : String(error)),
@@ -447,15 +459,19 @@ export function DeviceAppsPanel({
               <h4>{t("appEvents")}</h4>
               {events.length ? <span>{events.length}</span> : null}
             </div>
-            {dropped > 0 ? (
-              <p className="notice warning app-events-dropped">
-                {t("appEventsDropped")}: {dropped}
+            {rolledOff > 0 ? (
+              <p className="app-events-note">
+                {t("appEventsRolledOff").replace("{shown}", String(events.length))
+                                        .replace("{older}", String(rolledOff))}
               </p>
             ) : null}
             <ol className="app-event-list">
-              {events.map((event) => (
+              {events.map((event, index) => (
                 <li key={event.seq}>
                   <span className="app-event-seq">#{event.seq}</span>
+                  <span className="app-event-gap" title={t("appEventGap")}>
+                    {index + 1 < events.length ? formatGap(event.ms - events[index + 1].ms) : ""}
+                  </span>
                   <span className="app-event-frame" title={t("appEventFrame")}>f{event.frameSeq}</span>
                   <span className="app-event-app">{event.app}</span>
                   <strong className="app-event-name">{event.event}</strong>
