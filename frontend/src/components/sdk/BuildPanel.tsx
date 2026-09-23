@@ -85,14 +85,18 @@ export function BuildPanel({ project, analysis, onRevealLine }: Props) {
   const { t } = useI18n();
   const [digest, setDigest] = useState<string | null>(null);
 
+  // The previous digest stays up while the next one is computed, and an
+  // unchanged package (an edited comment, say) keeps the same string, so
+  // nothing that depends on it flashes.
   useEffect(() => {
     let cancelled = false;
-    setDigest(null);
-    if (analysis.bytes) {
-      void sha256Hex(analysis.bytes).then((hex) => {
-        if (!cancelled) setDigest(hex);
-      });
+    if (!analysis.bytes) {
+      setDigest(null);
+      return undefined;
     }
+    void sha256Hex(analysis.bytes).then((hex) => {
+      if (!cancelled) setDigest((current) => (current === hex ? current : hex));
+    });
     return () => {
       cancelled = true;
     };
@@ -170,6 +174,20 @@ export function BuildPanel({ project, analysis, onRevealLine }: Props) {
               ))}
             </div>
           ) : null}
+          <details className="sdk-limits-help">
+            <summary>{t("sdkLimitsHelp")}</summary>
+            <dl>
+              {(validation.kind === "flow"
+                ? ["Nodes", "Cost", "Pool", "Size", "Share"]
+                : ["Size"]
+              ).map((name) => (
+                <div key={name}>
+                  <dt>{t(`sdkLimitsHelp${name}Title`)}</dt>
+                  <dd>{t(`sdkLimitsHelp${name}`)}</dd>
+                </div>
+              ))}
+            </dl>
+          </details>
           <dl className="sdk-facts">
             <div><dt>{t("sdkMinOs")}</dt><dd>{validation.minOs}</dd></div>
             {validation.kind === "flow" && report ? (

@@ -21,6 +21,7 @@ import { addVisualizationListener, subscribeVisualization, unsubscribeVisualizat
 import {
   PRESSURE_FULL_SCALE,
   Simulator,
+  canonicalText,
   compareEvents,
   formatEventsCsv,
   parseEventsCsv,
@@ -138,6 +139,23 @@ function LedDot({ rgb }: { rgb: readonly [number, number, number] }) {
   );
 }
 
+/**
+ * The compiled package, kept as the same object while its content is the same.
+ * Editing a comment or re-analysing for any other reason must not restart a
+ * simulation that is replaying or listening to a device.
+ */
+function useStablePackage(analysis: Analysis): Record<string, any> | null {
+  const pkg = analysis.package;
+  const key = pkg ? canonicalText(pkg) : "";
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => pkg, [key]);
+}
+
+const NO_REGIONS: Record<string, never> = {};
+
+/** How often the live view redraws; every frame is still evaluated. */
+const LIVE_PAINT_MS = 50;
+
 function useLabels(analysis: Analysis) {
   return useMemo(() => {
     const labels = new Map<number, string>();
@@ -156,7 +174,7 @@ function useLabels(analysis: Analysis) {
 
 function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
   const { t } = useI18n();
-  const pkg = analysis.package;
+  const pkg = useStablePackage(analysis);
   const labels = useLabels(analysis);
   const [deviceUid, setDeviceUid] = useState(devices[0]?.uid ?? "");
   const [dir, setDir] = useState("");
@@ -332,7 +350,7 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
             </div>
           </div>
 
-          <EmulatorHeatmap frame={frame} rows={frame?.rows ?? shape.rows} cols={frame?.cols ?? shape.cols} range={range} regions={analysis.report?.regions ?? {}} ariaLabel={t("sdkEmuHeatmap")} />
+          <EmulatorHeatmap frame={frame} rows={frame?.rows ?? shape.rows} cols={frame?.cols ?? shape.cols} range={range} regions={analysis.report?.regions ?? NO_REGIONS} ariaLabel={t("sdkEmuHeatmap")} />
           {frame && frame.rows * frame.cols !== target.rows * target.cols ? (
             <p className="notice warning">{t("sdkEmuShapeMismatch").replace("{rec}", `${frame.rows} × ${frame.cols}`).replace("{target}", `${target.rows} × ${target.cols}`)}</p>
           ) : null}
@@ -379,7 +397,14 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines }: Props) {
 
 function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
   const { t } = useI18n();
-  const pkg = analysis.package;
+  const pkg = useStablePackage(analysis);
+  // Read by the stream listener, which is subscribed once per start/stop.
+  const pkgRef = useRef(pkg);
+  pkgRef.current = pkg;
+  const reportRef = useRef(analysis.report);
+  reportRef.current = analysis.report;
+  const onMarkLinesRef = useRef(onMarkLines);
+  onMarkLinesRef.current = onMarkLines;
   const labels = useLabels(analysis);
   const online = devices.filter((device) => device.connectionState === "online");
   const [deviceUid, setDeviceUid] = useState(online[0]?.uid ?? devices[0]?.uid ?? "");
@@ -393,6 +418,8 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
 
   const device = devices.find((item) => item.uid === deviceUid);
   const shape = shapeOf(device) ?? { rows: target.rows, cols: target.cols };
+  const shapeRef = useRef(shape);
+  shapeRef.current = shape;
 
   const reset = useCallback(() => {
     simRef.current = pkg ? new Simulator(pkg) : null;
@@ -414,35 +441,33 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
       const sim = simRef.current;
       if (!sim) return;
       fallbackSeq.current += 1;
-      const frame = frameFromSample(item, shape, fallbackSeq.current);
+      const frame = frameFromSample(item, shapeRef.current, fallbackSeq.current);
       if (!frame) return;
       gapsRef.current.observe(frame.seq);
       // Every frame is evaluated; only the drawing is throttled to the screen.
       const events = sim.step(frame);
       pending.current = { frame, events: [...(pending.current?.events ?? []), ...events] };
     });
-    let raf = 0;
-    const paint = () => {
+    // Redrawn on a timer rather than per frame: a React render of the whole
+    // panel 60 times a second is what made it flicker.
+    const timer = window.setInterval(() => {
       const sim = simRef.current;
       const latest = pending.current;
-      if (sim && latest) {
-        pending.current = null;
-        const gaps = gapsRef.current;
-        setView({ frame: latest.frame, values: sim.nodeValues(), events: sim.events.slice(-MAX_EVENTS_SHOWN), led: sim.led, coverage: gaps.coverage, missed: gaps.missed, received: gaps.received });
-        if (pkg && analysis.report && latest.events.length) onMarkLines(linesForEvents(pkg, analysis.report.nodeLines, latest.events));
-      }
-      raf = requestAnimationFrame(paint);
-    };
-    raf = requestAnimationFrame(paint);
+      if (!sim || !latest) return;
+      pending.current = null;
+      const gaps = gapsRef.current;
+      setView({ frame: latest.frame, values: sim.nodeValues(), events: sim.events.slice(-MAX_EVENTS_SHOWN), led: sim.led, coverage: gaps.coverage, missed: gaps.missed, received: gaps.received });
+      const report = reportRef.current;
+      const currentPkg = pkgRef.current;
+      if (currentPkg && report && latest.events.length) onMarkLinesRef.current(linesForEvents(currentPkg, report.nodeLines, latest.events));
+    }, LIVE_PAINT_MS);
     return () => {
       off();
-      cancelAnimationFrame(raf);
+      window.clearInterval(timer);
       unsubscribeVisualization(deviceUid);
-      onMarkLines(new Set());
+      onMarkLinesRef.current(new Set());
     };
-    // shape is read per frame through closure; restarting on it is not needed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, deviceUid, pkg, analysis.report, onMarkLines]);
+  }, [running, deviceUid]);
 
   const range = useMemo(() => ({ min: 0, max: PRESSURE_FULL_SCALE }), []);
 
@@ -479,7 +504,7 @@ function LiveEmulator({ analysis, target, devices, onMarkLines }: Props) {
 
       {view ? (
         <>
-          <EmulatorHeatmap frame={view.frame} rows={view.frame?.rows ?? shape.rows} cols={view.frame?.cols ?? shape.cols} range={range} regions={analysis.report?.regions ?? {}} ariaLabel={t("sdkEmuHeatmap")} />
+          <EmulatorHeatmap frame={view.frame} rows={view.frame?.rows ?? shape.rows} cols={view.frame?.cols ?? shape.cols} range={range} regions={analysis.report?.regions ?? NO_REGIONS} ariaLabel={t("sdkEmuHeatmap")} />
           <p className="sdk-hint sdk-mono">{t("sdkEmuReceived").replace("{n}", String(view.received))} · f{view.frame?.seq}</p>
           <BudgetControls load={budget.load} grace={budget.grace} onChange={(load, grace) => setBudget({ load, grace })} />
           <section className="sdk-section">

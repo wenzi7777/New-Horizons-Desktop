@@ -7059,6 +7059,35 @@ button.sdk-diagnostic:hover {
   color: var(--danger);
 }
 
+.sdk-limits-help {
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
+.sdk-limits-help summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.sdk-limits-help dl {
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sdk-limits-help dt {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sdk-limits-help dd {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
 .sdk-facts {
   margin: 10px 0 0;
   display: flex;

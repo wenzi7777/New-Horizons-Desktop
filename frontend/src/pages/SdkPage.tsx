@@ -44,9 +44,9 @@ function useDebounced<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
-function analyze(project: SdkProject, target: MatrixTarget): Analysis {
+function analyze(project: SdkProject, cellCount: number): Analysis {
   return project.kind === "flow"
-    ? analyzeFlow(project.source, { cellCount: target.rows * target.cols })
+    ? analyzeFlow(project.source, { cellCount })
     : analyzeReadout(project.source);
 }
 
@@ -142,12 +142,21 @@ export function SdkPage() {
   const active = projects.find((project) => project.id === activeId) ?? projects[0];
 
   const targets = useMemo(() => [...deviceTargets(normalized), ...TARGET_PRESETS], [normalized]);
-  const target = targets.find((item) => item.key === targetKey) ?? TARGET_PRESETS[0];
+  const found = targets.find((item) => item.key === targetKey) ?? TARGET_PRESETS[0];
+  // The device list is re-derived every second (for "last seen" times), which
+  // makes a new target object each time. Keyed on its values, so a board that
+  // has not changed does not recompile the app -- which reset the emulator
+  // and re-hashed the package once a second.
+  const target = useMemo<MatrixTarget>(
+    () => ({ key: found.key, rows: found.rows, cols: found.cols, label: found.label }),
+    [found.key, found.rows, found.cols, found.label],
+  );
+  const cellCount = target.rows * target.cols;
 
   // Analysis runs on a short delay so typing stays smooth; the result is what
   // every panel and the editor's diagnostics show.
   const pending = useDebounced(active, ANALYZE_DELAY_MS);
-  const analysis = useMemo(() => analyze(pending, target), [pending, target]);
+  const analysis = useMemo(() => analyze(pending, cellCount), [pending, cellCount]);
   const lastGoodReport = useRef(analysis.report);
   if (analysis.report) lastGoodReport.current = analysis.report;
 
