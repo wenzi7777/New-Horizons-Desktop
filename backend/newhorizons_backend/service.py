@@ -145,6 +145,10 @@ class NewHorizonsService:
         "calibration_disable",
         "calibration_dump_tare",
         "calibration_dump_level",
+        # Zeroing pauses the scan itself (firmware v1.5.1+); older firmware
+        # answers maintenance_required and the Desktop falls back.
+        "calibration_tare_capture",
+        "calibration_tare_clear",
     }
     MAINTENANCE_COMMANDS = NORMAL_COMMANDS | {
         "exit_maintenance",
@@ -154,7 +158,6 @@ class NewHorizonsService:
         "calibration_session_abort",
         "calibration_session_commit",
         "calibration_capture_tare",
-        "calibration_tare_capture",
         "calibration_capture_cell",
         "calibration_capture_all",
         "file_write_begin",
@@ -214,6 +217,7 @@ class NewHorizonsService:
         self._mock_write_sessions: dict[tuple[str, str, str], dict[str, Any]] = {}
         # Mock app roster per device, so the Apps UI is developable without hardware.
         self._mock_apps: dict[str, list[dict[str, Any]]] = {}
+        self._mock_calibration: dict[str, dict[str, Any]] = {}
         self._mock_packages: dict[str, list[dict[str, Any]]] = {}
         self._recording_enabled: set[str] = set()
         self._recording_errors: dict[str, str] = {}
@@ -963,7 +967,26 @@ class NewHorizonsService:
         port: int = CONTROL_PORT,
         device_uid: str = "",
     ) -> dict[str, Any]:
-        return send_control_command(host, payload, port=port)
+        return send_control_command(host, payload, port=port, timeout=self._arduino_command_timeout(payload))
+
+    @staticmethod
+    def _arduino_command_timeout(payload: dict[str, Any]) -> float:
+        # Calibration captures block the device for duration_ms before it
+        # replies; a fixed 2 s socket timeout would read a successful 3 s
+        # capture as a dropped connection.
+        command = str(payload.get("command") or "")
+        default_ms = 0
+        if command in ("calibration_capture_tare", "calibration_capture_cell", "calibration_capture_all"):
+            default_ms = 3000
+        elif command == "calibration_tare_capture":
+            default_ms = 1000
+        try:
+            duration_ms = float(payload.get("duration_ms", default_ms) or 0)
+        except (TypeError, ValueError):
+            duration_ms = default_ms
+        if duration_ms <= 0:
+            return 2.0
+        return max(2.0, duration_ms / 1000.0 + 3.0)
 
     def _mark_arduino_disconnected(self, device_uid: str, error: str) -> None:
         self._record_status(
@@ -2068,6 +2091,8 @@ class NewHorizonsService:
                 })
             elif command.startswith("app_"):
                 result_payload.update(self._mock_app_command(device_uid, command, payload))
+            elif command.startswith("calibration_"):
+                result_payload.update(self._mock_calibration_command(device_uid, status, command, payload))
             elif command in ("file_write_begin", "file_write_chunk", "file_write_finish"):
                 result_payload.update(self._mock_file_write(device_uid, command, payload))
             elif command == "file_read_begin":
@@ -2499,6 +2524,7 @@ class NewHorizonsService:
         if str(payload.get("command") or "") == "app_events":
             self._capture_app_events(device_uid, payload)
         is_status_snapshot = self._is_status_snapshot_result(payload)
+        calibration_status = self._calibration_status_from_result(payload)
         inner = payload.get("data") if isinstance(payload.get("data"), dict) else {}
         entry_payload = dict(payload)
         if is_status_snapshot and inner:
@@ -2549,6 +2575,14 @@ class NewHorizonsService:
                 merged["last_status"] = status_payload
                 if maintenance_mode is not None:
                     merged["mode"] = maintenance_mode
+            elif calibration_status is not None and self._latest_status.get(device_uid):
+                # calibration_* replies carry the whole calibration status;
+                # without this the device snapshot kept the state from the
+                # last `status` poll, and the page reverted to it.
+                status_payload = dict(self._latest_status[device_uid])
+                status_payload["calibration"] = calibration_status
+                self._latest_status[device_uid] = status_payload
+                merged["last_status"] = status_payload
             self._clear_incompatible_visualization_locked(device_uid, merged)
             if merged.get("mode"):
                 merged["last_direct_mode_at"] = payload.get("received_at")
@@ -2567,6 +2601,30 @@ class NewHorizonsService:
         self._emit_event({"type": "device_update", "item": event_item})
         if purged_aliases:
             self._emit_event({"type": "device_snapshot", "items": self.list_devices()})
+
+    CALIBRATION_STATUS_KEYS = (
+        "enabled", "mode_active", "session_active", "complete", "tare_complete",
+        "levels_complete", "legacy_missing_tare", "tare_enabled", "output_mode",
+        "tare", "draft_tare", "levels", "draft_levels", "metadata",
+    )
+
+    @classmethod
+    def _calibration_status_from_result(cls, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """The calibration status a calibration_* reply carries, if any.
+
+        Most calibration commands answer with the firmware's full calibration
+        statusJson (under `data` on the gateway path, flattened on the TCP
+        path); the capture and dump commands answer with other shapes and are
+        left out by the key check.
+        """
+        if not str(payload.get("command") or "").startswith("calibration_"):
+            return None
+        if str(payload.get("status") or "").lower() == "error" or payload.get("ok") is False:
+            return None
+        source = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        if not all(key in source for key in ("enabled", "session_active", "tare_complete", "levels")):
+            return None
+        return {key: source[key] for key in cls.CALIBRATION_STATUS_KEYS if key in source}
 
     @staticmethod
     def _is_status_snapshot_result(payload: dict[str, Any]) -> bool:
@@ -3526,6 +3584,7 @@ class NewHorizonsService:
                 "protocol": "NHO/Arduino/1",
             },
             "matrix_shape": shape,
+            "calibration": self._mock_calibration_status(device_uid, shape, mode),
             "logging": {
                 "enabled": True,
                 "capacity": "standard",
@@ -3757,6 +3816,149 @@ class NewHorizonsService:
             "capabilities": 5, "size": 492, "estimated_us": 15, "slot": 0,
             "state": "active",
         }]
+
+    def _mock_calibration_state(self, device_uid: str) -> dict[str, Any]:
+        return self._mock_calibration.setdefault(device_uid, {
+            "enabled": False,
+            "tare_enabled": False,
+            "session": False,
+            "tare": False,
+            "draft_tare": False,
+            "levels": {},
+            "draft_levels": {},
+        })
+
+    def _mock_calibration_status(self, device_uid: str, shape: dict[str, Any] | None, mode: str) -> dict[str, Any]:
+        """The firmware's Calibration::statusJson, for mock devices."""
+        state = self._mock_calibration_state(device_uid)
+        shape = shape or {"rows": 4, "cols": 4}
+        total = max(0, int(shape.get("rows") or 0) * int(shape.get("cols") or 0))
+
+        def tare_summary(captured: bool, source: str) -> dict[str, Any]:
+            points = total if captured else 0
+            return {"captured_points": points, "total_points": total, "missing_points": total - points,
+                    "complete": captured and total > 0, "source": source}
+
+        def level_summaries(levels: dict[float, int], source: str) -> list[dict[str, Any]]:
+            return [
+                {"level": level, "captured_points": points, "total_points": total,
+                 "missing_points": max(0, total - points), "complete": points >= total > 0, "source": source}
+                for level, points in sorted(levels.items())
+            ]
+
+        tare_complete = bool(state["tare"])
+        levels_complete = bool(state["levels"]) and all(points >= total for points in state["levels"].values())
+        complete = tare_complete and levels_complete
+        enabled = bool(state["enabled"]) and complete
+        if enabled:
+            output_mode = "calibrated"
+        elif state["tare_enabled"] and tare_complete:
+            output_mode = "tared"
+        else:
+            output_mode = "raw"
+        return {
+            "enabled": enabled,
+            "mode_active": mode != "normal",
+            "session_active": bool(state["session"]),
+            "complete": complete,
+            "tare_complete": tare_complete,
+            "levels_complete": levels_complete,
+            "legacy_missing_tare": bool(state["levels"]) and not tare_complete,
+            "tare_enabled": bool(state["tare_enabled"]),
+            "output_mode": output_mode,
+            "tare": tare_summary(tare_complete, "saved"),
+            "draft_tare": tare_summary(bool(state["session"] and state["draft_tare"]), "draft"),
+            "levels": level_summaries(state["levels"], "saved"),
+            "draft_levels": level_summaries(state["draft_levels"] if state["session"] else {}, "draft"),
+            "metadata": {
+                "rows": int(shape.get("rows") or 0), "cols": int(shape.get("cols") or 0), "point_count": total,
+                "max_level": max(state["levels"], default=0),
+                "tare_complete": tare_complete, "levels_complete": levels_complete,
+            },
+        }
+
+    def _mock_calibration_command(
+        self, device_uid: str, status: dict[str, Any], command: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """A small stand-in for the firmware's calibration state machine.
+
+        Mirrors the v1.5.1 rules the Desktop relies on: begin is idempotent,
+        level captures need the draft baseline first, and the one-tap zero
+        works outside maintenance but not during a session.
+        """
+        state = self._mock_calibration_state(device_uid)
+        shape = status.get("matrix_shape") if isinstance(status.get("matrix_shape"), dict) else None
+        mode = str(status.get("mode") or "normal")
+        total = max(0, int((shape or {}).get("rows") or 4) * int((shape or {}).get("cols") or 4))
+
+        def ok(message: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+            return {"status": "ok", "ok": True, "message": message,
+                    "data": data if data is not None else self._mock_calibration_status(device_uid, shape, mode)}
+
+        def fail(error: str) -> dict[str, Any]:
+            return {"status": "error", "ok": False, "message": error, "error": error, "data": {}}
+
+        level = round(float(payload.get("level") or 0), 3)
+        if command == "calibration_status":
+            return ok("calibration_status")
+        if command == "calibration_session_begin":
+            if state["session"]:
+                return ok("calibration_session_already_active")
+            state.update(session=True, draft_tare=state["tare"], draft_levels=dict(state["levels"]))
+            return ok("calibration_session_started")
+        if command == "calibration_session_abort":
+            state.update(session=False, draft_tare=False, draft_levels={})
+            return ok("calibration_session_aborted")
+        if command == "calibration_capture_tare":
+            if not state["session"]:
+                return fail("calibration_capture_failed")
+            state["draft_tare"] = True
+            return ok("calibration_tare_captured", {"total_points": total, "session_active": True})
+        if command in ("calibration_capture_cell", "calibration_capture_all"):
+            if not state["session"] or not state["draft_tare"]:
+                return fail("calibration_tare_required" if state["session"] else "calibration_capture_failed")
+            captured = state["draft_levels"].get(level, 0)
+            state["draft_levels"][level] = total if command == "calibration_capture_all" else min(total, captured + 1)
+            message = "calibration_all_captured" if command == "calibration_capture_all" else "calibration_cell_captured"
+            return ok(message, {"level": level, "total_points": total, "session_active": True})
+        if command == "calibration_session_commit":
+            if not state["session"]:
+                return fail("calibration_session_required")
+            levels_ok = bool(state["draft_levels"]) and all(p >= total for p in state["draft_levels"].values())
+            if payload.get("auto_enable") and not (state["draft_tare"] and levels_ok):
+                return fail("calibration_incomplete")
+            state.update(tare=state["draft_tare"], levels=dict(state["draft_levels"]), session=False,
+                         draft_tare=False, draft_levels={})
+            state["enabled"] = bool(payload.get("auto_enable")) and state["tare"] and levels_ok
+            return ok("calibration_committed")
+        if command == "calibration_tare_capture":
+            if state["session"]:
+                return fail("calibration_session_active")
+            state.update(tare=True, tare_enabled=True)
+            return ok("calibration_tare_captured")
+        if command == "calibration_tare_clear":
+            if state["session"]:
+                return fail("calibration_session_active")
+            state["tare_enabled"] = False
+            return ok("calibration_tare_cleared")
+        if command in ("calibration_enable", "calibration_disable"):
+            if command == "calibration_enable" and not self._mock_calibration_status(device_uid, shape, mode)["complete"]:
+                return fail("calibration_incomplete")
+            state["enabled"] = command == "calibration_enable"
+            return ok("calibration_enabled" if state["enabled"] else "calibration_disabled")
+        if command == "calibration_clear_profile":
+            state.update(enabled=False, tare_enabled=False, session=False, tare=False, draft_tare=False,
+                         levels={}, draft_levels={})
+            return ok("calibration_profile_cleared")
+        if command == "calibration_delete_level":
+            target = state["draft_levels"] if state["session"] else state["levels"]
+            if level not in target:
+                return fail("calibration_level_delete_failed")
+            del target[level]
+            return ok("calibration_level_deleted")
+        if command in ("calibration_dump_tare", "calibration_dump_level"):
+            return fail("calibration_tare_not_found" if command == "calibration_dump_tare" else "calibration_level_not_found")
+        return fail("unknown_command")
 
     def _mock_app_command(self, device_uid: str, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         apps = self._mock_apps.setdefault(device_uid, self._mock_default_apps())

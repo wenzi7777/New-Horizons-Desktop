@@ -420,35 +420,41 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
     def test_maintenance_section_exposes_calibration_workbench_commands(self):
         source = SETTINGS_PAGE.read_text()
+        workbench = (ROOT / "frontend" / "src" / "components" / "calibration" / "CalibrationWorkbench.tsx").read_text(encoding="utf-8")
 
+        self.assertIn("<CalibrationWorkbench", source)
+        self.assertIn('from "../components/calibration/CalibrationWorkbench"', source)
         for command in (
             'command: "calibration_status"',
-            'command: "calibration_enable"',
-            'command: "calibration_disable"',
             'command: "calibration_clear_profile"',
             'command: "calibration_session_begin"',
             'command: "calibration_session_abort"',
-            'command: "calibration_session_commit"',
+            'command: "calibration_session_commit", auto_enable: true',
             'command: "calibration_capture_tare"',
             'command: "calibration_capture_cell"',
             'command: "calibration_capture_all"',
+            'command: "calibration_tare_capture"',
+            'command: "calibration_tare_clear"',
             'command: "calibration_dump_tare"',
             'command: "calibration_dump_level"',
             'command: "calibration_delete_level"',
-            'command: "storage_status"',
-            'command: "log_clear"',
+            '"calibration_disable" : "calibration_enable"',
         ):
+            self.assertIn(command, workbench)
+        for command in ('command: "storage_status"', 'command: "log_clear"'):
             self.assertIn(command, source)
-        self.assertIn("CalibrationWorkbench", source)
-        self.assertIn("selectedCalibrationSensor", source)
-        self.assertIn("calibrationLevelPreview", source)
-        self.assertIn("tarePreview", source)
-        self.assertIn("captureAllSensors", source)
-        self.assertIn("captureTare", source)
-        self.assertIn("dumpTare", source)
-        self.assertIn("tare_complete", source)
-        self.assertIn("legacy_missing_tare", source)
-        self.assertIn("captureSelectedSensor", source)
+        # Clicks wait for a background command instead of being dropped, and
+        # destructive actions confirm in a modal rather than window.confirm.
+        self.assertIn("{ waitForLock: true }", workbench)
+        self.assertIn("options.waitForLock", source)
+        self.assertIn("<ConfirmModal", workbench)
+        self.assertNotIn("window.confirm", workbench)
+        # The reply is shown until the snapshot moves on (no reload needed).
+        self.assertIn("chooseCalibrationState(calibrationStatus, override)", workbench)
+        self.assertNotIn("setCalibrationState(parseCalibrationState(calibrationStatus))", source)
+        # Old firmware only zeroes in maintenance mode.
+        self.assertIn('outcome.code === "maintenance_required"', workbench)
+        self.assertIn("legacy_missing_tare", workbench)
         self.assertNotIn("calibrationAnalogPin", source)
         self.assertNotIn("calibrationSelectPin", source)
         self.assertIn("appHref(`device/${encodeURIComponent(deviceUid)}/files`)", source)

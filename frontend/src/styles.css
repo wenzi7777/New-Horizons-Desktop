@@ -7765,3 +7765,503 @@ button.sdk-diagnostic:hover {
     transition: none;
   }
 }
+
+/* Calibration (Settings -> Maintenance): zero first, pressure calibration
+   second, everything else one level deeper. */
+
+.cal-card {
+  display: grid;
+  gap: 14px;
+}
+
+.cal-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cal-card-text h4 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.cal-card-text p,
+.cal-step-panel > p {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.cal-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.cal-output-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(118, 118, 128, 0.12);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background var(--dur-med) var(--ease-out),
+    color var(--dur-med) var(--ease-out);
+}
+
+.cal-output-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.cal-output-chip.tared {
+  background: rgba(0, 113, 227, 0.1);
+  color: #0060c0;
+}
+
+.cal-output-chip.calibrated {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cal-zero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.button.cal-zero-button {
+  min-width: 116px;
+  padding: 11px 22px;
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.button.danger-solid {
+  background: var(--danger);
+  color: #ffffff;
+  border-color: transparent;
+}
+
+.button.danger-solid:hover:not(:disabled) {
+  background: #b80012;
+  border-color: transparent;
+}
+
+.cal-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: rgba(118, 118, 128, 0.16);
+}
+
+.cal-progress-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+  animation: cal-fill var(--cal-duration, 1000ms) linear forwards;
+}
+
+@keyframes cal-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.cal-done {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 500;
+  animation: nh-fade-in var(--dur-med) var(--ease-out);
+}
+
+.cal-steps {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transition: opacity var(--dur-med) var(--ease-out);
+}
+
+.cal-steps.idle {
+  opacity: 0.55;
+}
+
+.cal-step {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.cal-step:last-child {
+  flex: 0 0 auto;
+}
+
+.cal-step:not(:last-child)::after {
+  content: "";
+  flex: 1;
+  min-width: 12px;
+  height: 1px;
+  margin: 0 10px;
+  background: var(--line-strong);
+}
+
+.cal-step-mark {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background var(--dur-med) var(--ease-out),
+    border-color var(--dur-med) var(--ease-out),
+    color var(--dur-med) var(--ease-out);
+}
+
+.cal-step-label {
+  white-space: nowrap;
+}
+
+.cal-step.current {
+  color: var(--text);
+}
+
+.cal-step.current .cal-step-mark {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.cal-step.done {
+  color: var(--text-dim);
+}
+
+.cal-step.done .cal-step-mark {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cal-step-panel {
+  display: grid;
+  gap: 12px;
+  animation: cal-step-in var(--dur-med) var(--ease-out);
+}
+
+@keyframes cal-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.cal-profile-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.cal-capture-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.cal-field {
+  display: grid;
+  gap: 4px;
+  min-width: 140px;
+}
+
+.cal-field-narrow {
+  min-width: 110px;
+  max-width: 130px;
+}
+
+.cal-field span {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.cal-field input {
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-level-group {
+  gap: 6px;
+}
+
+.cal-level-row {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.cal-advanced .cal-level-row {
+  grid-template-columns: minmax(72px, 1fr) auto auto auto;
+}
+
+.cal-level-row strong {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-level-count {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-level-count svg {
+  color: var(--success);
+}
+
+.app-budget-fill.partial {
+  background: var(--warning);
+}
+
+.cal-empty {
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.cal-disclosure > summary,
+.cal-advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.cal-disclosure > summary::-webkit-details-marker,
+.cal-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cal-disclosure > summary svg,
+.cal-advanced > summary svg {
+  flex-shrink: 0;
+  transition: transform var(--dur-med) var(--ease-out);
+}
+
+.cal-disclosure[open] > summary svg,
+.cal-advanced[open] > summary svg {
+  transform: rotate(90deg);
+}
+
+.cal-disclosure > summary:focus-visible,
+.cal-advanced > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.cal-advanced > summary span {
+  display: grid;
+  gap: 2px;
+}
+
+.cal-advanced > summary strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.cal-advanced > summary small {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.cal-disclosure-body,
+.cal-advanced-body {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+  animation: cal-step-in var(--dur-med) var(--ease-out);
+}
+
+.cal-setting-row,
+.cal-danger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+}
+
+.cal-setting-row strong,
+.cal-danger-row strong {
+  font-weight: 600;
+}
+
+.cal-setting-row p,
+.cal-danger-row p {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.cal-danger-row {
+  border: 1px solid rgba(215, 0, 21, 0.18);
+  border-radius: var(--radius-md);
+}
+
+.cal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.cal-footer-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.cal-matrix {
+  display: grid;
+  gap: 4px;
+}
+
+.cal-matrix-cell {
+  display: grid;
+  place-items: center;
+  gap: 1px;
+  min-height: 30px;
+  padding: 4px 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background var(--dur-med) var(--ease-out),
+    border-color var(--dur-med) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+button.cal-matrix-cell {
+  cursor: pointer;
+}
+
+button.cal-matrix-cell:active {
+  transform: scale(0.94);
+}
+
+.cal-matrix-cell strong {
+  font-weight: 600;
+}
+
+.cal-matrix-cell.captured {
+  border-color: rgba(31, 107, 84, 0.25);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cal-matrix-cell.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(31, 107, 84, 0.25);
+  color: var(--text);
+}
+
+.cal-matrix.values .cal-matrix-cell small {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.cal-preview {
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .cal-level-row,
+  .cal-advanced .cal-level-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .cal-level-row .app-budget-track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .cal-step-label {
+    font-size: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cal-step-panel,
+  .cal-disclosure-body,
+  .cal-advanced-body,
+  .cal-done {
+    animation: none;
+  }
+
+  button.cal-matrix-cell:active {
+    transform: none;
+  }
+}

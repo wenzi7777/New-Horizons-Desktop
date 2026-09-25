@@ -55,6 +55,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "calibration_capture_cell",
     "calibration_capture_all",
     "calibration_tare_capture",
+    "calibration_tare_clear",
     "findme_discover",
     "findme_switch_gateway",
     "set_matrix_layout",

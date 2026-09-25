@@ -8,9 +8,11 @@ interface ConfirmModalProps {
   cancelLabel: string;
   onConfirm: () => void;
   onCancel: () => void;
+  // Irreversible actions get a red confirm button instead of the accent one.
+  destructive?: boolean;
 }
 
-export function ConfirmModal({ title, message, confirmLabel, cancelLabel, onConfirm, onCancel }: ConfirmModalProps) {
+export function ConfirmModal({ title, message, confirmLabel, cancelLabel, onConfirm, onCancel, destructive = false }: ConfirmModalProps) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onCancel();
@@ -28,7 +30,7 @@ export function ConfirmModal({ title, message, confirmLabel, cancelLabel, onConf
         <p className="confirm-modal-message">{message}</p>
         <div className="confirm-modal-actions">
           <button className="button" type="button" onClick={onCancel}>{cancelLabel}</button>
-          <button className="button primary" type="button" onClick={onConfirm}>{confirmLabel}</button>
+          <button className={destructive ? "button danger-solid" : "button primary"} type="button" onClick={onConfirm}>{confirmLabel}</button>
         </div>
       </div>
     </div>

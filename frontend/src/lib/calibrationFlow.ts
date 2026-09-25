@@ -1,104 +1,214 @@
-export type CalibrationPrimaryStepId =
-  | "enter_maintenance"
-  | "start_session"
-  | "capture_tare"
-  | "capture_level"
-  | "commit_session"
-  | "enable_profile";
+// Calibration state and the pressure-calibration flow, kept free of React so
+// the rules can be tested directly.
+//
+// The device reports calibration in two places: the `calibration` block of
+// its status (what the device snapshot carries), and the full calibration
+// status most calibration_* commands answer with. A command reply is newer
+// than the snapshot until the snapshot moves on, so the page shows the reply
+// first -- that is what makes "Start calibration" take effect without a
+// reload.
 
-export type CalibrationPrimaryStepStatus = "complete" | "current" | "upcoming";
+export type CalibrationOutputMode = "raw" | "tared" | "calibrated";
 
-export type CalibrationDisabledReason =
-  | "device_offline"
-  | "needs_maintenance_mode"
-  | "needs_active_session"
-  | "needs_tare"
-  | "needs_levels"
-  | "needs_complete_profile"
-  | "already_enabled"
-  | "no_sensors";
+export type CalibrationCaptureSummary = {
+  captured_points: number;
+  total_points: number;
+  missing_points: number;
+  complete: boolean;
+  source: string;
+};
+
+export type CalibrationSummary = CalibrationCaptureSummary & {
+  level: number;
+};
+
+export type CalibrationState = {
+  enabled: boolean;
+  mode_active: boolean;
+  session_active: boolean;
+  complete: boolean;
+  tare_complete: boolean;
+  levels_complete: boolean;
+  legacy_missing_tare: boolean;
+  // Firmware before v1.5.1 reports neither; `output_mode` is then derived.
+  tare_enabled: boolean | null;
+  output_mode: CalibrationOutputMode;
+  output_mode_reported: boolean;
+  tare: CalibrationCaptureSummary | null;
+  draft_tare: CalibrationCaptureSummary | null;
+  levels: CalibrationSummary[];
+  draft_levels: CalibrationSummary[];
+  metadata: Record<string, unknown>;
+};
+
+export type CalibrationStep = "not_started" | "baseline" | "levels";
 
 export type CalibrationFlowSnapshot = {
-  deviceConnected: boolean;
-  maintenanceMode: boolean;
   sessionActive: boolean;
-  profileComplete: boolean;
-  profileEnabled: boolean;
-  tareComplete: boolean;
-  levelsComplete: boolean;
-  totalSensors: number;
+  draftTareComplete: boolean;
+  // The operator captured (or chose to keep) the baseline in this session.
+  baselineConfirmed: boolean;
 };
 
-export type CalibrationPrimaryStepState = {
-  id: CalibrationPrimaryStepId;
-  status: CalibrationPrimaryStepStatus;
-  disabledReason: CalibrationDisabledReason | null;
+export type CalibrationOverride = {
+  state: CalibrationState;
+  // The snapshot's calibration block when the reply arrived.
+  snapshotKey: string;
 };
 
-const PRIMARY_STEP_ORDER: CalibrationPrimaryStepId[] = [
-  "enter_maintenance",
-  "start_session",
-  "capture_tare",
-  "capture_level",
-  "commit_session",
-  "enable_profile",
+const CALIBRATION_STATUS_KEYS = [
+  "enabled",
+  "mode_active",
+  "session_active",
+  "complete",
+  "tare_complete",
+  "levels_complete",
+  "legacy_missing_tare",
+  "tare_enabled",
+  "output_mode",
+  "tare",
+  "draft_tare",
+  "levels",
+  "draft_levels",
+  "metadata",
 ];
 
-export function getRecommendedCalibrationStep(snapshot: CalibrationFlowSnapshot): CalibrationPrimaryStepId | null {
-  if (!snapshot.deviceConnected) return "enter_maintenance";
-  if (!snapshot.maintenanceMode) return "enter_maintenance";
-  if (snapshot.sessionActive) {
-    if (!snapshot.tareComplete) return "capture_tare";
-    if (!snapshot.levelsComplete) return "capture_level";
-    return "commit_session";
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function numberValue(value: unknown, fallback: number) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function calibrationSource(value: unknown) {
+  const direct = recordValue(value);
+  const nested = recordValue(direct.calibration);
+  if (Object.keys(nested).length > 0) {
+    return nested;
   }
-  if (!snapshot.profileComplete) return "start_session";
-  if (!snapshot.profileEnabled) return "enable_profile";
+  return CALIBRATION_STATUS_KEYS.some((key) => key in direct) ? direct : {};
+}
+
+// A calibration_* reply that carries the whole calibration status (begin,
+// abort, commit, enable, the one-tap zero...). Capture and dump replies carry
+// other shapes and are not a status.
+export function isFullCalibrationStatus(value: unknown) {
+  const source = calibrationSource(value);
+  return ["enabled", "session_active", "tare_complete", "levels"].every((key) => key in source);
+}
+
+function parseCaptureSummary(value: unknown, fallbackSource: string): CalibrationCaptureSummary | null {
+  const source = recordValue(value);
+  if (Object.keys(source).length === 0) return null;
+  return {
+    captured_points: numberValue(source.captured_points, 0),
+    total_points: numberValue(source.total_points, 0),
+    missing_points: numberValue(source.missing_points, 0),
+    complete: source.complete === true,
+    source: typeof source.source === "string" ? source.source : fallbackSource,
+  };
+}
+
+function parseSummaryList(value: unknown, fallbackSource: string): CalibrationSummary[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => recordValue(item))
+    .filter((item) => Object.keys(item).length > 0)
+    .map((item) => ({
+      level: numberValue(item.level, 0),
+      captured_points: numberValue(item.captured_points, 0),
+      total_points: numberValue(item.total_points, 0),
+      missing_points: numberValue(item.missing_points, 0),
+      complete: item.complete === true,
+      source: typeof item.source === "string" ? item.source : fallbackSource,
+    }))
+    .sort((a, b) => a.level - b.level);
+}
+
+export function parseCalibrationState(value: unknown): CalibrationState {
+  const source = calibrationSource(value);
+  const enabled = source.enabled === true;
+  const complete = source.complete === true;
+  const reportedMode = source.output_mode;
+  const outputModeReported = reportedMode === "raw" || reportedMode === "tared" || reportedMode === "calibrated";
+  return {
+    enabled,
+    mode_active: source.mode_active === true,
+    session_active: source.session_active === true,
+    complete,
+    tare_complete: source.tare_complete === true,
+    levels_complete: source.levels_complete === true,
+    legacy_missing_tare: source.legacy_missing_tare === true,
+    tare_enabled: typeof source.tare_enabled === "boolean" ? source.tare_enabled : null,
+    output_mode: outputModeReported ? reportedMode as CalibrationOutputMode : enabled && complete ? "calibrated" : "raw",
+    output_mode_reported: outputModeReported,
+    tare: parseCaptureSummary(source.tare, "saved"),
+    draft_tare: parseCaptureSummary(source.draft_tare, "draft"),
+    levels: parseSummaryList(source.levels, "saved"),
+    draft_levels: parseSummaryList(source.draft_levels, "draft"),
+    metadata: recordValue(source.metadata),
+  };
+}
+
+// A stable key for the snapshot's calibration block, so a newer snapshot can
+// be told apart from the one an override was taken against.
+export function calibrationSnapshotKey(value: unknown) {
+  try {
+    return JSON.stringify(calibrationSource(value));
+  } catch {
+    return "";
+  }
+}
+
+// The state to show: a command reply until the snapshot changes after it.
+export function chooseCalibrationState(snapshot: unknown, override: CalibrationOverride | null): CalibrationState {
+  if (override && override.snapshotKey === calibrationSnapshotKey(snapshot)) {
+    return override.state;
+  }
+  return parseCalibrationState(snapshot);
+}
+
+export function getCalibrationStep(snapshot: CalibrationFlowSnapshot): CalibrationStep {
+  if (!snapshot.sessionActive) return "not_started";
+  if (!snapshot.draftTareComplete || !snapshot.baselineConfirmed) return "baseline";
+  return "levels";
+}
+
+// Save needs a baseline and at least one pressure, with every draft pressure
+// captured on every sensor -- the firmware refuses auto_enable otherwise.
+export function canSaveCalibration(state: CalibrationState) {
+  const draftTareComplete = state.draft_tare?.complete === true;
+  return state.session_active
+    && draftTareComplete
+    && state.draft_levels.length > 0
+    && state.draft_levels.every((item) => item.complete);
+}
+
+export type ZeroBlockedReason = "device_offline" | "session_active";
+
+export function zeroBlockedReason(deviceConnected: boolean, state: CalibrationState): ZeroBlockedReason | null {
+  if (!deviceConnected) return "device_offline";
+  if (state.session_active) return "session_active";
   return null;
 }
 
-export function getPrimaryStepDisabledReason(
-  step: CalibrationPrimaryStepId,
-  snapshot: CalibrationFlowSnapshot,
-): CalibrationDisabledReason | null {
-  if (!snapshot.deviceConnected) return "device_offline";
-
-  switch (step) {
-    case "enter_maintenance":
-      return null;
-    case "start_session":
-      return snapshot.maintenanceMode ? null : "needs_maintenance_mode";
-    case "capture_tare":
-      if (!snapshot.maintenanceMode) return "needs_maintenance_mode";
-      if (!snapshot.sessionActive) return "needs_active_session";
-      if (snapshot.totalSensors <= 0) return "no_sensors";
-      return null;
-    case "capture_level":
-      if (!snapshot.maintenanceMode) return "needs_maintenance_mode";
-      if (!snapshot.sessionActive) return "needs_active_session";
-      if (!snapshot.tareComplete) return "needs_tare";
-      if (snapshot.totalSensors <= 0) return "no_sensors";
-      return null;
-    case "commit_session":
-      if (!snapshot.maintenanceMode) return "needs_maintenance_mode";
-      if (!snapshot.sessionActive) return "needs_active_session";
-      if (!snapshot.tareComplete) return "needs_tare";
-      if (!snapshot.levelsComplete) return "needs_levels";
-      return null;
-    case "enable_profile":
-      if (!snapshot.profileComplete) return "needs_complete_profile";
-      if (snapshot.profileEnabled) return "already_enabled";
-      return null;
+// i18n key for a firmware/transport error code from a calibration command.
+export function calibrationErrorKey(code: string) {
+  switch (code) {
+    case "calibration_tare_required":
+      return "calErrorTareRequired";
+    case "calibration_session_active":
+      return "calErrorSessionActive";
+    case "calibration_incomplete":
+      return "calErrorIncomplete";
+    case "maintenance_required":
+      return "calErrorMaintenanceRequired";
+    case "":
+    case "no_response":
+      return "calErrorNoResponse";
+    default:
+      return "calErrorGeneric";
   }
-}
-
-export function getPrimaryStepStates(snapshot: CalibrationFlowSnapshot): CalibrationPrimaryStepState[] {
-  const recommended = getRecommendedCalibrationStep(snapshot);
-  const currentIndex = recommended ? PRIMARY_STEP_ORDER.indexOf(recommended) : PRIMARY_STEP_ORDER.length;
-
-  return PRIMARY_STEP_ORDER.map((id, index) => ({
-    id,
-    status: index < currentIndex ? "complete" : index === currentIndex ? "current" : "upcoming",
-    disabledReason: getPrimaryStepDisabledReason(id, snapshot),
-  }));
 }
