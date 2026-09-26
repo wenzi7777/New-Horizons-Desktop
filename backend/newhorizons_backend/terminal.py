@@ -13,6 +13,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "enter_maintenance",
     "exit_maintenance",
     "memory_status",
+    "sensor_sample",
     "scan_health",
     "storage_status",
     "task_list",
@@ -149,6 +150,11 @@ def terminal_help_items() -> list[dict[str, str]]:
             "command": "scan-health",
             "description": "Query lightweight scan, stream, memory, and control health.",
             "example": "scan-health",
+        },
+        {
+            "command": "sensor-sample",
+            "description": "Read the latest IMU, magnetometer and battery values (firmware v1.6.0+).",
+            "example": "sensor-sample",
         },
         {
             "command": "task-list",
@@ -471,6 +477,7 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "apply-update": "apply_update",
         "exit-maintenance": "exit_maintenance",
         "scan-health": "scan_health",
+        "sensor-sample": "sensor_sample",
         "storage-status": "storage_status",
         "calibration-status": "calibration_status",
         "calibration-enable": "calibration_enable",

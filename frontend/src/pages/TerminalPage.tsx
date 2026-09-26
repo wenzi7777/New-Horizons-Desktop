@@ -68,6 +68,7 @@ const COMMAND_BLOCKS: CommandBlock[] = [
   },
   { command: "exit-maintenance", groupKey: "commandGroupMaintenance", params: [] },
   { command: "scan-health", groupKey: "commandGroupCore", params: [] },
+  { command: "sensor-sample", groupKey: "commandGroupCore", params: [] },
   { command: "task-list", groupKey: "commandGroupCore", params: [] },
   { command: "service-list", groupKey: "commandGroupCore", params: [] },
   { command: "capabilities", groupKey: "commandGroupCore", params: [] },

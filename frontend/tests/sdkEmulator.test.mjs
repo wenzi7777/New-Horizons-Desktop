@@ -188,3 +188,16 @@ test("a generated frame runs through the simulator", async () => {
   for (let t = 0; t < 2000; t += period) sim.step(feed.frame(t));
   assert.ok(sim.events.some((event) => event.event === "pressed"));
 });
+
+test("a live sample carries its IMU and magnetometer readings into the frame", async () => {
+  const { emu } = await modules;
+  const flat = emu.frameFromSample({ dn: "X", sn: 1, frame_id: 5, p: [1, 2, 3, 4], acc: [0.1, 0.2, 0.97], gyro: [1, 2, 3], mag: [30, -5, 12] }, { rows: 2, cols: 2 }, 0);
+  assert.deepEqual([...flat.imu], [0.1, 0.2, 0.97, 1, 2, 3].map(Math.fround));
+  assert.deepEqual([...flat.mag], [30, -5, 12]);
+  const nested = emu.frameFromSample({ dn: "X", sn: 1, p: [1], imu: { acc: [0, 0, 1], gyro: [0, 0, 0], mag: [1, 2, 3] } }, { rows: 1, cols: 1 }, 0);
+  assert.deepEqual([...nested.imu], [0, 0, 1, 0, 0, 0]);
+  assert.deepEqual([...nested.mag], [1, 2, 3]);
+  const bare = emu.frameFromSample({ dn: "X", sn: 1, p: [1] }, { rows: 1, cols: 1 }, 0);
+  assert.equal(bare.imu, undefined);
+  assert.equal(bare.mag, undefined);
+});

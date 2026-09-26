@@ -11,6 +11,7 @@ import {
   SYNTH_FPS,
   SeqGapTracker,
   SyntheticFeed,
+  emulatorSimulator,
   frameFromSample,
   isSidecar,
   linesForEvents,
@@ -626,7 +627,7 @@ function LiveEmulator({ analysis, target, devices, onMarkLines, deviceUid }: Run
   stripRef.current = stripLength(target.board);
 
   const reset = useCallback(() => {
-    simRef.current = pkg ? new Simulator(pkg) : null;
+    simRef.current = pkg ? emulatorSimulator(pkg) : null;
     simRef.current?.setBudget(budget.load, budget.grace);
     gapsRef.current.reset();
     setView(null);
@@ -757,7 +758,7 @@ function GeneratedEmulator({ analysis, target, onMarkLines, virtual, onVirtualCh
   boardRef.current = target.board;
 
   const reset = useCallback(() => {
-    simRef.current = pkg ? new Simulator(pkg) : null;
+    simRef.current = pkg ? emulatorSimulator(pkg) : null;
     simRef.current?.setBudget(budget.load, budget.grace);
     framesRef.current = 0;
     setView(null);
@@ -945,6 +946,8 @@ function BoardFit({ analysis, board }: { analysis: Analysis; board: BoardSpec | 
     caps.has("display") && !board.oled ? "OLED" : null,
     caps.has("button") && !board.button ? t("sdkEmuCapButton") : null,
     caps.has("drive_ext_led") && !board.externalLeds ? t("sdkEmuCapExtLed") : null,
+    caps.has("read_mag") && !board.magnetometer ? t("sdkEmuCapMag") : null,
+    caps.has("power") && !board.fuelGauge ? t("sdkEmuCapGauge") : null,
   ].filter(Boolean);
   // Accepted by the device and never shown: past this board's own strip.
   const unseen = board.externalLeds

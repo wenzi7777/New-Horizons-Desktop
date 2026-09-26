@@ -176,17 +176,19 @@ type DeviceCommandResult = {
 // ---------------------------------------------------------------------------
 
 const PRESSURE_CAL_PRESETS: Record<string, number[]> = {
-  quick:    [5, 20, 45],
-  standard: [5, 10, 20, 35, 45],
-  detailed: [5, 10, 20, 30, 40, 45],
-  fine:     [5, 10, 15, 20, 25, 30, 38, 45],
-  experiment: [4.5, 6, 8, 11, 14, 18, 23, 28, 34, 40],
+  quick:    [6, 12, 20],
+  standard: [6, 10, 15, 20, 25],
+  detailed: [6, 8, 10, 12, 15, 18, 20, 25],
+  fine:     [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 25, 28],
+  experiment: [2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10.5, 12, 13.5, 15, 16.5, 18, 19, 20],
 };
-const PRESSURE_MAX_KPA = 45;
-// 無加壓狀態下氣壓本就約 3.5 kPa（tare/0 點基準）。低於此值的校準點不可達。
-const PRESSURE_BASELINE_KPA = 3.5;
+// 平台上限：腔體熱熔膠密封約 30 kPa 會漏，28 kPa 保壓 5 分鐘無漂移（2026-09-25）。
+const PRESSURE_MAX_KPA = 28;
+// 無加壓狀態下 MPX 讀數約 0.384 kPa（tare/0 點基準）。舊值 3.5 是 MPX Vs 誤接 Vin
+// （讀數 ×2.19、零點 3.426）時的數字，2026-09-25 改接 5 V 後不再適用。
+const PRESSURE_BASELINE_KPA = 0.5;
 // 結束後的殘壓安全測試：嘗試穩定在此壓力，達標代表殘壓仍高、不可安全關閉氣壓控制。
-const PRESSURE_RESIDUAL_TEST_KPA = 10;
+const PRESSURE_RESIDUAL_TEST_KPA = 5;
 const PRESSURE_RESIDUAL_TEST_TIMEOUT_MS = 15000;
 const PRESSURE_STABLE_TOLERANCE_KPA = 0.5;
 const PRESSURE_STABLE_CONFIRMATION_SAMPLES = 5;
@@ -497,7 +499,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       await api.queueDeviceCommand(deviceUid, { command: "calibration_session_begin" });
       await new Promise<void>((res) => setTimeout(res, 1000));
 
-      // Hold the pressure controller at the baseline (≈3.5 kPa) BEFORE sampling the
+      // Hold the pressure controller at the baseline (≈0.5 kPa) BEFORE sampling the
       // tare/zero point. Otherwise the intake valve keeps feeding air and the pressure
       // drifts upward, contaminating the tare baseline.
       setPhase("holding_baseline");

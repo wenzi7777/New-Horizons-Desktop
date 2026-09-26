@@ -61,24 +61,36 @@ export const nhsLanguage = StreamLanguage.define<State>({
 const FUNCTION_DOCS: Record<string, { args: string; info: string }> = {
   sum: { args: "(region)", info: "Total load over a region." },
   total: { args: "()", info: OPS.total.summary },
-  peak: { args: "()", info: OPS.peak.summary },
-  active: { args: "(level)", info: OPS.active_cells.summary },
+  peak: { args: "() or (region)", info: `${OPS.peak.summary} With a region: ${OPS.region_peak.summary}` },
+  active: { args: "(level) or (region, level)", info: `${OPS.active_cells.summary} With a region: ${OPS.region_active.summary}` },
   feature: { args: "(field)", info: "One field of a single features sweep; every feature() shares it." },
   arg_max: { args: "()", info: OPS.arg_max.summary },
-  row_centroid: { args: "()", info: OPS.row_centroid.summary },
-  col_centroid: { args: "()", info: OPS.col_centroid.summary },
+  row_centroid: { args: "() or (region)", info: OPS.row_centroid.summary },
+  col_centroid: { args: "() or (region)", info: OPS.col_centroid.summary },
   mean: { args: "(x, frames)", info: OPS.mean.summary },
   max_hold: { args: "(x, frames)", info: OPS.max_hold.summary },
   integrate: { args: "(x, frames)", info: OPS.integrate.summary },
   delta: { args: "(x)", info: OPS.delta.summary },
   abs: { args: "(x)", info: OPS.abs.summary },
-  counter: { args: "(event)", info: OPS.counter.summary },
+  counter: { args: "(event) or (event, reset)", info: `${OPS.counter.summary} With a reset: ${OPS.counter_reset.summary}` },
   min: { args: "(a, b)", info: OPS.min.summary },
   max: { args: "(a, b)", info: OPS.max.summary },
   clamp: { args: "(x, lo, hi)", info: OPS.clamp.summary },
   budget_load: { args: "()", info: OPS.budget_load.summary },
   grace_left: { args: "()", info: OPS.grace_left.summary },
   button: { args: "()", info: OPS.button.summary },
+  not: { args: "(event)", info: OPS.not.summary },
+  select: { args: "(event, a, b)", info: OPS.select.summary },
+  duration: { args: "(event)", info: OPS.duration.summary },
+  interval: { args: "(event)", info: OPS.interval.summary },
+  peak_since: { args: "(x, event)", info: OPS.peak_since.summary },
+  sqrt: { args: "(x)", info: OPS.sqrt.summary },
+  atan2: { args: "(y, x)", info: OPS.atan2.summary },
+  imu: { args: "(field)", info: OPS.imu.summary },
+  mag: { args: "(field)", info: OPS.mag.summary },
+  battery: { args: "()", info: OPS.battery.summary },
+  linked: { args: "()", info: OPS.linked.summary },
+  uptime: { args: "()", info: OPS.uptime.summary },
 };
 
 export function functionDoc(name: string) {
@@ -109,10 +121,16 @@ export function nhsCompletions(symbols: () => CompileReport | null) {
     if (/\bfeature\(\s*[A-Za-z_]*$/.test(before)) {
       return { from, options: LANGUAGE.featureFields.map((field) => ({ label: field, type: "constant" })) };
     }
-    if (/\bsum\(\s*[A-Za-z_]*$/.test(before)) {
+    if (/\bimu\(\s*[A-Za-z_]*$/.test(before)) {
+      return { from, options: LANGUAGE.imuFields.map((field) => ({ label: field, type: "constant" })) };
+    }
+    if (/\bmag\(\s*[A-Za-z_]*$/.test(before)) {
+      return { from, options: LANGUAGE.magFields.map((field) => ({ label: field, type: "constant" })) };
+    }
+    if (/\b(?:sum|peak|row_centroid|col_centroid)\(\s*[A-Za-z_]*$/.test(before)) {
       return { from, options: Object.keys(report?.regions ?? {}).map((name) => ({ label: name, type: "variable", detail: "region" })) };
     }
-    if (/\b(?:rise\(|when)\s*[A-Za-z_]*$/.test(before) && /\b(?:led|emit)\b/.test(before)) {
+    if (/\b(?:rise\(|fall\(|when)\s*[A-Za-z_]*$/.test(before) && /\b(?:led|emit|pixel)\b/.test(before)) {
       return { from, options: Object.keys(report?.events ?? {}).map((name) => ({ label: name, type: "variable", detail: "event" })) };
     }
     for (const keyword of LANGUAGE.keywords) options.push({ label: keyword, type: "keyword" });

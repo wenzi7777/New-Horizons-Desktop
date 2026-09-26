@@ -45,8 +45,13 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 MIN_OS_RE = re.compile(r"^v?\d+\.\d+\.\d+$")
 
 # button and display since firmware v1.4.0 (the OLED and the action button);
-# drive_ext_led since v1.5.0 (the external LED strip).
-CAPABILITIES = {"read_matrix", "read_imu", "emit_event", "drive_led", "write_file", "button", "display", "drive_ext_led"}
+# drive_ext_led since v1.5.0 (the external LED strip); tick, power, link,
+# read_mag and persist since v1.6.0 (background running, the battery, the
+# link, the magnetometer and persisted counters).
+CAPABILITIES = {
+    "read_matrix", "read_imu", "emit_event", "drive_led", "write_file", "button", "display", "drive_ext_led",
+    "tick", "power", "link", "read_mag", "persist",
+}
 
 # Commands a readout may poll. Enforced here as well as in the library's CI:
 # a package can arrive from a hand-edited catalog, and nothing that renders in
@@ -54,8 +59,10 @@ CAPABILITIES = {"read_matrix", "read_imu", "emit_event", "drive_led", "write_fil
 READOUT_SOURCES = {
     "task_list", "service_list", "app_list", "app_list_packages", "app_events",
     "memory_status", "scan_health", "storage_status", "status", "capabilities",
+    # v1.6.0: the latest IMU, magnetometer and fuel-gauge readings.
+    "sensor_sample",
 }
-READOUT_SECTION_KINDS = {"stats", "table"}
+READOUT_SECTION_KINDS = {"stats", "table", "chart"}
 
 # Mirrors the App Library's sdk/lib/opset.mjs. Kept as a flat set because this module's job is to
 # reject the impossible, not to estimate cost -- the device does that.
@@ -70,6 +77,10 @@ KNOWN_OPS = {
     "mod", "button", "oled_text", "oled_bar",
     # v1.5.0: the external LED strip
     "ext_pixel", "ext_meter",
+    # v1.6.0: time, logic, region sweeps and the other sensors
+    "not", "duration", "interval", "peak_since", "counter_reset", "sqrt", "atan2",
+    "region_peak", "region_active", "region_row_centroid", "region_col_centroid",
+    "imu", "mag", "battery", "linked", "uptime",
 }
 
 FETCH_TIMEOUT_SEC = 5

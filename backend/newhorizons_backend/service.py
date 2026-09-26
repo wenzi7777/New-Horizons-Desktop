@@ -85,6 +85,7 @@ class NewHorizonsService:
         "status",
         "query",
         "memory_status",
+        "sensor_sample",
         "scan_health",
         "storage_status",
         "findme_discover",

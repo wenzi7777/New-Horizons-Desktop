@@ -6,6 +6,16 @@ import { PRESSURE_FULL_SCALE, Simulator, type Frame, type SimEvent } from "../sd
 import type { VisualizationEntry } from "./api";
 import type { SynthPattern } from "./sdkProject";
 
+/**
+ * A simulator as the emulator runs it. Every frame it sees was streamed, so on
+ * the device linked() was true while it arrived.
+ */
+export function emulatorSimulator(pkg: Record<string, any>): Simulator {
+  const sim = new Simulator(pkg);
+  sim.setLinked(true);
+  return sim;
+}
+
 /** A live sample as a simulator frame, or null if it carries no pressures. */
 export function frameFromSample(entry: VisualizationEntry, shape: { rows: number; cols: number }, fallbackSeq: number): Frame | null {
   if (!Array.isArray(entry.p) || entry.p.length === 0) return null;
@@ -13,7 +23,19 @@ export function frameFromSample(entry: VisualizationEntry, shape: { rows: number
   const timestamp = Number(entry.timestamp_ms ?? entry.received_at_ms ?? Date.now());
   const rows = shape.rows * shape.cols === entry.p.length ? shape.rows : 1;
   const cols = shape.rows * shape.cols === entry.p.length ? shape.cols : entry.p.length;
-  return { seq, timestampMs: Math.trunc(timestamp), values: Float32Array.from(entry.p, (v) => Number(v) || 0), rows, cols };
+  const frame: Frame = { seq, timestampMs: Math.trunc(timestamp), values: Float32Array.from(entry.p, (v) => Number(v) || 0), rows, cols };
+  // The samples streamed with the frame, which is what imu() and mag() read
+  // on the device: acceleration then rotation, and the magnetic field.
+  const acc = entry.acc ?? entry.imu?.acc;
+  const gyro = entry.gyro ?? entry.imu?.gyro;
+  const mag = entry.mag ?? entry.imu?.mag;
+  if (Array.isArray(acc) && acc.length >= 3 && Array.isArray(gyro) && gyro.length >= 3) {
+    frame.imu = Float32Array.from([...acc.slice(0, 3), ...gyro.slice(0, 3)], (v) => Number(v) || 0);
+  }
+  if (Array.isArray(mag) && mag.length >= 3) {
+    frame.mag = Float32Array.from(mag.slice(0, 3), (v) => Number(v) || 0);
+  }
+  return frame;
 }
 
 /**
@@ -81,7 +103,7 @@ export class RecordingCursor {
     private readonly frames: readonly Frame[],
     private readonly presses: ReadonlySet<number> = new Set(),
   ) {
-    this.sim = new Simulator(pkg);
+    this.sim = emulatorSimulator(pkg);
   }
 
   get simulator(): Simulator {
@@ -101,7 +123,7 @@ export class RecordingCursor {
   seek(index: number): SimEvent[] {
     const target = Math.max(-1, Math.min(index, this.frames.length - 1));
     if (target < this.position) {
-      this.sim = new Simulator(this.pkg);
+      this.sim = emulatorSimulator(this.pkg);
       this.sim.setBudget(this.budget.load, this.budget.graceLeft);
       this.position = -1;
     }
@@ -121,7 +143,7 @@ export class RecordingCursor {
 
 /** Every event a package produces over a whole recording, for the timeline. */
 export function simulateAll(pkg: Record<string, any>, frames: readonly Frame[], presses: ReadonlySet<number> = new Set()): SimEvent[] {
-  const sim = new Simulator(pkg);
+  const sim = emulatorSimulator(pkg);
   frames.forEach((frame, index) => {
     if (presses.has(index)) sim.pressButton();
     sim.step(frame);

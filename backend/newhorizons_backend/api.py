@@ -24,6 +24,8 @@ from .terminal import compile_terminal_command, terminal_help_items, validate_de
 Decorator = Callable[[Callable[..., Any]], Callable[..., Any]]
 JSON_MIMETYPE = "application/json"
 GATEWAY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+# Calibration chamber limit: its hot-glue seals leak around 30 kPa (2026-09-25).
+PRESSURE_CAL_MAX_KPA = 28.0
 
 
 def json_response(payload: Any) -> Response:
@@ -953,8 +955,8 @@ def create_blueprint(
         if target_kpa is None or not isinstance(target_kpa, (int, float)):
             return json_response({"error": "target_kpa_required"}), 422
         target_kpa = float(target_kpa)
-        if target_kpa > 45.0:
-            return json_response({"error": "target_kpa_exceeds_safety_limit", "limit": 45.0}), 422
+        if target_kpa > PRESSURE_CAL_MAX_KPA:
+            return json_response({"error": "target_kpa_exceeds_safety_limit", "limit": PRESSURE_CAL_MAX_KPA}), 422
         if target_kpa < 0:
             return json_response({"error": "target_kpa_must_be_non_negative"}), 422
         try:

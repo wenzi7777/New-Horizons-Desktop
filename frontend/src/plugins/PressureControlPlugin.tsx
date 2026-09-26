@@ -5,9 +5,9 @@ import { useI18n } from "../i18n";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { TriangleAlert } from "lucide-react";
 
-const PRESSURE_MAX_KPA = 45;
-const PRESSURE_BASELINE_KPA = 3.5;
-const PRESSURE_RESIDUAL_TEST_KPA = 10;
+const PRESSURE_MAX_KPA = 28;
+const PRESSURE_BASELINE_KPA = 0.5;
+const PRESSURE_RESIDUAL_TEST_KPA = 5;
 const PRESSURE_RESIDUAL_TEST_TIMEOUT_MS = 15000;
 const STABLE_TOLERANCE_KPA = 0.5;
 const STABLE_CONFIRM_SAMPLES = 5;

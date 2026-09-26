@@ -36,15 +36,19 @@ export type BoardSpec = {
   button: boolean;
   /** External LEDs on the board's header; 0 where there are none. */
   externalLeds: number;
+  /** A magnetometer, which mag() reads (NHOS_BOARD_HAS_MAG). */
+  magnetometer: boolean;
+  /** A fuel gauge, which battery() reads (NHOS_BOARD_HAS_MAX17048); -1 without one. */
+  fuelGauge: boolean;
 };
 
 /** Largest first: the first is what a new virtual device starts as. */
 export const BOARDS: BoardSpec[] = [
-  { id: "v23d", hardwareModel: "VD-CTL/R v2.3.D GCU LTS", name: "v2.3.D GCU LTS", rows: 15, cols: 15, oled: false, button: false, externalLeds: 0 },
-  { id: "v10f", hardwareModel: "VD-CTL/R v1.0.F 2026.4", name: "v1.0.F", rows: 10, cols: 21, oled: true, button: true, externalLeds: 3 },
-  { id: "v15f", hardwareModel: "VD-CTL/R v1.5.F 2026.7", name: "v1.5.F", rows: 14, cols: 14, oled: true, button: true, externalLeds: 9 },
-  { id: "v22c", hardwareModel: "VD-CTL/R v2.2.C GCU LTS", name: "v2.2.C GCU LTS", rows: 11, cols: 13, oled: false, button: false, externalLeds: 0 },
-  { id: "v21", hardwareModel: "VD-CTL/R v2.1 GCU LTS", name: "v2.1 GCU LTS", rows: 10, cols: 12, oled: false, button: false, externalLeds: 0 },
+  { id: "v23d", hardwareModel: "VD-CTL/R v2.3.D GCU LTS", name: "v2.3.D GCU LTS", rows: 15, cols: 15, oled: false, button: false, externalLeds: 0, magnetometer: true, fuelGauge: false },
+  { id: "v10f", hardwareModel: "VD-CTL/R v1.0.F 2026.4", name: "v1.0.F", rows: 10, cols: 21, oled: true, button: true, externalLeds: 3, magnetometer: false, fuelGauge: false },
+  { id: "v15f", hardwareModel: "VD-CTL/R v1.5.F 2026.7", name: "v1.5.F", rows: 14, cols: 14, oled: true, button: true, externalLeds: 9, magnetometer: true, fuelGauge: true },
+  { id: "v22c", hardwareModel: "VD-CTL/R v2.2.C GCU LTS", name: "v2.2.C GCU LTS", rows: 11, cols: 13, oled: false, button: false, externalLeds: 0, magnetometer: true, fuelGauge: false },
+  { id: "v21", hardwareModel: "VD-CTL/R v2.1 GCU LTS", name: "v2.1 GCU LTS", rows: 10, cols: 12, oled: false, button: false, externalLeds: 0, magnetometer: true, fuelGauge: false },
 ];
 
 export function boardById(id: string | undefined): BoardSpec {

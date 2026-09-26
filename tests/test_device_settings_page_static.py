@@ -11,6 +11,8 @@ DEVICE_COMMAND_LIB = ROOT / "frontend" / "src" / "lib" / "deviceCommand.ts"
 APP_TSX = ROOT / "frontend" / "src" / "App.tsx"
 STYLES = ROOT / "frontend" / "src" / "styles.css"
 SERVICE = ROOT / "backend" / "newhorizons_backend" / "service.py"
+PRESSURE_PLUGIN = ROOT / "frontend" / "src" / "plugins" / "PressureControlPlugin.tsx"
+API = ROOT / "backend" / "newhorizons_backend" / "api.py"
 
 
 class DeviceSettingsPageStaticTest(unittest.TestCase):
@@ -504,10 +506,22 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('Metric label={t("pressureCalReferencePressure")}', source)
         self.assertIn('currentImadaValue !== null ? `${currentImadaValue.toFixed(3)} ${currentImadaUnit}` : t("pressureCalRefNotConnected")', source)
 
+    def test_pressure_range_matches_corrected_mpx_wiring(self):
+        # 2026-09-25: MPX Vs moved from Vin to 5 V (zero 3.426 -> 0.384); chamber seals leak ~30 kPa.
+        for path in (SETTINGS_PAGE, PRESSURE_PLUGIN):
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("const PRESSURE_MAX_KPA = 28;", source)
+            self.assertIn("const PRESSURE_BASELINE_KPA = 0.5;", source)
+            self.assertIn("const PRESSURE_RESIDUAL_TEST_KPA = 5;", source)
+        api = API.read_text(encoding="utf-8")
+        self.assertIn("PRESSURE_CAL_MAX_KPA = 28.0", api)
+        self.assertIn("if target_kpa > PRESSURE_CAL_MAX_KPA:", api)
+        self.assertNotIn("45.0", api)
+
     def test_pressure_calibration_commit_holds_low_pressure_with_compensation(self):
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
 
-        self.assertIn("const PRESSURE_BASELINE_KPA = 3.5;", source)
+        self.assertIn("const PRESSURE_BASELINE_KPA = 0.5;", source)
         self.assertIn("const PRESSURE_POST_CAL_HOLD_KPA = PRESSURE_BASELINE_KPA;", source)
         self.assertIn("const PRESSURE_POST_CAL_HOLD_SETTLE_MS = 3000;", source)
         self.assertIn('addLog("Returning pressure system to baseline hold…");', source)

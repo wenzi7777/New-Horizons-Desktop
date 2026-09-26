@@ -33,13 +33,23 @@ export type ReadoutColumn = {
   bar_max?: number;
 };
 
+export type ReadoutSeries = {
+  label?: string;
+  field: string;
+};
+
 export type ReadoutSection = {
-  kind: "stats" | "table";
+  kind: "stats" | "table" | "chart";
   title: string;
   source?: string;
   sort?: { field: string; desc?: boolean };
   items?: ReadoutStat[];
   columns?: ReadoutColumn[];
+  /** chart: numeric fields of `source`, plotted over the last `points` polls */
+  series?: ReadoutSeries[];
+  points?: number;
+  min?: number;
+  max?: number;
 };
 
 export type ReadoutSpec = {
@@ -64,10 +74,16 @@ export type ReadoutPackage = {
 export const READOUT_ALLOWED_SOURCES = new Set([
   "task_list", "service_list", "app_list", "app_list_packages", "app_events",
   "memory_status", "scan_health", "storage_status", "status", "capabilities",
+  // Firmware v1.6.0: the latest IMU, magnetometer and fuel-gauge readings.
+  "sensor_sample",
 ]);
 
 export const MIN_REFRESH_MS = 500;
 export const MAX_REFRESH_MS = 60000;
+export const MAX_CHART_SERIES = 4;
+export const DEFAULT_CHART_POINTS = 60;
+export const MIN_CHART_POINTS = 10;
+export const MAX_CHART_POINTS = 600;
 
 export function isReadoutPackage(doc: unknown): doc is ReadoutPackage {
   const record = doc as Record<string, unknown> | null;
@@ -153,7 +169,51 @@ export function extractSource(
   const data = (result?.data ?? result ?? {}) as Record<string, unknown>;
   if (!source.path) return data;
   const picked = data[source.path];
-  return Array.isArray(picked) ? (picked as Row[]) : [];
+  if (Array.isArray(picked)) return picked as Row[];
+  // An object under the path is one row -- sensor_sample's imu/mag/battery.
+  if (picked && typeof picked === "object") return picked as Row;
+  return [];
+}
+
+/** How many polls a chart keeps, clamped to what the format allows. */
+export function chartPoints(section: ReadoutSection): number {
+  const raw = Number(section.points ?? DEFAULT_CHART_POINTS);
+  if (!Number.isFinite(raw)) return DEFAULT_CHART_POINTS;
+  return Math.min(Math.max(Math.round(raw), MIN_CHART_POINTS), MAX_CHART_POINTS);
+}
+
+/**
+ * One poll's values for a chart's series: a number per series, or null where
+ * the field is missing or not a number, so a gap is drawn as a gap rather
+ * than as a zero the device never reported.
+ */
+export function chartSample(section: ReadoutSection, source: Row | Row[] | undefined): (number | null)[] {
+  const row = Array.isArray(source) ? source[0] : source;
+  return (section.series ?? []).slice(0, MAX_CHART_SERIES).map((line) => numericValue(row?.[line.field]));
+}
+
+/** Append a poll and keep only the last `points`. */
+export function pushChartHistory(history: (number | null)[][], sample: (number | null)[], points: number) {
+  const next = [...history, sample];
+  return next.length > points ? next.slice(next.length - points) : next;
+}
+
+/** The y range to draw: the section's fixed bounds, or the data's (never zero-height). */
+export function chartRange(section: ReadoutSection, history: (number | null)[][]): { min: number; max: number } {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const sample of history) {
+    for (const value of sample) {
+      if (value === null) continue;
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+  }
+  if (typeof section.min === "number") min = section.min;
+  if (typeof section.max === "number") max = section.max;
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return { min: 0, max: 1 };
+  if (max - min < 1e-9) return { min: min - 1, max: max + 1 };
+  return { min, max };
 }
 
 export function sortRows(rows: Row[], sort?: ReadoutSection["sort"]): Row[] {

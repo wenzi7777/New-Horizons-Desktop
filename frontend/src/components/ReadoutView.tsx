@@ -4,9 +4,13 @@ import { useI18n } from "../i18n";
 import {
   type ReadoutPackage,
   type ReadoutSection,
+  chartPoints,
+  chartRange,
+  chartSample,
   extractSource,
   formatValue,
   numericValue,
+  pushChartHistory,
   readoutRejectionReason,
   refreshInterval,
   sortRows,
@@ -14,6 +18,10 @@ import {
 import type { CommandRunner } from "../lib/deviceFileTransfer";
 
 type Row = Record<string, unknown>;
+type History = (number | null)[][];
+
+const CHART_WIDTH = 600;
+const CHART_HEIGHT = 140;
 
 export type ReadoutViewProps = {
   pkg: ReadoutPackage;
@@ -90,11 +98,80 @@ function TableSection({ section, data }: { section: ReadoutSection; data: Record
   );
 }
 
+/**
+ * Up to four numeric fields over the last `points` polls. The history lives
+ * here, in the browser -- the device reports only the present -- so it
+ * starts empty each time the readout is opened.
+ */
+function ChartSection({ section, history }: { section: ReadoutSection; history: History }) {
+  const { t } = useI18n();
+  const series = section.series ?? [];
+  const points = chartPoints(section);
+  const { min, max } = chartRange(section, history);
+  const x = (index: number) => (points <= 1 ? 0 : (index / (points - 1)) * CHART_WIDTH);
+  const y = (value: number) => CHART_HEIGHT - ((value - min) / (max - min)) * CHART_HEIGHT;
+  // Right-aligned: the newest poll is always at the right edge.
+  const offset = points - history.length;
+  const latest = history.length ? history[history.length - 1] : [];
+
+  const paths = series.map((_, line) => {
+    let d = "";
+    let pen = false;
+    history.forEach((sample, index) => {
+      const value = sample[line];
+      if (value === null || value === undefined) {
+        pen = false;
+        return;
+      }
+      d += `${pen ? "L" : "M"}${x(index + offset).toFixed(1)},${y(value).toFixed(1)}`;
+      pen = true;
+    });
+    return d;
+  });
+
+  return (
+    <div className="readout-chart">
+      <div className="readout-chart-legend">
+        {series.map((line, index) => (
+          <span key={line.field} className={`readout-chart-key series-${index}`}>
+            <i aria-hidden="true" />
+            {line.label ?? line.field}
+            <strong>{latest[index] === null || latest[index] === undefined ? "—" : formatValue(latest[index], "raw")}</strong>
+          </span>
+        ))}
+      </div>
+      {history.length ? (
+        <svg
+          className="readout-chart-plot"
+          viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={section.title}
+        >
+          {min < 0 && max > 0 ? <line className="readout-chart-zero" x1={0} x2={CHART_WIDTH} y1={y(0)} y2={y(0)} /> : null}
+          {paths.map((d, index) => (d ? <path key={index} className={`series-${index}`} d={d} vectorEffect="non-scaling-stroke" /> : null))}
+        </svg>
+      ) : (
+        <p className="readout-empty">{t("readoutNoRows")}</p>
+      )}
+      {history.length ? (
+        <div className="readout-chart-axis">
+          <span>{formatValue(Number(min.toPrecision(4)), "raw")} – {formatValue(Number(max.toPrecision(4)), "raw")}</span>
+          <span>{history.length} / {points}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ReadoutView({ pkg, runner, busy = false }: ReadoutViewProps) {
   const { t } = useI18n();
   const spec = pkg.readout;
   const rejection = useMemo(() => readoutRejectionReason(pkg), [pkg]);
   const [data, setData] = useState<Record<string, Row | Row[]>>({});
+  // Per chart section, by index: the polls it has seen.
+  const [history, setHistory] = useState<Record<number, History>>({});
+  useEffect(() => setHistory({}), [pkg]);
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
@@ -121,6 +198,14 @@ export function ReadoutView({ pkg, runner, busy = false }: ReadoutViewProps) {
         next[source.id] = extractSource(byCommand.get(source.command) ?? null, source);
       }
       setData(next);
+      setHistory((previous) => {
+        const updated: Record<number, History> = { ...previous };
+        spec.sections.forEach((section, index) => {
+          if (section.kind !== "chart" || !section.source) return;
+          updated[index] = pushChartHistory(previous[index] ?? [], chartSample(section, next[section.source]), chartPoints(section));
+        });
+        return updated;
+      });
       setUpdatedAt(Date.now());
       setError(null);
     } catch (err) {
@@ -128,7 +213,7 @@ export function ReadoutView({ pkg, runner, busy = false }: ReadoutViewProps) {
     } finally {
       inFlight.current = false;
     }
-  }, [spec.sources, rejection]);
+  }, [spec.sources, spec.sections, rejection]);
 
   useEffect(() => {
     if (!live || rejection) return;
@@ -184,7 +269,9 @@ export function ReadoutView({ pkg, runner, busy = false }: ReadoutViewProps) {
           <h4>{section.title}</h4>
           {section.kind === "stats"
             ? <StatsSection section={section} data={data} />
-            : <TableSection section={section} data={data} />}
+            : section.kind === "chart"
+              ? <ChartSection section={section} history={history[index] ?? []} />
+              : <TableSection section={section} data={data} />}
         </div>
       ))}
     </section>
