@@ -7,7 +7,7 @@
 | MCU | ESP32-S3 Mini 1 N8（双核 Xtensa LX7，240 MHz） |
 | Flash | 8 MB |
 | PSRAM | 无 |
-| 主板 | TIA-CTL/R v1.0.F 2026.4 |
+| 主板 | TIA-CTL v1.0.F 2026.4 |
 | FQBN | `esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB` |
 
 ## 按键矩阵

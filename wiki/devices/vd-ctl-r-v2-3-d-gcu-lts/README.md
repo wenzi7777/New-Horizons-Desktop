@@ -1,6 +1,6 @@
-# TIA-CTL/R v2.3.D GCU LTS
+# TIA-CTL v2.3.D GCU LTS
 
-This wiki directory is the device-level documentation entry for the `TIA-CTL/R v2.3.D GCU LTS` hardware family.
+This wiki directory is the device-level documentation entry for the `TIA-CTL v2.3.D GCU LTS` hardware family.
 
 ## Runtime Notes
 

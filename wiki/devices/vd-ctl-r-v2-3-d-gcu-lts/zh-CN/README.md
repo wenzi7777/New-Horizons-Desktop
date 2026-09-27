@@ -1,6 +1,6 @@
-# TIA-CTL/R v2.3.D GCU LTS
+# TIA-CTL v2.3.D GCU LTS
 
-TIA-CTL/R v2.3.D GCU LTS 是 New Horizons 系列中最新款 GCU 型号。它配备 15×15 压力传感器矩阵、BMI270 IMU（集成 BMM150 磁力计）、BQ25180 电池充电管理，以及一颗板载状态 LED。本设备无物理操作按钮、无外部 LED 灯带、无 OLED 显示屏。
+TIA-CTL v2.3.D GCU LTS 是 New Horizons 系列中最新款 GCU 型号。它配备 15×15 压力传感器矩阵、BMI270 IMU（集成 BMM150 磁力计）、BQ25180 电池充电管理，以及一颗板载状态 LED。本设备无物理操作按钮、无外部 LED 灯带、无 OLED 显示屏。
 
 ## 规格参数
 
@@ -8,7 +8,7 @@ TIA-CTL/R v2.3.D GCU LTS 是 New Horizons 系列中最新款 GCU 型号。它配
 |------|-------|
 | MCU | ESP32-S3 |
 | Flash | 4 MB |
-| 主板版本 | TIA-CTL/R v2.3.D GCU LTS |
+| 主板版本 | TIA-CTL v2.3.D GCU LTS |
 | 按键矩阵 | 15 行 × 15 列（225 个传感器） |
 | 状态 LED | SK6812（板载，GPIO 38） |
 | 外部 LED | 无 |

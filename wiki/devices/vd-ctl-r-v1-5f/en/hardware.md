@@ -1,4 +1,4 @@
-# TIA-CTL/R v1.5.F Hardware Reference
+# TIA-CTL v1.5.F Hardware Reference
 
 ## Evidence and notation
 

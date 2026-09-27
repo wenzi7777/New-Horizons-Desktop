@@ -7,7 +7,7 @@
 | MCU | ESP32-S3（デュアルコア Xtensa LX7、240 MHz） |
 | フラッシュ | 4 MB |
 | PSRAM | なし |
-| ボード | TIA-CTL/R v2.3.D GCU LTS |
+| ボード | TIA-CTL v2.3.D GCU LTS |
 
 ## キーマトリックス
 

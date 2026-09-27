@@ -1,6 +1,6 @@
-# TIA-CTL/R v1.0.F 2026.4
+# TIA-CTL v1.0.F 2026.4
 
-The TIA-CTL/R v1.0.F 2026.4 is the primary consumer hardware revision in the New Horizons family. It features a full-size key matrix, built-in status LED, external addressable LED strip, OLED display, BMI270 IMU, physical action button, and BQ25180-based charging circuitry.
+The TIA-CTL v1.0.F 2026.4 is the primary consumer hardware revision in the New Horizons family. It features a full-size key matrix, built-in status LED, external addressable LED strip, OLED display, BMI270 IMU, physical action button, and BQ25180-based charging circuitry.
 
 ## Specifications
 
@@ -8,7 +8,7 @@ The TIA-CTL/R v1.0.F 2026.4 is the primary consumer hardware revision in the New
 |------|-------|
 | MCU | ESP32-S3 Mini 1 N8 |
 | Flash | 8 MB |
-| Board revision | TIA-CTL/R v1.0.F 2026.4 |
+| Board revision | TIA-CTL v1.0.F 2026.4 |
 | Key matrix | 10 rows × 21 columns (210 sensors) |
 | Status LED | SK6812 (on-board, GPIO 11) |
 | External LED | WS2812B-compatible strip (GPIO 12, 3 pixels) |

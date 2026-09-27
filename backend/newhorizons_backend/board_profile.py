@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 
-# Firmware before the TIA-CTL/R rename reports these same boards as
-# "VD-CTL/R ..."; normalize_hardware_model() folds that old prefix in.
-V1_HARDWARE_MODEL = "TIA-CTL/R v1.0.F 2026.4"
-V15F_HARDWARE_MODEL = "TIA-CTL/R v1.5.F 2026.7"
-V21_GCU_HARDWARE_MODEL = "TIA-CTL/R v2.1 GCU LTS"
-V22C_GCU_HARDWARE_MODEL = "TIA-CTL/R v2.2.C GCU LTS"
-GCU_HARDWARE_MODEL = "TIA-CTL/R v2.3.D GCU LTS"
+# Older firmware reports these same boards as "VD-CTL/R ..." (before v1.8.0)
+# or "TIA-CTL/R ..." (v1.8.0); normalize_hardware_model() folds both in.
+V1_HARDWARE_MODEL = "TIA-CTL v1.0.F 2026.4"
+V15F_HARDWARE_MODEL = "TIA-CTL v1.5.F 2026.7"
+V21_GCU_HARDWARE_MODEL = "TIA-CTL v2.1 GCU LTS"
+V22C_GCU_HARDWARE_MODEL = "TIA-CTL v2.2.C GCU LTS"
+GCU_HARDWARE_MODEL = "TIA-CTL v2.3.D GCU LTS"
 
 DEFAULT_BOARD_PROFILE = {
     "hardware_model": V1_HARDWARE_MODEL,
@@ -74,8 +74,9 @@ KNOWN_PROFILES = [
 
 def normalize_hardware_model(value: Any) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized.startswith("vd-ctl/r"):
-        normalized = "tia-ctl/r" + normalized[len("vd-ctl/r"):]
+    for legacy in ("vd-ctl/r", "tia-ctl/r"):
+        if normalized.startswith(legacy):
+            return "tia-ctl" + normalized[len(legacy):]
     return normalized
 
 

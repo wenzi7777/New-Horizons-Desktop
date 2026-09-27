@@ -205,7 +205,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         helper = (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8")
         i18n = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
 
-        self.assertIn('const V21_GCU_HARDWARE_MODEL = "TIA-CTL/R v2.1 GCU LTS";', helper)
+        self.assertIn('const V21_GCU_HARDWARE_MODEL = "TIA-CTL v2.1 GCU LTS";', helper)
         self.assertIn("wikiSlug: \"vd-ctl-r-v2-1-gcu-lts\"", helper)
         self.assertIn("arduino-gcu-v21-lts-latest.json", helper)
         self.assertIn("defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]", helper)

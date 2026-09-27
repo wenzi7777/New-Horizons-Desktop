@@ -34,14 +34,14 @@ export type BoardProfile = {
   digitalPinHeading: string;
 };
 
-// Firmware before the TIA-CTL/R rename reports these same boards as
-// "VD-CTL/R ..."; normalizeHardwareModel() folds that old prefix in, so both
-// spellings resolve to one profile.
-export const V1_HARDWARE_MODEL = "TIA-CTL/R v1.0.F 2026.4";
-export const V15F_HARDWARE_MODEL = "TIA-CTL/R v1.5.F 2026.7";
-const V21_GCU_HARDWARE_MODEL = "TIA-CTL/R v2.1 GCU LTS";
-const V22C_GCU_HARDWARE_MODEL = "TIA-CTL/R v2.2.C GCU LTS";
-const GCU_HARDWARE_MODEL = "TIA-CTL/R v2.3.D GCU LTS";
+// Older firmware reports these same boards as "VD-CTL/R ..." (before v1.8.0)
+// or "TIA-CTL/R ..." (v1.8.0); normalizeHardwareModel() folds both old
+// prefixes in, so every spelling resolves to one profile.
+export const V1_HARDWARE_MODEL = "TIA-CTL v1.0.F 2026.4";
+export const V15F_HARDWARE_MODEL = "TIA-CTL v1.5.F 2026.7";
+const V21_GCU_HARDWARE_MODEL = "TIA-CTL v2.1 GCU LTS";
+const V22C_GCU_HARDWARE_MODEL = "TIA-CTL v2.2.C GCU LTS";
+const GCU_HARDWARE_MODEL = "TIA-CTL v2.3.D GCU LTS";
 
 const V1_ANALOG_PIN_SLOTS: BoardPinSlot[] = [
   { label: "A0", gpio: 1, role: "analog" },
@@ -404,13 +404,13 @@ const GCU_PROFILE: BoardProfile = {
 const KNOWN_PROFILES = [V21_GCU_PROFILE, V22C_GCU_PROFILE, GCU_PROFILE, V15F_PROFILE, V1_PROFILE];
 
 export function normalizeHardwareModel(value: string) {
-  return value.trim().toLowerCase().replace(/^vd-ctl\/r\b/, "tia-ctl/r");
+  return value.trim().toLowerCase().replace(/^(vd|tia)-ctl\/r\b/, "tia-ctl");
 }
 
 function slugifyHardwareModel(value: string) {
   return value
     .toLowerCase()
-    .replace(/^tia-ctl\/r\b/, "vd-ctl/r") // wiki directories kept the old name
+    .replace(/^tia-ctl(\/r)?\b/, "vd-ctl/r") // wiki directories kept the old name
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/-2026-4$/, "")
     .replace(/-2026-7$/, "")
@@ -430,9 +430,9 @@ export function defaultManifestUrlForHardwareModel(value: string | null | undefi
   return boardProfileForHardwareModel(value).defaultManifestUrl;
 }
 
-/** Name shown in the UI for a board: older firmware still reports "VD-CTL/R ...". */
+/** Name shown in the UI for a board: older firmware still reports "VD-CTL/R ..." or "TIA-CTL/R ...". */
 export function displayHardwareModel(value: string | null | undefined): string {
-  return String(value ?? "").replace(/^VD-CTL\/R\b/, "TIA-CTL/R");
+  return String(value ?? "").replace(/^(VD|TIA)-CTL\/R\b/, "TIA-CTL");
 }
 
 export function wikiSlugFromHardwareModel(value: string | null | undefined): string {

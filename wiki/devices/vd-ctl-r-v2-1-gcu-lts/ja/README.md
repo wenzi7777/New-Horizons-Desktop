@@ -1,6 +1,6 @@
-# TIA-CTL/R v2.1 GCU LTS
+# TIA-CTL v2.1 GCU LTS
 
-TIA-CTL/R v2.1 GCU LTS は New Horizons ファミリーのコンパクトな GCU（汎用制御ユニット）バリアントです。10×12 の感圧センサーマトリックス、BMI270 IMU と BMM150 磁力計、オンボードステータス LED を搭載しています。物理アクションボタン、外部 LED ストリップ、OLED ディスプレイはありません。
+TIA-CTL v2.1 GCU LTS は New Horizons ファミリーのコンパクトな GCU（汎用制御ユニット）バリアントです。10×12 の感圧センサーマトリックス、BMI270 IMU と BMM150 磁力計、オンボードステータス LED を搭載しています。物理アクションボタン、外部 LED ストリップ、OLED ディスプレイはありません。
 
 ## 仕様
 
@@ -8,7 +8,7 @@ TIA-CTL/R v2.1 GCU LTS は New Horizons ファミリーのコンパクトな GCU
 |------|-----|
 | MCU | ESP32-S3 |
 | フラッシュ | 4 MB |
-| ボードリビジョン | TIA-CTL/R v2.1 GCU LTS |
+| ボードリビジョン | TIA-CTL v2.1 GCU LTS |
 | キーマトリックス | 10 行 × 12 列（120 センサー） |
 | ステータス LED | SK6812（オンボード、GPIO 38） |
 | 外部 LED | なし |
