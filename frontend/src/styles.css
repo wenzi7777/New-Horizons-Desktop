@@ -8337,3 +8337,128 @@ button.cal-matrix-cell:active {
     transform: none;
   }
 }
+
+/* Apps panel: the device's own outputs, mirrored from app_view. */
+.app-live {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-sm);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.app-live.stale {
+  opacity: 0.6;
+}
+
+.app-live-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-live-head h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.app-live-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.app-live-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 384px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.app-live-oled,
+.app-live-side,
+.app-live-led,
+.app-live-strip {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-live-side {
+  gap: 16px;
+}
+
+.app-live-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.app-live-rows {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.app-live-rows li {
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-live-led-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.app-live-led-row .sdk-led {
+  margin-left: 0;
+}
+
+.app-live-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.app-live-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.app-live-conflicts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (max-width: 720px) {
+  .app-live-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

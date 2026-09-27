@@ -8,8 +8,9 @@ import type { AppCatalogEntry, AppPackage } from "../lib/appLibrary";
 import { compareVersions, useLocalised } from "../lib/appLibrary";
 import { normalizeDevice, useDevicesPolling } from "../lib/device";
 import { appErrorKey } from "../lib/deviceApps";
-import { useDeviceCommand } from "../lib/deviceCommand";
+import { pollDeviceCommand, useDeviceCommand } from "../lib/deviceCommand";
 import {
+  type CommandRunner,
   type InstallPhase,
   type TransferProgress,
   installAppPackage,
@@ -25,7 +26,39 @@ export function DeviceAppsPage() {
   const { deviceUid = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const { devices } = useDevicesPolling();
-  const { queue, running, errorMessage } = useDeviceCommand(deviceUid);
+  const { queue: rawQueue, running, errorMessage } = useDeviceCommand(deviceUid);
+
+  // The live preview polls app_view on the same device. Operator commands
+  // (and every chunk of an install) wait out a poll in flight, and a poll
+  // skips while any of them runs: a Hub relays one command per device at a
+  // time, so the two must never overlap.
+  const pollInFlightRef = useRef<Promise<unknown> | null>(null);
+  const actionsInFlightRef = useRef(0);
+  const queue = useCallback<CommandRunner>(
+    async (payload, timeoutMs) => {
+      actionsInFlightRef.current += 1;
+      try {
+        if (pollInFlightRef.current) await pollInFlightRef.current.catch(() => undefined);
+        return await rawQueue(payload, timeoutMs);
+      } finally {
+        actionsInFlightRef.current -= 1;
+      }
+    },
+    [rawQueue],
+  );
+  const poll = useCallback<CommandRunner>(
+    async (payload, timeoutMs) => {
+      if (actionsInFlightRef.current > 0 || pollInFlightRef.current) return { result: null };
+      const pending = pollDeviceCommand(deviceUid, payload, timeoutMs);
+      pollInFlightRef.current = pending;
+      try {
+        return await pending;
+      } finally {
+        pollInFlightRef.current = null;
+      }
+    },
+    [deviceUid],
+  );
 
   const device = devices.find((item) => item.device_uid === deviceUid);
   const normalized = device ? normalizeDevice(device) : null;
@@ -218,6 +251,7 @@ export function DeviceAppsPage() {
 
       <DeviceAppsPanel
         runner={queue}
+        poll={poll}
         maintenanceMode={maintenanceMode}
         supportsRegistry={supportsRegistry}
         busy={running}

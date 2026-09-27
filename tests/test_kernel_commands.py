@@ -53,6 +53,7 @@ KERNEL_COMMANDS = {
     "app-revive --name flow": "app_revive",
     "app-load-flow --path apps/flow.json": "app_load_flow",
     "app-unload-flow": "app_unload_flow",
+    "app-view": "app_view",
 }
 
 # Terminal entries handled entirely in the browser -- they open a local modal and

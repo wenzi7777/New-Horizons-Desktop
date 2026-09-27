@@ -125,6 +125,8 @@ class NewHorizonsService:
         "app_events",
         "app_list_packages",
         "app_verify",
+        # v1.7.0: what the apps' OLED rows, status LED and strip show now.
+        "app_view",
     }
     NORMAL_COMMANDS = SHARED_COMMANDS | {
         "enter_maintenance",
@@ -3774,6 +3776,51 @@ class NewHorizonsService:
         ]
 
     @staticmethod
+    def _mock_app_view(apps: list[dict[str, Any]]) -> dict[str, Any]:
+        """A moving app_view, shaped like ControlServer::appViewJson().
+
+        Only the "flow" slot draws, and only while it runs, so disabling it in
+        the mock empties the preview the way it would on hardware.
+        """
+        running = any(a["name"] == "flow" and a["state"] == "running" for a in apps)
+        if not running:
+            return {
+                "oled": {"hw": True, "page": "live_status", "on_screen": False, "rows": [None] * 4},
+                "status_led": {"rgb": [0, 80, 0], "signal": "online", "owner": "system"},
+                "ext_led": {"count": 3, "owner": "system_status"},
+            }
+        phase = (time.time() % 4.0) / 4.0
+        load = round(abs(phase * 2 - 1) * 100, 1)
+        strike = phase < 0.25
+        value = f"{load:.1f}"
+        label = "LOAD"
+        text = label + " " * (21 - len(label) - len(value)) + value
+        return {
+            "oled": {
+                "hw": True, "page": "live_status", "on_screen": False,
+                "rows": [
+                    {"slot": "flow", "kind": "text", "label": label, "text": text},
+                    {"slot": "flow", "kind": "bar", "label": "HEEL", "x0": 30, "width": 98,
+                     "fill_px": int(load / 100 * 96), "contended": ["flow1"]},
+                    None,
+                    None,
+                ],
+            },
+            "status_led": {
+                "rgb": [255, 0, 0] if strike else [0, 80, 0],
+                "signal": "online",
+                "owner": "flow" if strike else "system",
+                **({"app_request": {"slot": "flow", "rgb": [255, 0, 0], "suppressed": False}} if strike else {}),
+            },
+            "ext_led": {
+                "count": 3, "owner": "app",
+                "pixels": [[0, 160, 0] if load > 20 else [0, 0, 0],
+                           [160, 160, 0] if load > 50 else [0, 0, 0],
+                           [160, 0, 0] if load > 80 else [0, 0, 0]],
+            },
+        }
+
+    @staticmethod
     def _mock_default_apps() -> list[dict[str, Any]]:
         """The four flow slots a v1.1.0 device compiles in.
 
@@ -4000,6 +4047,9 @@ class NewHorizonsService:
             return {"message": "app_events",
                     "data": {"seq": 6, "dropped": 0,
                              "events": [e for e in events if e["seq"] > since]}}
+
+        if command == "app_view":
+            return {"message": "app_view", "data": self._mock_app_view(apps)}
 
         if command in ("app_enable", "app_disable", "app_revive"):
             name = str(payload.get("name") or "")

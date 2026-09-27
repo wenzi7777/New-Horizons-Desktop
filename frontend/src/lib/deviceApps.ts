@@ -205,3 +205,114 @@ export function appErrorKey(raw: string): string | null {
   const code = String(raw || "").split(":")[0];
   return APP_ERROR_KEYS[code] ?? null;
 }
+
+// --- app_view (firmware v1.7.0) ---------------------------------------------
+
+export type Rgb = [number, number, number];
+
+/** One OLED row as the device's app page draws it, and which slot drew it. */
+export type AppViewRow = {
+  kind: "text" | "bar";
+  label: string;
+  text?: string;
+  bar?: { x0: number; width: number; fillPx: number };
+  slot: string;
+  /** Other running slots that drew this row too, and lost to `slot`. */
+  contended: string[];
+};
+
+/**
+ * The apps' outputs as the device shows them, after every composition rule.
+ * Shape follows ControlServer::appViewJson().
+ */
+export type AppViewState = {
+  oled: {
+    /** The board has a panel at all. */
+    hw: boolean;
+    page: string;
+    /** App rows are on the physical panel right now. */
+    onScreen: boolean;
+    rows: (AppViewRow | null)[];
+  };
+  statusLed: {
+    rgb: Rgb;
+    signal: string;
+    /** "system", or the slot whose colour the pixel shows. */
+    owner: string;
+    request: { slot: string; rgb: Rgb; suppressed: boolean; contended: string[] } | null;
+  };
+  extLed: {
+    count: number;
+    /** "app" while an app holds the strip, else the preset drawing it. */
+    owner: string;
+    pixels: Rgb[] | null;
+  };
+};
+
+function rgb(value: unknown): Rgb {
+  const list = Array.isArray(value) ? value : [];
+  return [num(list[0]), num(list[1]), num(list[2])];
+}
+
+function names(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => str(item)).filter(Boolean) : [];
+}
+
+export function parseAppView(result: Record<string, unknown> | null): AppViewState {
+  const data = asRecord(asRecord(result).data);
+  const oled = asRecord(data.oled);
+  const led = asRecord(data.status_led);
+  const ext = asRecord(data.ext_led);
+  const rawRows = Array.isArray(oled.rows) ? oled.rows : [];
+  const rows: (AppViewRow | null)[] = [0, 1, 2, 3].map((index) => {
+    const raw = rawRows[index];
+    if (!raw || typeof raw !== "object") return null;
+    const entry = asRecord(raw);
+    const row: AppViewRow = {
+      kind: entry.kind === "bar" ? "bar" : "text",
+      label: str(entry.label),
+      slot: str(entry.slot),
+      contended: names(entry.contended),
+    };
+    if (row.kind === "bar") {
+      row.bar = { x0: num(entry.x0), width: num(entry.width), fillPx: num(entry.fill_px) };
+    } else {
+      row.text = str(entry.text);
+    }
+    return row;
+  });
+  const request = asRecord(led.app_request);
+  return {
+    oled: {
+      hw: oled.hw !== false,
+      page: str(oled.page),
+      onScreen: oled.on_screen === true,
+      rows,
+    },
+    statusLed: {
+      rgb: rgb(led.rgb),
+      signal: str(led.signal),
+      owner: str(led.owner, "system"),
+      request: led.app_request
+        ? {
+            slot: str(request.slot),
+            rgb: rgb(request.rgb),
+            suppressed: request.suppressed === true,
+            contended: names(request.contended),
+          }
+        : null,
+    },
+    extLed: {
+      count: num(ext.count),
+      owner: str(ext.owner),
+      pixels: Array.isArray(ext.pixels) ? ext.pixels.map(rgb) : null,
+    },
+  };
+}
+
+/** True when the device answered app_view with "no such command" (pre-v1.7.0). */
+export function isUnknownCommand(result: Record<string, unknown> | null): boolean {
+  const record = asRecord(result);
+  return (record.status === "error" || record.ok === false) &&
+    /unknown_command|unsupported/.test(str(record.error ?? record.message));
+}

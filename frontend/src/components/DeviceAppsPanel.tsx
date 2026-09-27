@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Gauge, RefreshCw, Workflow, X } from "lucide-react";
 import { ConfirmModal } from "./ConfirmModal";
+import { DeviceAppLivePreview } from "./DeviceAppLivePreview";
 import { ReadoutView } from "./ReadoutView";
 import { useI18n } from "../i18n";
 import {
@@ -30,6 +31,12 @@ export type DeviceAppsPanelProps = {
   supportsRegistry: boolean;
   busy?: boolean;
   compact?: boolean;
+  /**
+   * Runs the live preview's app_view polls. Must skip rather than queue while
+   * the operator's own command holds the device, and stay out of the busy
+   * state and the operation log; see DeviceAppLivePreview. No preview without.
+   */
+  poll?: CommandRunner;
 };
 
 function AppBudgetMeter({ app }: { app: InstalledApp }) {
@@ -87,6 +94,7 @@ export function DeviceAppsPanel({
   supportsRegistry,
   busy = false,
   compact = false,
+  poll,
 }: DeviceAppsPanelProps) {
   const { t } = useI18n();
   const [apps, setApps] = useState<InstalledApp[]>([]);
@@ -213,6 +221,7 @@ export function DeviceAppsPanel({
   }, [packages]);
 
   const disabled = busy || pending !== null;
+  const anyRunning = apps.some((app) => app.state === "running" && !app.idle);
   const maintenanceTitle = maintenanceMode ? undefined : t("appRequiresMaintenance");
 
   function packageRow(entry: AppPackageEntry) {
@@ -303,6 +312,8 @@ export function DeviceAppsPanel({
       </div>
 
       {notice ? <p className={`notice ${notice.kind}`}>{notice.text}</p> : null}
+
+      {poll ? <DeviceAppLivePreview poll={poll} active={anyRunning} paused={disabled || loading} /> : null}
 
       <div className="app-slot-grid">
         {apps.map((app, index) => {

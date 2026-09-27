@@ -35,6 +35,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "app_load_flow",
     "app_unload_flow",
     "app_events",
+    "app_view",
     "app_list_packages",
     "app_install",
     "app_uninstall",
@@ -498,6 +499,7 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "config-schema": "config_schema",
         "app-list": "app_list",
         "app-list-packages": "app_list_packages",
+        "app-view": "app_view",
         "app-reindex": "app_reindex",
         "app-unload-flow": "app_unload_flow",
     }

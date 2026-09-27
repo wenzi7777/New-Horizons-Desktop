@@ -54,7 +54,41 @@ class PanelWiringTests(unittest.TestCase):
 
     def test_the_settings_page_shares_its_own_mutex_with_the_panel(self):
         page = read("pages/DeviceSettingsPage.tsx")
-        self.assertIn("runner={(payload, timeoutMs) => run(", page)
+        flat = re.sub(r"\s+", " ", page)
+        self.assertIn("runner={(payload, timeoutMs) => run(", flat)
+        # The live preview holds the same mutex between polls, so an operator's
+        # click must wait it out rather than be silently skipped.
+        self.assertRegex(flat, r"runner=\{\(payload, timeoutMs\) => run\([^}]*\{ waitForLock: true \}")
+        self.assertRegex(flat, r"poll=\{\(payload, timeoutMs\) => run\([^}]*\{ background: true \}")
+
+    def test_a_background_run_neither_logs_nor_marks_the_page_busy(self):
+        page = read("pages/DeviceSettingsPage.tsx")
+        body = page[page.index("if (options.background) {"):]
+        body = body[:body.index("setBusyCommand(command);")]
+        self.assertIn("pollDeviceCommand(", body)
+        self.assertNotIn("pushOperationLog", body)
+        self.assertIn("commandInFlightRef.current = false", body)
+
+    def test_the_apps_page_never_overlaps_a_poll_and_an_action(self):
+        page = read("pages/DeviceAppsPage.tsx")
+        # A Hub relays one command per device at a time.
+        self.assertIn("if (pollInFlightRef.current) await pollInFlightRef.current", page)
+        self.assertIn("if (actionsInFlightRef.current > 0 || pollInFlightRef.current) return { result: null };", page)
+        self.assertIn("poll={poll}", page)
+
+    def test_the_preview_has_no_pipeline_of_its_own(self):
+        preview = read("components/DeviceAppLivePreview.tsx")
+        self.assertNotIn("useDeviceCommand(", preview)
+        self.assertNotIn("sendDeviceCommand(", preview)
+        self.assertIn('{ command: "app_view" }', preview)
+
+    def test_the_shared_indicator_views_do_not_pull_in_the_sdk(self):
+        views = read("components/sdk/IndicatorViews.tsx")
+        # The Apps panel is in the main bundle; a value import from the SDK
+        # index drags the simulator and compiler in with it.
+        imports = [line for line in views.splitlines() if "sdk/lib" in line]
+        self.assertTrue(imports)
+        self.assertTrue(all(line.startswith("import type") for line in imports))
 
     def test_killed_and_suspended_are_shown_differently(self):
         panel = read("components/DeviceAppsPanel.tsx")

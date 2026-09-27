@@ -8,7 +8,7 @@ import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
 import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
 import { isHubRelayed, normalizeDevice, useDevicesPolling } from "../lib/device";
-import { useDeviceCommand } from "../lib/deviceCommand";
+import { pollDeviceCommand, useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
 import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { BoardIoModal } from "./TerminalPage";
@@ -1323,7 +1323,7 @@ export function DeviceSettingsPage() {
     label: string,
     payload: Record<string, unknown>,
     timeoutMs = 20000,
-    options: { waitForLock?: boolean } = {},
+    options: { waitForLock?: boolean; background?: boolean } = {},
   ) {
     const command = String(payload.command ?? "");
     if (isControlUnavailable && isLiveQueryCommand(command)) {
@@ -1345,6 +1345,17 @@ export function DeviceSettingsPage() {
       return { queued: null, result: null };
     }
     commandInFlightRef.current = true;
+    if (options.background) {
+      // A repeating read (the Apps tab's live preview): it holds the mutex so
+      // it cannot collide with an operator's command -- a Hub relays one
+      // command per device at a time -- but it neither logs, nor marks the
+      // page busy, nor refetches the device list 2-4 times a second.
+      try {
+        return await pollDeviceCommand(deviceUid, payload, timeoutMs);
+      } finally {
+        commandInFlightRef.current = false;
+      }
+    }
     setBusyCommand(command);
     try {
       const response = await queue(payload, timeoutMs);
@@ -2432,7 +2443,12 @@ export function DeviceSettingsPage() {
           <DeviceAppsPanel
             // This page owns a single-flight mutex over run(); the panel must
             // share it rather than opening a second pipeline to the device.
-            runner={(payload, timeoutMs) => run(String(payload.command ?? "app"), payload, timeoutMs)}
+            // waitForLock: the live preview holds the same mutex between
+            // polls, and an operator's click must wait it out, not be dropped.
+            runner={(payload, timeoutMs) =>
+              run(String(payload.command ?? "app"), payload, timeoutMs, { waitForLock: true })}
+            poll={(payload, timeoutMs) =>
+              run(String(payload.command ?? "app_view"), payload, timeoutMs, { background: true })}
             maintenanceMode={normalized?.mode === "maintenance" || normalized?.mode === "safe_maintenance"}
             supportsRegistry={supportsAppRegistry}
             busy={Boolean(busyCommand)}

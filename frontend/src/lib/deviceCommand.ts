@@ -39,6 +39,21 @@ async function waitForResult(
   return null;
 }
 
+/**
+ * One read for a repeating poll: over the WebSocket only, with none of
+ * useDeviceCommand's bookkeeping -- no device-list fetch before the command, no
+ * REST fallback, no running state to re-render the page. A poll that gets no
+ * answer is simply retried on its next tick, so result null is not an error.
+ */
+export async function pollDeviceCommand(
+  deviceUid: string,
+  payload: Record<string, unknown>,
+  timeoutMs = 4000,
+): Promise<{ result: Record<string, unknown> | null }> {
+  const response = await sendDeviceCommand(deviceUid, payload, timeoutMs);
+  return { result: response.result ? normalizeCommandResult(response.result) : null };
+}
+
 export function useDeviceCommand(deviceUid: string) {
   const [running, setRunning] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");

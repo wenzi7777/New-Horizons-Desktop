@@ -97,6 +97,7 @@ const COMMAND_BLOCKS: CommandBlock[] = [
     ],
   },
   { command: "app-list-packages", groupKey: "commandGroupCore", params: [] },
+  { command: "app-view", groupKey: "commandGroupCore", params: [] },
   {
     command: "app-install",
     groupKey: "commandGroupMaintenance",

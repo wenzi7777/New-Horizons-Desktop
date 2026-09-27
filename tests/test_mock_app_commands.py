@@ -298,6 +298,21 @@ class MockAppRegistryTests(MockAppCommandTestCase):
         self.assertTrue(all("frame_seq" in event for event in events))
 
 
+class MockAppViewTests(MockAppCommandTestCase):
+    def test_app_view_has_the_firmware_shape(self):
+        view = self.run_command("NH-MOCK-001", {"command": "app_view"})["data"]
+        self.assertEqual(len(view["oled"]["rows"]), 4)
+        self.assertIn(view["status_led"]["owner"], ("system", "flow"))
+        text = view["oled"]["rows"][0]
+        # Rows arrive already formatted to the panel's 21 columns.
+        self.assertEqual(len(text["text"]), 21)
+
+    def test_a_stopped_slot_draws_nothing(self):
+        self.run_command("NH-MOCK-001", {"command": "app_disable", "name": "flow"})
+        view = self.run_command("NH-MOCK-001", {"command": "app_view"})["data"]
+        self.assertEqual(view["oled"]["rows"], [None] * 4)
+        self.assertEqual(view["status_led"]["owner"], "system")
+
 class MockProcScopeTests(MockAppCommandTestCase):
     def test_proc_lists_the_synthetic_views(self):
         listed = self.run_command("NH-MOCK-001", {"command": "file_list", "scope": "proc"})
