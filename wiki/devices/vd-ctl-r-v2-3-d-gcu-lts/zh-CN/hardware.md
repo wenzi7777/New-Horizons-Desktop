@@ -7,7 +7,7 @@
 | MCU | ESP32-S3（双核 Xtensa LX7，240 MHz） |
 | Flash | 4 MB |
 | PSRAM | 无 |
-| 主板 | VD-CTL/R v2.3.D GCU LTS |
+| 主板 | TIA-CTL/R v2.3.D GCU LTS |
 
 ## 按键矩阵
 

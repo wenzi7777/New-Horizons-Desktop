@@ -1,6 +1,6 @@
-# VD-CTL/R v1.0.F 2026.4
+# TIA-CTL/R v1.0.F 2026.4
 
-VD-CTL/R v1.0.F 2026.4 是 New Horizons 系列中的主要消费硬件版本。它配备全尺寸按键矩阵、内置状态 LED、外部可寻址 LED 灯带、OLED 显示屏、BMI270 IMU、实体操作按钮以及基于 BQ25180 的充电电路。
+TIA-CTL/R v1.0.F 2026.4 是 New Horizons 系列中的主要消费硬件版本。它配备全尺寸按键矩阵、内置状态 LED、外部可寻址 LED 灯带、OLED 显示屏、BMI270 IMU、实体操作按钮以及基于 BQ25180 的充电电路。
 
 ## 规格参数
 
@@ -8,7 +8,7 @@ VD-CTL/R v1.0.F 2026.4 是 New Horizons 系列中的主要消费硬件版本。�
 |------|-------|
 | MCU | ESP32-S3 Mini 1 N8 |
 | Flash | 8 MB |
-| 主板版本 | VD-CTL/R v1.0.F 2026.4 |
+| 主板版本 | TIA-CTL/R v1.0.F 2026.4 |
 | 按键矩阵 | 10 行 × 21 列（210 个传感器） |
 | 状态 LED | SK6812（板载，GPIO 11） |
 | 外部 LED | WS2812B 兼容灯带（GPIO 12，3 像素） |

@@ -4,7 +4,7 @@ import { Folder, X } from "lucide-react";
 
 import { useI18n } from "../i18n";
 import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
-import { boardProfileForHardwareModel } from "../lib/boardProfile";
+import { boardProfileForHardwareModel, displayHardwareModel } from "../lib/boardProfile";
 import { batteryIndicatorState } from "../lib/batteryProfile";
 import { isHubRelayed, useDevicesPolling, type NormalizedDevice } from "../lib/device";
 import { deviceClassName, statusDot } from "../lib/deviceStatus";
@@ -76,7 +76,7 @@ function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) 
           </div>
           <div className="device-uid">{device.uid}</div>
           <div className="device-meta-grid">
-            <span>{t("hardwareModel")}: {device.hardwareModel}</span>
+            <span>{t("hardwareModel")}: {displayHardwareModel(device.hardwareModel)}</span>
             <span>Firmware: {device.firmwareVersion}</span>
             <span>Protocol: {device.protocol}</span>
             <span className="device-battery-reading">

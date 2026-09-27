@@ -150,16 +150,21 @@ class DeviceCommandValidationTest(unittest.TestCase):
     def test_board_profile_lists_v21_gcu_lts_manifest_track(self):
         source = BOARD_PROFILE.read_text(encoding="utf-8")
 
-        self.assertIn('const V21_GCU_HARDWARE_MODEL = "VD-CTL/R v2.1 GCU LTS";', source)
+        self.assertIn('const V21_GCU_HARDWARE_MODEL = "TIA-CTL/R v2.1 GCU LTS";', source)
         self.assertIn('wikiSlug: "vd-ctl-r-v2-1-gcu-lts"', source)
         self.assertIn('defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v21-lts-latest.json"', source)
 
     def test_backend_board_profile_recognizes_v15f_local_hardware_capabilities(self):
         from newhorizons_backend.board_profile import board_profile_for_hardware_model
 
-        profile = board_profile_for_hardware_model("VD-CTL/R v1.5.F 2026.7")
+        profile = board_profile_for_hardware_model("TIA-CTL/R v1.5.F 2026.7")
 
-        self.assertEqual(profile["hardware_model"], "VD-CTL/R v1.5.F 2026.7")
+        self.assertEqual(profile["hardware_model"], "TIA-CTL/R v1.5.F 2026.7")
+        # Firmware from before the TIA-CTL/R rename reports the old name.
+        self.assertEqual(
+            board_profile_for_hardware_model("VD-CTL/R v1.5.F 2026.7")["hardware_model"],
+            "TIA-CTL/R v1.5.F 2026.7",
+        )
         self.assertTrue(profile["supports_external_led"])
         self.assertTrue(profile["supports_oled"])
         self.assertTrue(profile["supports_charge_control"])
@@ -172,7 +177,7 @@ class DeviceCommandValidationTest(unittest.TestCase):
 
         profile = board_profile_for_hardware_model("VD-CTL/R v2.2.C GCU LTS")
 
-        self.assertEqual(profile["hardware_model"], "VD-CTL/R v2.2.C GCU LTS")
+        self.assertEqual(profile["hardware_model"], "TIA-CTL/R v2.2.C GCU LTS")
         self.assertFalse(profile["supports_charge_control"])
         self.assertFalse(profile["supports_oled"])
         self.assertFalse(profile["supports_external_led"])
@@ -182,7 +187,7 @@ class DeviceCommandValidationTest(unittest.TestCase):
     def test_board_profile_lists_v22c_gcu_lts_manifest_track(self):
         source = BOARD_PROFILE.read_text(encoding="utf-8")
 
-        self.assertIn('const V22C_GCU_HARDWARE_MODEL = "VD-CTL/R v2.2.C GCU LTS";', source)
+        self.assertIn('const V22C_GCU_HARDWARE_MODEL = "TIA-CTL/R v2.2.C GCU LTS";', source)
         self.assertIn('wikiSlug: "vd-ctl-r-v2-2-c-gcu-lts"', source)
         self.assertIn(
             'defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v22c-lts-latest.json"',

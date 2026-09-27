@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { api, type DeviceEntry, type TerminalHelpEntry } from "../lib/api";
-import { DEFAULT_BOARD_PROFILE, boardProfileForHardwareModel, type BoardPinSlot, type BoardProfile } from "../lib/boardProfile";
+import { DEFAULT_BOARD_PROFILE, boardProfileForHardwareModel, displayHardwareModel, type BoardPinSlot, type BoardProfile } from "../lib/boardProfile";
 import { commandDescriptionKey, useI18n } from "../i18n";
 import { valueToCsv } from "../lib/valueFormat";
 
@@ -989,7 +989,8 @@ export function BoardIoModal({
   const [copyStatus, setCopyStatus] = useState("");
   const [applyStatus, setApplyStatus] = useState("");
   const command = pinCommand(selectedAnalogPins, selectedSelectPins);
-  const orientationCopy = boardName === DEFAULT_BOARD_PROFILE.hardwareModel ? t("ioOrientation") : boardName;
+  const boardLabel = displayHardwareModel(boardName);
+  const orientationCopy = boardName === DEFAULT_BOARD_PROFILE.hardwareModel ? t("ioOrientation") : boardLabel;
 
   function isSelected(pin: BoardPinSlot) {
     if (pin.role === "analog" && pin.gpio !== undefined) return selectedAnalogPins.includes(pin.gpio);
@@ -1076,7 +1077,7 @@ export function BoardIoModal({
         <div className="modal-header">
           <div>
             <h3 id="io-config-title">{t("ioConfigTitle")}</h3>
-            <p>{supportsPinVisualizer ? orientationCopy : boardName}</p>
+            <p>{supportsPinVisualizer ? orientationCopy : boardLabel}</p>
           </div>
           <button className="button" type="button" onClick={onClose}>
             {t("ioConfigClose")}
@@ -1085,10 +1086,10 @@ export function BoardIoModal({
         <div className="board-diagram">
           <div className="board-outline board-image-outline">
             {supportsPinVisualizer && overviewAsset ? (
-              <img className="board-overview-image" src={overviewAsset} alt={`${boardName} overview`} />
+              <img className="board-overview-image" src={overviewAsset} alt={`${boardLabel} overview`} />
             ) : (
-              <div className="board-overview-image" aria-label={boardName}>
-                <strong>{boardName}</strong>
+              <div className="board-overview-image" aria-label={boardLabel}>
+                <strong>{boardLabel}</strong>
               </div>
             )}
           </div>

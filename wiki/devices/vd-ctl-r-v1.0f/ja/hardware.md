@@ -7,7 +7,7 @@
 | MCU | ESP32-S3 Mini 1 N8（デュアルコア Xtensa LX7、240 MHz） |
 | フラッシュ | 8 MB |
 | PSRAM | なし |
-| ボード | VD-CTL/R v1.0.F 2026.4 |
+| ボード | TIA-CTL/R v1.0.F 2026.4 |
 | FQBN | `esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB` |
 
 ## キーマトリックス

@@ -7,6 +7,7 @@
 // means to keep leaves through export -- a source file and a package, the same
 // files the App Library takes in a pull request.
 
+import { normalizeHardwareModel } from "./boardProfile";
 import { MAX_SLOTS, appShareUs, type Analysis } from "../sdk/lib/index.mjs";
 
 export type SdkKind = "flow" | "readout";
@@ -44,11 +45,11 @@ export type BoardSpec = {
 
 /** Largest first: the first is what a new virtual device starts as. */
 export const BOARDS: BoardSpec[] = [
-  { id: "v23d", hardwareModel: "VD-CTL/R v2.3.D GCU LTS", name: "v2.3.D GCU LTS", rows: 15, cols: 15, oled: false, button: false, externalLeds: 0, magnetometer: true, fuelGauge: false },
-  { id: "v10f", hardwareModel: "VD-CTL/R v1.0.F 2026.4", name: "v1.0.F", rows: 10, cols: 21, oled: true, button: true, externalLeds: 3, magnetometer: false, fuelGauge: false },
-  { id: "v15f", hardwareModel: "VD-CTL/R v1.5.F 2026.7", name: "v1.5.F", rows: 14, cols: 14, oled: true, button: true, externalLeds: 9, magnetometer: true, fuelGauge: true },
-  { id: "v22c", hardwareModel: "VD-CTL/R v2.2.C GCU LTS", name: "v2.2.C GCU LTS", rows: 11, cols: 13, oled: false, button: false, externalLeds: 0, magnetometer: true, fuelGauge: false },
-  { id: "v21", hardwareModel: "VD-CTL/R v2.1 GCU LTS", name: "v2.1 GCU LTS", rows: 10, cols: 12, oled: false, button: false, externalLeds: 0, magnetometer: true, fuelGauge: false },
+  { id: "v23d", hardwareModel: "TIA-CTL/R v2.3.D GCU LTS", name: "v2.3.D GCU LTS", rows: 15, cols: 15, oled: false, button: false, externalLeds: 0, magnetometer: true, fuelGauge: false },
+  { id: "v10f", hardwareModel: "TIA-CTL/R v1.0.F 2026.4", name: "v1.0.F", rows: 10, cols: 21, oled: true, button: true, externalLeds: 3, magnetometer: false, fuelGauge: false },
+  { id: "v15f", hardwareModel: "TIA-CTL/R v1.5.F 2026.7", name: "v1.5.F", rows: 14, cols: 14, oled: true, button: true, externalLeds: 9, magnetometer: true, fuelGauge: true },
+  { id: "v22c", hardwareModel: "TIA-CTL/R v2.2.C GCU LTS", name: "v2.2.C GCU LTS", rows: 11, cols: 13, oled: false, button: false, externalLeds: 0, magnetometer: true, fuelGauge: false },
+  { id: "v21", hardwareModel: "TIA-CTL/R v2.1 GCU LTS", name: "v2.1 GCU LTS", rows: 10, cols: 12, oled: false, button: false, externalLeds: 0, magnetometer: true, fuelGauge: false },
 ];
 
 export function boardById(id: string | undefined): BoardSpec {
@@ -56,7 +57,9 @@ export function boardById(id: string | undefined): BoardSpec {
 }
 
 export function boardForHardwareModel(hardwareModel: string | undefined): BoardSpec | undefined {
-  return BOARDS.find((board) => board.hardwareModel === hardwareModel);
+  if (!hardwareModel) return undefined;
+  const normalized = normalizeHardwareModel(hardwareModel);
+  return BOARDS.find((board) => normalizeHardwareModel(board.hardwareModel) === normalized);
 }
 
 export type MatrixTarget = {
@@ -156,10 +159,10 @@ export function saveTargetKey(key: string): void {
   }
 }
 
-/** "VD-CTL/R v1.5.F 2026.7" -> "v1.5.F", for a board this list does not know. */
+/** "TIA-CTL/R v1.5.F 2026.7" (or the older "VD-CTL/R ...") -> "v1.5.F", for a board this list does not know. */
 function shortBoardName(hardwareModel: string | undefined): string | undefined {
   if (!hardwareModel || hardwareModel === "unknown") return undefined;
-  const name = hardwareModel.replace(/^VD-CTL\/R\s+/, "").replace(/\s+\d{4}\.\d{1,2}$/, "").trim();
+  const name = hardwareModel.replace(/^(VD|TIA)-CTL\/R\s+/, "").replace(/\s+\d{4}\.\d{1,2}$/, "").trim();
   return name || undefined;
 }
 

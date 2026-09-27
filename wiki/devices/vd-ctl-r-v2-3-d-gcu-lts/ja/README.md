@@ -1,6 +1,6 @@
-# VD-CTL/R v2.3.D GCU LTS
+# TIA-CTL/R v2.3.D GCU LTS
 
-VD-CTL/R v2.3.D GCU LTS は New Horizons ファミリーの最新 GCU バリアントです。大型の 15×15 感圧センサーマトリックス、BMI270 IMU と BMM150 磁力計、BQ25180 バッテリー充電、オンボードステータス LED を搭載しています。物理アクションボタン、外部 LED ストリップ、OLED ディスプレイはありません。
+TIA-CTL/R v2.3.D GCU LTS は New Horizons ファミリーの最新 GCU バリアントです。大型の 15×15 感圧センサーマトリックス、BMI270 IMU と BMM150 磁力計、BQ25180 バッテリー充電、オンボードステータス LED を搭載しています。物理アクションボタン、外部 LED ストリップ、OLED ディスプレイはありません。
 
 ## 仕様
 
@@ -8,7 +8,7 @@ VD-CTL/R v2.3.D GCU LTS は New Horizons ファミリーの最新 GCU バリア�
 |------|-----|
 | MCU | ESP32-S3 |
 | フラッシュ | 4 MB |
-| ボードリビジョン | VD-CTL/R v2.3.D GCU LTS |
+| ボードリビジョン | TIA-CTL/R v2.3.D GCU LTS |
 | キーマトリックス | 15 行 × 15 列（225 センサー） |
 | ステータス LED | SK6812（オンボード、GPIO 38） |
 | 外部 LED | なし |

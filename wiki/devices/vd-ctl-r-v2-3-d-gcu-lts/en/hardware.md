@@ -7,7 +7,7 @@
 | MCU | ESP32-S3 (dual-core Xtensa LX7, 240 MHz) |
 | Flash | 4 MB |
 | PSRAM | None |
-| Board | VD-CTL/R v2.3.D GCU LTS |
+| Board | TIA-CTL/R v2.3.D GCU LTS |
 
 ## Key Matrix
 

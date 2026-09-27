@@ -1,6 +1,6 @@
-# VD-CTL/R v1.0.F
+# TIA-CTL/R v1.0.F
 
-This wiki directory is the device-level documentation entry for the `VD-CTL/R v1.0.F 2026.4` hardware family.
+This wiki directory is the device-level documentation entry for the `TIA-CTL/R v1.0.F 2026.4` hardware family.
 
 ## Key References
 - `sk6812-status.md` covers the board `SK6812` indicator meanings.

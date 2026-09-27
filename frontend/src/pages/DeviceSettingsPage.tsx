@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type PressureCalReadings, type PressureCalServerPreset } from "../lib/api";
 
 import { useI18n } from "../i18n";
-import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from "../lib/boardProfile";
+import { V15F_HARDWARE_MODEL, boardProfileForHardwareModel, defaultManifestUrlForHardwareModel, displayHardwareModel } from "../lib/boardProfile";
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
 import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
 import { isHubRelayed, normalizeDevice, useDevicesPolling } from "../lib/device";
@@ -998,7 +998,7 @@ export function DeviceSettingsPage() {
 
   const [activeSection, setActiveSection] = useState<SettingsSection>("overview");
   const boardProfile = useMemo(() => boardProfileForHardwareModel(normalized?.hardwareModel), [normalized?.hardwareModel]);
-  const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : boardProfile.hardwareModel === "VD-CTL/R v1.5.F 2026.7" ? t("powerStatusCopyV15") : t("powerStatusCopy");
+  const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : boardProfile.hardwareModel === V15F_HARDWARE_MODEL ? t("powerStatusCopyV15") : t("powerStatusCopy");
   const pinLayoutCopy = boardProfile.powerUx === "remote_only" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1");
   const [manifestUrl, setManifestUrl] = useState(() => defaultManifestUrlForHardwareModel(normalized?.hardwareModel));
   const [autoOtaOnBoot, setAutoOtaOnBoot] = useState(otaConfig.auto_apply_on_boot === true);
@@ -1672,7 +1672,7 @@ export function DeviceSettingsPage() {
             <DetailBox label={t("mode")} value={connectionLabel} />
             <DetailBox label={t("firmwareVersion")} value={normalized?.firmwareVersion ?? "-"} />
             <DetailBox label={t("protocol")} value={normalized?.protocol ?? "-"} />
-            <DetailBox label={t("hardwareModel")} value={normalized?.hardwareModel ?? "-"} />
+            <DetailBox label={t("hardwareModel")} value={normalized?.hardwareModel ? displayHardwareModel(normalized.hardwareModel) : "-"} />
             <DetailBox label={t("matrixShape")} value={normalized?.matrixShape ?? "-"} />
             <DetailBox label={t("lastSeen")} value={normalized?.lastSeen ?? "-"} />
           </div>
@@ -2648,7 +2648,7 @@ export function DeviceSettingsPage() {
         <div className="settings-overview-card">
           <span>{t("firmwareVersion")}</span>
           <strong>{normalized?.firmwareVersion ?? "-"}</strong>
-          <small>{t("hardwareModel")}: {normalized?.hardwareModel ?? "-"}</small>
+          <small>{t("hardwareModel")}: {normalized?.hardwareModel ? displayHardwareModel(normalized.hardwareModel) : "-"}</small>
         </div>
         <div className="settings-overview-card">
           <span>{t("gatewayTitle")}</span>

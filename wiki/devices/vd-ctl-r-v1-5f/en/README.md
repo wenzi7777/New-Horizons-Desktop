@@ -1,6 +1,6 @@
-# VD-CTL/R v1.5.F
+# TIA-CTL/R v1.5.F
 
-This is the hardware reference entry for VD-CTL/R v1.5.F. It records only connections, parts, and net names that can be checked in the schematic; operating procedures, ratings, I²C addresses, battery compatibility, and mechanical orientation are intentionally not inferred.
+This is the hardware reference entry for TIA-CTL/R v1.5.F. It records only connections, parts, and net names that can be checked in the schematic; operating procedures, ratings, I²C addresses, battery compatibility, and mechanical orientation are intentionally not inferred.
 
 ## Source and scope
 

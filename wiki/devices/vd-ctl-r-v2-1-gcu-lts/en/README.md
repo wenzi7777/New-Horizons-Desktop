@@ -1,6 +1,6 @@
-# VD-CTL/R v2.1 GCU LTS
+# TIA-CTL/R v2.1 GCU LTS
 
-The VD-CTL/R v2.1 GCU LTS is a compact GCU (General Control Unit) variant in the New Horizons family. It features a 10×12 pressure sensor matrix, BMI270 IMU with BMM150 magnetometer, and a single on-board status LED. It has no physical action button, no external LED strip, and no OLED display.
+The TIA-CTL/R v2.1 GCU LTS is a compact GCU (General Control Unit) variant in the New Horizons family. It features a 10×12 pressure sensor matrix, BMI270 IMU with BMM150 magnetometer, and a single on-board status LED. It has no physical action button, no external LED strip, and no OLED display.
 
 ## Specifications
 
@@ -8,7 +8,7 @@ The VD-CTL/R v2.1 GCU LTS is a compact GCU (General Control Unit) variant in the
 |------|-------|
 | MCU | ESP32-S3 |
 | Flash | 4 MB |
-| Board revision | VD-CTL/R v2.1 GCU LTS |
+| Board revision | TIA-CTL/R v2.1 GCU LTS |
 | Key matrix | 10 rows × 12 columns (120 sensors) |
 | Status LED | SK6812 (on-board, GPIO 38) |
 | External LED | None |

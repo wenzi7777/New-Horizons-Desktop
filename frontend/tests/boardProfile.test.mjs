@@ -35,7 +35,7 @@ test("v2.2.C GCU LTS resolves to its own profile instead of falling back to v1.0
     await loadBoardProfile();
   const profile = boardProfileForHardwareModel("VD-CTL/R v2.2.C GCU LTS");
 
-  assert.equal(profile.hardwareModel, "VD-CTL/R v2.2.C GCU LTS");
+  assert.equal(profile.hardwareModel, "TIA-CTL/R v2.2.C GCU LTS");
   // The bug this guards: falling through to V1_PROFILE advertised a charger,
   // an OLED, an external LED strip and a local power button, none of which
   // NHOS_BOARD_GCU_V22C_LTS compiles in.
@@ -61,11 +61,11 @@ test("v2.2.C GCU LTS resolves to its own profile instead of falling back to v1.0
 test("every known board profile declares artwork support only when it has artwork", async () => {
   const { boardProfileForHardwareModel } = await loadBoardProfile();
   for (const model of [
-    "VD-CTL/R v1.0.F 2026.4",
-    "VD-CTL/R v1.5.F 2026.7",
-    "VD-CTL/R v2.1 GCU LTS",
-    "VD-CTL/R v2.2.C GCU LTS",
-    "VD-CTL/R v2.3.D GCU LTS",
+    "TIA-CTL/R v1.0.F 2026.4",
+    "TIA-CTL/R v1.5.F 2026.7",
+    "TIA-CTL/R v2.1 GCU LTS",
+    "TIA-CTL/R v2.2.C GCU LTS",
+    "TIA-CTL/R v2.3.D GCU LTS",
   ]) {
     const profile = boardProfileForHardwareModel(model);
     assert.equal(profile.hardwareModel, model, `${model} must resolve to itself`);
@@ -73,4 +73,16 @@ test("every known board profile declares artwork support only when it has artwor
       assert.ok(profile.overviewAsset, `${model} claims a pin visualizer but has no overview asset`);
     }
   }
+});
+
+test("firmware from before the TIA-CTL/R rename still resolves to the same profile", async () => {
+  const { boardProfileForHardwareModel, wikiSlugFromHardwareModel, displayHardwareModel } = await loadBoardProfile();
+  for (const model of ["v1.0.F 2026.4", "v1.5.F 2026.7", "v2.1 GCU LTS", "v2.2.C GCU LTS", "v2.3.D GCU LTS"]) {
+    const legacy = boardProfileForHardwareModel(`VD-CTL/R ${model}`);
+    assert.equal(legacy.hardwareModel, `TIA-CTL/R ${model}`);
+    assert.equal(wikiSlugFromHardwareModel(`VD-CTL/R ${model}`), wikiSlugFromHardwareModel(`TIA-CTL/R ${model}`));
+    assert.equal(displayHardwareModel(`VD-CTL/R ${model}`), `TIA-CTL/R ${model}`);
+  }
+  // A board no profile knows yet keeps the wiki directory naming.
+  assert.equal(wikiSlugFromHardwareModel("TIA-CTL/R v9.9"), "vd-ctl-r-v9-9");
 });

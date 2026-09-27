@@ -99,13 +99,18 @@ test("device targets name the board when its hardware model is known", async () 
   const { project } = await modules;
   const [known, unknown] = project.deviceTargets([
     { uid: "A", displayName: "NHOS-A", hardwareModel: "VD-CTL/R v1.5.F 2026.7", raw: { matrix_shape: { rows: 2, cols: 2 } } },
-    { uid: "B", displayName: "NHOS-B", hardwareModel: "VD-CTL/R v9.9 2027.1", raw: { matrix_shape: { rows: 5, cols: 5 } } },
+    { uid: "B", displayName: "NHOS-B", hardwareModel: "TIA-CTL/R v9.9 2027.1", raw: { matrix_shape: { rows: 5, cols: 5 } } },
   ]);
   assert.equal(known.label, "NHOS-A · v1.5.F · 2 × 2");
   assert.equal(known.board.externalLeds, 9);
   // A board this list does not know yet still gets a short name.
   assert.equal(unknown.label, "NHOS-B · v9.9 · 5 × 5");
   assert.equal(unknown.board, undefined);
+  // Firmware since the rename reports TIA-CTL/R; both spellings name the board.
+  const [renamed] = project.deviceTargets([
+    { uid: "C", displayName: "NHOS-C", hardwareModel: "TIA-CTL/R v1.5.F 2026.7", raw: { matrix_shape: { rows: 2, cols: 2 } } },
+  ]);
+  assert.equal(renamed.board.externalLeds, 9);
 });
 
 test("boards mirror the firmware's BoardConfig.h", async () => {

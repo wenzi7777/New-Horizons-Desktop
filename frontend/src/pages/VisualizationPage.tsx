@@ -5,7 +5,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { api, type DeviceEntry, type ProfileListEntry, type VisualizationEntry } from "../lib/api";
 import { DeviceBatteryChip } from "../components/DeviceBatteryChip";
 import { deviceBatteryReadout } from "../lib/batteryProfile";
-import { boardProfileForHardwareModel } from "../lib/boardProfile";
+import { boardProfileForHardwareModel, displayHardwareModel } from "../lib/boardProfile";
 import { isHubRelayed, normalizeDevice } from "../lib/device";
 import { connectionRank, connectionStateLabel, deviceClassName, statusDot } from "../lib/deviceStatus";
 import { fitProfileRect, profilePointToScreen, profilePointToWorld, type FittedProfileRect } from "../lib/profileLayout";
@@ -1581,7 +1581,7 @@ export function VisualizationPage() {
                     </div>
                     <div className="device-uid">{uid}</div>
                     <div className="device-meta-grid">
-                      <span>{t("hardwareModel")}: {normalized.hardwareModel}</span>
+                      <span>{t("hardwareModel")}: {displayHardwareModel(normalized.hardwareModel)}</span>
                       <span>{t("firmwareVersion")}: {normalized.firmwareVersion}</span>
                       <span>{t("protocol")}: {normalized.protocol}</span>
                       <span>{t("matrixShape")}: {normalized.matrixShape}</span>

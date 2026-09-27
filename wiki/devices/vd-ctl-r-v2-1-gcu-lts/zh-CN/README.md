@@ -1,6 +1,6 @@
-# VD-CTL/R v2.1 GCU LTS
+# TIA-CTL/R v2.1 GCU LTS
 
-VD-CTL/R v2.1 GCU LTS 是 New Horizons 系列中的紧凑型 GCU（通用控制单元）变体。它配备 10×12 压力传感器矩阵、BMI270 IMU 与 BMM150 磁力计，以及一个板载状态 LED。该设备无物理操作按钮、无外部 LED 灯带、无 OLED 显示屏。
+TIA-CTL/R v2.1 GCU LTS 是 New Horizons 系列中的紧凑型 GCU（通用控制单元）变体。它配备 10×12 压力传感器矩阵、BMI270 IMU 与 BMM150 磁力计，以及一个板载状态 LED。该设备无物理操作按钮、无外部 LED 灯带、无 OLED 显示屏。
 
 ## 规格参数
 
@@ -8,7 +8,7 @@ VD-CTL/R v2.1 GCU LTS 是 New Horizons 系列中的紧凑型 GCU（通用控制�
 |------|-------|
 | MCU | ESP32-S3 |
 | Flash | 4 MB |
-| 主板版本 | VD-CTL/R v2.1 GCU LTS |
+| 主板版本 | TIA-CTL/R v2.1 GCU LTS |
 | 按键矩阵 | 10 行 × 12 列（120 个传感器） |
 | 状态 LED | SK6812（板载，GPIO 38） |
 | 外部 LED | 无 |

@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from .app_event_log import append_dropped_marker, append_events, events_lost_since
 from .arduino_protocol import CONTROL_PORT, is_arduino_heartbeat_packet, is_arduino_stream_packet, packet_device_uid, send_control_command
-from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_for_hardware_model
+from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_for_hardware_model, normalize_hardware_model
 from .packet_parser import PacketParseError, parse_binary_packet
 from .terminal import DEVICE_COMMAND_ALLOWLIST
 from .discovery import DiscoveryResponder
@@ -2390,7 +2390,7 @@ class NewHorizonsService:
         if not hardware_model:
             return None
         profile = board_profile_for_hardware_model(hardware_model)
-        if str(profile.get("hardware_model") or "").strip().lower() != hardware_model.lower():
+        if normalize_hardware_model(profile.get("hardware_model")) != normalize_hardware_model(hardware_model):
             return None
         rows = cls._int_list(profile.get("default_analog_pins"))
         cols = cls._int_list(profile.get("default_select_pins"))
