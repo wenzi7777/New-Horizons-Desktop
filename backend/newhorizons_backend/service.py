@@ -2450,7 +2450,9 @@ class NewHorizonsService:
             for device_uid in recording:
                 since = self._app_event_seq.get(device_uid, 0)
                 try:
-                    self.publish_command(device_uid, {"command": "app_events", "since_seq": since})
+                    # quiet: polled, so the device skips its LED ack (v1.7.2+).
+                    self.publish_command(device_uid, {"command": "app_events", "since_seq": since,
+                                                      "quiet": True})
                 except RuntimeError:
                     # Offline, booting, or the firmware predates app_events.
                     # Not an error worth surfacing on every tick.

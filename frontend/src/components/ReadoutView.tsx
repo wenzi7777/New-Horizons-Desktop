@@ -15,6 +15,7 @@ import {
   refreshInterval,
   sortRows,
 } from "../lib/readout";
+import { quietCommand } from "../lib/deviceCommand";
 import type { CommandRunner } from "../lib/deviceFileTransfer";
 
 type Row = Record<string, unknown>;
@@ -192,7 +193,8 @@ export function ReadoutView({ pkg, runner, busy = false }: ReadoutViewProps) {
       const byCommand = new Map<string, Record<string, unknown> | null>();
       for (const source of spec.sources) {
         if (!byCommand.has(source.command)) {
-          const response = await runnerRef.current({ command: source.command });
+          // Polled on a timer: quiet, so a readout does not keep the LED flashing.
+          const response = await runnerRef.current(quietCommand({ command: source.command }));
           byCommand.set(source.command, response.result as Record<string, unknown> | null);
         }
         next[source.id] = extractSource(byCommand.get(source.command) ?? null, source);

@@ -4,6 +4,8 @@ import { ConfirmModal } from "./ConfirmModal";
 import { DeviceAppLivePreview } from "./DeviceAppLivePreview";
 import { ReadoutView } from "./ReadoutView";
 import { useI18n } from "../i18n";
+import { api } from "../lib/api";
+import { type AppCatalogEntry, useLocalised } from "../lib/appLibrary";
 import {
   type AppEventEntry,
   type AppPackageEntry,
@@ -109,6 +111,32 @@ export function DeviceAppsPanel({
   const [openReadout, setOpenReadout] = useState<ReadoutPackage | null>(null);
   const [openReadoutId, setOpenReadoutId] = useState<string | null>(null);
   const [confirmUninstall, setConfirmUninstall] = useState<AppPackageEntry | null>(null);
+  const localise = useLocalised();
+  // The catalog's localised name and summary, by package id. A package's own
+  // manifest carries one English string, and changing that would mean a new
+  // version of every package; the catalog already has every locale. Missing
+  // (offline, or a sideloaded id the library does not know): the device's text.
+  const [catalog, setCatalog] = useState<Map<string, AppCatalogEntry>>(() => new Map());
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .appLibraryIndex()
+      .then((index) => {
+        if (!cancelled) setCatalog(new Map((index.items || []).map((item) => [item.id, item])));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const nameOf = (entry: AppPackageEntry) => {
+    const known = catalog.get(entry.id);
+    return known ? localise(known.name) || entry.name : entry.name;
+  };
+  const summaryOf = (entry: AppPackageEntry) => {
+    const known = catalog.get(entry.id);
+    return known ? localise(known.summary) || entry.summary : entry.summary;
+  };
 
   // Callers may pass a fresh runner each render (DeviceSettingsPage wraps its
   // run() inline). Depending on its identity re-ran refresh() after every
@@ -231,13 +259,13 @@ export function DeviceAppsPanel({
         <PackageGlyph kind={entry.kind} />
         <div className="app-row-body">
           <div className="app-row-title">
-            <strong>{entry.name}</strong>
+            <strong>{nameOf(entry)}</strong>
             <span className="app-row-version">v{entry.version}</span>
             {entry.state === "load_failed" ? (
               <span className="app-pill danger">{t("appLoadFailed")}</span>
             ) : null}
           </div>
-          {entry.summary ? <div className="app-row-summary">{entry.summary}</div> : null}
+          {summaryOf(entry) ? <div className="app-row-summary">{summaryOf(entry)}</div> : null}
           <div className="app-row-meta">
             <span className="app-mono">{entry.id}</span>
             <span>{entry.size} B</span>
@@ -339,7 +367,7 @@ export function DeviceAppsPanel({
               <div className="app-slot-package">
                 {bound ? (
                   <>
-                    <strong title={bound.summary}>{bound.name}</strong>
+                    <strong title={summaryOf(bound)}>{nameOf(bound)}</strong>
                     <span className="app-row-version">v{bound.version}</span>
                   </>
                 ) : !empty && app.graph ? (
@@ -451,7 +479,12 @@ export function DeviceAppsPanel({
             <div className="readout-host">
               <header className="readout-host-header">
                 <PackageGlyph kind="readout" />
-                <h4>{String((openReadout.manifest as Record<string, unknown>).name ?? openReadoutId)}</h4>
+                <h4>
+                  {(openReadoutId && catalog.has(openReadoutId)
+                    ? localise(catalog.get(openReadoutId)?.name)
+                    : "") ||
+                    String((openReadout.manifest as Record<string, unknown>).name ?? openReadoutId)}
+                </h4>
                 <button
                   type="button"
                   className="button ghost compact icon-button"
@@ -506,7 +539,7 @@ export function DeviceAppsPanel({
 
       {confirmUninstall ? (
         <ConfirmModal
-          title={`${t("appUninstall")} ${confirmUninstall.name}`}
+          title={`${t("appUninstall")} ${nameOf(confirmUninstall)}`}
           message={t("appUninstallConfirm")}
           confirmLabel={t("appUninstall")}
           cancelLabel={t("cancel")}

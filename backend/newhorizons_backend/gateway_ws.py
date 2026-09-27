@@ -250,6 +250,8 @@ class GatewaySocketSession:
                     "command": "set_time",
                     "request_id": "clock-sync-{}".format(int(now * 1000)),
                     "epoch_ms": str(int(_time.time() * 1000)),
+                    # Sent on its own, nobody clicked anything: no LED ack.
+                    "quiet": True,
                 },
             )
         except Exception:

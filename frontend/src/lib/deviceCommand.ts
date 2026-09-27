@@ -40,6 +40,17 @@ async function waitForResult(
 }
 
 /**
+ * Marks a command the software sends on its own -- a poll or an automatic
+ * refresh -- so the device (firmware v1.7.2+) skips its received/success LED
+ * flashes. Without it a poll keeps the status LED flashing, and the flash
+ * outranks an app's colour. Never for something an operator clicked: that
+ * flash is the only confirmation the device gives. Older firmware ignores it.
+ */
+export function quietCommand(payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...payload, quiet: true };
+}
+
+/**
  * One read for a repeating poll: over the WebSocket only, with none of
  * useDeviceCommand's bookkeeping -- no device-list fetch before the command, no
  * REST fallback, no running state to re-render the page. A poll that gets no
@@ -50,7 +61,7 @@ export async function pollDeviceCommand(
   payload: Record<string, unknown>,
   timeoutMs = 4000,
 ): Promise<{ result: Record<string, unknown> | null }> {
-  const response = await sendDeviceCommand(deviceUid, payload, timeoutMs);
+  const response = await sendDeviceCommand(deviceUid, quietCommand(payload), timeoutMs);
   return { result: response.result ? normalizeCommandResult(response.result) : null };
 }
 

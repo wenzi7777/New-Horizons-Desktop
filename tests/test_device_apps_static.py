@@ -90,6 +90,15 @@ class PanelWiringTests(unittest.TestCase):
         self.assertTrue(imports)
         self.assertTrue(all(line.startswith("import type") for line in imports))
 
+    def test_installed_packages_show_the_catalog_translation(self):
+        panel = read("components/DeviceAppsPanel.tsx")
+        # A package manifest holds one English name; the catalog has every
+        # locale, looked up by id, with the device's own text as the fallback.
+        self.assertIn("api\n      .appLibraryIndex()", panel)
+        self.assertIn("known ? localise(known.name) || entry.name : entry.name", panel)
+        for raw in ("<strong>{entry.name}</strong>", "{bound.name}", "{entry.summary}</div>"):
+            self.assertNotIn(raw, panel)
+
     def test_killed_and_suspended_are_shown_differently(self):
         panel = read("components/DeviceAppsPanel.tsx")
         # A killed app needs an operator; a suspended one comes back by itself,

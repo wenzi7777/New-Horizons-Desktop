@@ -8,7 +8,7 @@ import { boardProfileForHardwareModel, defaultManifestUrlForHardwareModel } from
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
 import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
 import { isHubRelayed, normalizeDevice, useDevicesPolling } from "../lib/device";
-import { pollDeviceCommand, useDeviceCommand } from "../lib/deviceCommand";
+import { pollDeviceCommand, quietCommand, useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
 import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { BoardIoModal } from "./TerminalPage";
@@ -1402,7 +1402,7 @@ export function DeviceSettingsPage() {
     ramRefreshInFlightRef.current = true;
     setRamRefreshInFlight(true);
     try {
-      await run(t("ramRefresh"), { command: "memory_status" }, 18000);
+      await run(t("ramRefresh"), quietCommand({ command: "memory_status" }), 18000);
       setRamLastUpdated(new Date().toLocaleTimeString());
     } catch (error) {
       void error;
@@ -1432,7 +1432,7 @@ export function DeviceSettingsPage() {
     let cancelled = false;
     const intervalId = window.setInterval(() => {
       if (!cancelled && !commandInFlightRef.current) {
-        void run(t("refreshStatus"), { command: "status" }, 18000).catch(() => undefined);
+        void run(t("refreshStatus"), quietCommand({ command: "status" }), 18000).catch(() => undefined);
       }
     }, 1000);
     return () => {
@@ -1456,7 +1456,7 @@ export function DeviceSettingsPage() {
     const refreshKey = `${deviceUid}:${activeSection}`;
     if (statusDrivenSectionAutoRefreshKeyRef.current === refreshKey || busyCommand) return;
     statusDrivenSectionAutoRefreshKeyRef.current = refreshKey;
-    void run(t("refreshStatus"), { command: "status" }, 18000).catch(() => undefined);
+    void run(t("refreshStatus"), quietCommand({ command: "status" }), 18000).catch(() => undefined);
   }, [activeSection, busyCommand, deviceUid, isControlUnavailable, t]);
 
   useEffect(() => {
@@ -1464,14 +1464,14 @@ export function DeviceSettingsPage() {
     if (analogPinsFromStatus && selectPinsFromStatus) return;
     if (pinStatusAutoRequestedRef.current[deviceUid]) return;
     pinStatusAutoRequestedRef.current[deviceUid] = true;
-    void run(t("refreshStatus"), { command: "status" }, 18000).catch(() => undefined);
+    void run(t("refreshStatus"), quietCommand({ command: "status" }), 18000).catch(() => undefined);
   }, [activeSection, analogPinsFromStatus, busyCommand, deviceUid, isControlUnavailable, selectPinsFromStatus, t]);
 
   function runIndicatorsStatusRefresh() {
     if (!deviceUid || isControlUnavailable) return;
     lastIndicatorsStatusAutoRefreshKeyRef.current = `${deviceUid}:hardware`;
     indicatorsStatusAutoRefreshPendingRef.current = false;
-    void run(t("refreshStatus"), { command: "status" }, 18000).catch(() => undefined);
+    void run(t("refreshStatus"), quietCommand({ command: "status" }), 18000).catch(() => undefined);
   }
 
   useEffect(() => {
