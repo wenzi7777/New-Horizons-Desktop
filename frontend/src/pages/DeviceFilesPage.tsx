@@ -8,8 +8,11 @@ import { useDeviceCommand } from "../lib/deviceCommand";
 import {
   MAX_USER_PATH,
   bytesToHex,
+  ensureReadAdvanced,
+  ensureReadOk,
   ensureWriteOk,
   hexToBytes,
+  readFailure,
   writeDeviceFile,
 } from "../lib/deviceFileTransfer";
 import { storageSnapshotFromResult } from "../lib/storageStatus";
@@ -159,6 +162,7 @@ export function DeviceFilesPage() {
       setPreviewError("");
       try {
         const begin = await queue({ command: "file_read_begin", scope: file.scope, path: file.path });
+        ensureReadOk(begin.result);
         const size = Number(begin.result?.size ?? file.size ?? 0);
         const length = Math.min(size || 32768, 32768);
         const offset = Math.max(size - length, 0);
@@ -169,6 +173,7 @@ export function DeviceFilesPage() {
           offset,
           length,
         });
+        ensureReadOk(chunk.result);
         const data = chunkDataText(chunk.result);
         const bytes = /^[0-9a-fA-F]*$/.test(data) ? hexToBytes(data) : new TextEncoder().encode(data);
         if (!cancelled) {
@@ -199,8 +204,10 @@ export function DeviceFilesPage() {
     onProgress?: (loaded: number, total: number) => void,
   ) {
     const begin = await queue({ command: "file_read_begin", scope: file.scope, path: file.path });
+    ensureReadOk(begin.result);
     const size = Number(begin.result?.size ?? file.size ?? 0);
     let offset = 0;
+    let retried = false;
     const chunks: Uint8Array[] = [];
     onProgress?.(0, size);
     while (offset < size || chunks.length === 0) {
@@ -211,12 +218,26 @@ export function DeviceFilesPage() {
         offset,
         length: 4096,
       });
+      const failure = readFailure(chunk.result);
+      if (failure) {
+        // One retry, after re-reading the size. A device that rebooted
+        // mid-download (an OTA) may hold a different file now; splicing two
+        // versions of it together would be worse than failing.
+        if (retried) throw new Error(failure);
+        retried = true;
+        const again = await queue({ command: "file_read_begin", scope: file.scope, path: file.path });
+        ensureReadOk(again.result);
+        if (Number(again.result?.size ?? -1) !== size) throw new Error("file_changed");
+        continue;
+      }
+      retried = false;
       const chunkResult = chunk.result ?? {};
       const data = typeof chunkResult.data === "string" ? chunkResult.data : "";
       const bytes = /^[0-9a-fA-F]*$/.test(data) ? hexToBytes(data) : new TextEncoder().encode(data);
       chunks.push(bytes);
       const nextOffset = Number(chunkResult.next_offset ?? offset + bytes.length);
       const hasMore = Boolean(chunkResult.has_more ?? nextOffset < size);
+      ensureReadAdvanced(offset, nextOffset, hasMore);
       offset = nextOffset;
       onProgress?.(Math.min(offset, size), size);
       if (!hasMore) break;
@@ -233,7 +254,16 @@ export function DeviceFilesPage() {
   async function downloadFile(file: DeviceFileEntry) {
     const dlStartTime = Date.now();
     setDownloadProgress({ loaded: 0, total: Number(file.size ?? 0), startTime: dlStartTime });
-    const bytes = await downloadFileBytes(file, (loaded, total) => setDownloadProgress({ loaded, total, startTime: dlStartTime }));
+    let bytes: Awaited<ReturnType<typeof downloadFileBytes>>;
+    try {
+      bytes = await downloadFileBytes(file, (loaded, total) => setDownloadProgress({ loaded, total, startTime: dlStartTime }));
+    } catch (error) {
+      // Said, not swallowed: the button's `void downloadFile()` would have
+      // dropped the rejection and left the progress bar up forever.
+      setDownloadProgress(null);
+      setStatusMessage(`${t("downloadFailed")}: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
     const blob = new Blob([bytes]);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

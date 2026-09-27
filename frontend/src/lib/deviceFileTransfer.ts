@@ -55,6 +55,31 @@ export function ensureWriteOk(result: Record<string, unknown> | null) {
   }
 }
 
+/**
+ * Why a file_read_* reply cannot be used, or null when it can. A missing
+ * reply counts: a timed-out chunk has no data and no next_offset, and a loop
+ * that took it as "empty, try again" re-sent the same offset forever -- 8-10
+ * failed commands a second, each flashing the device's LED red, until the
+ * tab was closed.
+ */
+export function readFailure(result: Record<string, unknown> | null | undefined): string | null {
+  if (!result) return "no_response";
+  if (result.status === "error" || result.ok === false) {
+    return String(result.error ?? result.message ?? "file_read_failed");
+  }
+  return null;
+}
+
+export function ensureReadOk(result: Record<string, unknown> | null | undefined) {
+  const failure = readFailure(result);
+  if (failure) throw new Error(failure);
+}
+
+/** A read that said there was more but did not move forward. */
+export function ensureReadAdvanced(offset: number, nextOffset: number, hasMore: boolean) {
+  if (hasMore && !(nextOffset > offset)) throw new Error("file_read_stalled");
+}
+
 export type WriteOptions = {
   path: string;
   bytes: Uint8Array;
@@ -171,7 +196,7 @@ export async function readDeviceFile(
   { path, scope = "user", chunkBytes = 256 }: ReadOptions,
 ): Promise<Uint8Array> {
   const begin = await queue({ command: "file_read_begin", scope, path });
-  ensureWriteOk(begin.result);
+  ensureReadOk(begin.result);
   const size = Number((begin.result as Record<string, unknown> | null)?.size ?? 0);
   if (!size) return new Uint8Array();
 
@@ -181,13 +206,15 @@ export async function readDeviceFile(
     const response = await queue({
       command: "file_read_chunk", scope, path, offset, length: chunkBytes,
     });
-    ensureWriteOk(response.result);
+    ensureReadOk(response.result);
     const result = (response.result ?? {}) as Record<string, unknown>;
     const hex = typeof result.data === "string" ? result.data : "";
     if (!hex) break;
     const bytes = hexToBytes(hex);
     chunks.push(bytes);
-    offset = Number(result.next_offset ?? offset + bytes.length);
+    const nextOffset = Number(result.next_offset ?? offset + bytes.length);
+    ensureReadAdvanced(offset, nextOffset, result.has_more !== false);
+    offset = nextOffset;
     if (result.has_more === false) break;
   }
 
