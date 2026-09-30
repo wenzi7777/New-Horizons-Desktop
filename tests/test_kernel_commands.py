@@ -41,6 +41,7 @@ KERNEL_COMMANDS = {
     "dmesg": "dmesg",
     "crash-log": "crash_log",
     "crash-clear": "crash_clear",
+    "health": "health",
     "capabilities": "capabilities",
     "config-schema": "config_schema",
     "config-get --path scan.target_fps": "config_get",

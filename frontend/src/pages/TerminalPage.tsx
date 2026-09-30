@@ -607,6 +607,7 @@ const COMMAND_BLOCKS: CommandBlock[] = [
   },
   { command: "log-clear", groupKey: "commandGroupFiles", params: [] },
   { command: "crash-log", groupKey: "commandGroupFiles", params: [] },
+  { command: "health", groupKey: "commandGroupFiles", params: [] },
   { command: "crash-clear", groupKey: "commandGroupFiles", params: [] },
   { command: "reboot", groupKey: "commandGroupDanger", params: [] },
 ];

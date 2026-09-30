@@ -2927,6 +2927,20 @@ button:disabled {
   color: var(--text-muted);
 }
 
+.status-pill.danger {
+  color: #b3261e;
+  border-color: rgba(215, 0, 21, 0.32);
+  background: rgba(215, 0, 21, 0.08);
+}
+
+.health-group-title {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+
 .visualization-battery-chip {
   display: inline-flex;
   align-items: center;

@@ -110,6 +110,7 @@ class NewHorizonsService:
         "dmesg",
         "crash_log",
         "crash_clear",
+        "health",
         "capabilities",
         "config_schema",
         "config_get",

@@ -19,6 +19,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "task_list",
     "crash_log",
     "crash_clear",
+    "health",
     "service_list",
     "service_restart",
     "dmesg",
@@ -166,6 +167,11 @@ def terminal_help_items() -> list[dict[str, str]]:
             "command": "crash-log",
             "description": "Show recorded panics/watchdog resets, with the faulting task and PC.",
             "example": "crash-log",
+        },
+        {
+            "command": "health",
+            "description": "Show SMART-style lifetime stats: power-on hours, reset counts, OTA history, temperature.",
+            "example": "health",
         },
         {
             "command": "service-list",
@@ -494,6 +500,7 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "service-list": "service_list",
         "crash-log": "crash_log",
         "crash-clear": "crash_clear",
+        "health": "health",
         "dmesg": "dmesg",
         "capabilities": "capabilities",
         "config-schema": "config_schema",

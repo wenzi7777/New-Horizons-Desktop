@@ -16,6 +16,7 @@ import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { CalibrationWorkbench } from "../components/calibration/CalibrationWorkbench";
 import { DeviceAppsPanel } from "../components/DeviceAppsPanel";
+import { DeviceHealthCard } from "../components/DeviceHealthCard";
 import { compareVersions } from "../lib/appLibrary";
 import { Battery, CircleOff, Lightbulb, Power, TriangleAlert } from "lucide-react";
 
@@ -2355,6 +2356,7 @@ export function DeviceSettingsPage() {
               <p>{t("diagnosticsNotesCopy")}</p>
             </div>
           </div>
+          <DeviceHealthCard deviceUid={deviceUid} disabled={isControlUnavailable} run={run} />
           <div className="settings-card">
             <div className="settings-detail-header">
               <div>
