@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 import { quietCommand } from "../lib/deviceCommand";
 
-// SMART-style lifetime stats from the firmware's `health` command (v1.9.0+).
+// Device health from the firmware's `health` command (v1.9.0+).
 // Kept out of `status` on the device side, so this card fetches and holds its
 // own copy -- the page's last_result is overwritten by the next status poll.
 

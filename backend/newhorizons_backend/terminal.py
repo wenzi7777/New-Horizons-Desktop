@@ -170,7 +170,7 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "health",
-            "description": "Show SMART-style lifetime stats: power-on hours, reset counts, OTA history, temperature.",
+            "description": "Show device health: power-on hours, reset counts, OTA history, temperature.",
             "example": "health",
         },
         {
