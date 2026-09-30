@@ -42,6 +42,7 @@ KERNEL_COMMANDS = {
     "crash-log": "crash_log",
     "crash-clear": "crash_clear",
     "health": "health",
+    "reboot-wifi-setup": "reboot_wifi_setup",
     "capabilities": "capabilities",
     "config-schema": "config_schema",
     "config-get --path scan.target_fps": "config_get",

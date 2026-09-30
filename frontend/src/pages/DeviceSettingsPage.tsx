@@ -6,7 +6,7 @@ import { api, type PressureCalReadings, type PressureCalServerPreset } from "../
 import { useI18n } from "../i18n";
 import { V15F_HARDWARE_MODEL, boardProfileForHardwareModel, defaultManifestUrlForHardwareModel, displayHardwareModel } from "../lib/boardProfile";
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
-import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, buildBatteryProfileDetectionCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
+import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
 import { isHubRelayed, normalizeDevice, useDevicesPolling } from "../lib/device";
 import { pollDeviceCommand, quietCommand, useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
@@ -934,6 +934,7 @@ export function DeviceSettingsPage() {
       : normalized?.connectionState === "offline"
         ? t("offline")
         : normalized?.mode ?? "-";
+  const inMaintenanceMode = normalized?.mode === "maintenance" || normalized?.mode === "safe_maintenance";
   const status = recordValue(device?.last_status);
   const lastResult = recordValue(device?.last_result);
   const lastResultCommand = stringValue(lastResult.command, "");
@@ -949,7 +950,7 @@ export function DeviceSettingsPage() {
   const analogPinsFromStatus = arrayCsv(matrixLayout.analog_pins ?? matrixLayout.active_rows);
   const selectPinsFromStatus = arrayCsv(matrixLayout.select_pins ?? matrixLayout.active_cols);
   const wifi = recordValue(status.wifi);
-  const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "detect_battery_profile", "resync_battery_gauge"].includes(lastResultCommand) ? lastResult.battery : undefined));
+  const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "resync_battery_gauge"].includes(lastResultCommand) ? lastResult.battery : undefined));
   const battery = normalizeBatteryStatus(batteryStatus);
   const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" ? lastResult.power : undefined));
   const actionButton = normalizeActionButtonStatus(
@@ -1023,6 +1024,22 @@ export function DeviceSettingsPage() {
   const [customBatteryCapacity, setCustomBatteryCapacity] = useState("");
   const [maxBatteryChargeCurrent, setMaxBatteryChargeCurrent] = useState("100");
   const batteryProfileDraftError = batteryProfileValidationError(batteryCapacityChoice, customBatteryCapacity, maxBatteryChargeCurrent);
+  // Fill the manual battery form from what the device already has, once per
+  // device, so editing it starts from the saved values rather than defaults.
+  const batteryDraftSeededForRef = useRef("");
+  useEffect(() => {
+    if (!deviceUid || batteryDraftSeededForRef.current === deviceUid) return;
+    if (battery.profileResolved !== true || battery.capacityMah === null || battery.maxChargeCurrentMa === null) return;
+    batteryDraftSeededForRef.current = deviceUid;
+    const capacity = String(battery.capacityMah);
+    if (capacity === "200" || capacity === "400") {
+      setBatteryCapacityChoice(capacity);
+    } else {
+      setBatteryCapacityChoice("custom");
+      setCustomBatteryCapacity(capacity);
+    }
+    setMaxBatteryChargeCurrent(String(battery.maxChargeCurrentMa));
+  }, [battery.capacityMah, battery.maxChargeCurrentMa, battery.profileResolved, deviceUid]);
   const [lowBatteryThresholdPercent, setLowBatteryThresholdPercent] = useState(stringValue(batteryLed.low_battery_threshold_percent, "10"));
   const batteryLedThresholdDraftError = batteryLedThresholdValidationError(Number(lowBatteryThresholdPercent));
   const [imuEnabled, setImuEnabled] = useState(imu.enabled !== false);
@@ -1057,6 +1074,7 @@ export function DeviceSettingsPage() {
   );
   const batteryLedSupported = boardProfile.supportsBatteryStatusLed && batteryLed.supported === true;
   const [showIoModal, setShowIoModal] = useState(false);
+  const [showWifiSetupRebootModal, setShowWifiSetupRebootModal] = useState(false);
   const [deviceGroupDraft, setDeviceGroupDraft] = useState(stringValue(device?.device_group, ""));
   const [deviceGroupSaving, setDeviceGroupSaving] = useState(false);
   const [ramMonitorEnabled, setRamMonitorEnabled] = useState(false);
@@ -1551,14 +1569,6 @@ export function DeviceSettingsPage() {
     }
   }
 
-  async function detectBatteryProfile() {
-    try {
-      await run(t("detectBatteryProfile"), buildBatteryProfileDetectionCommand());
-    } catch (error) {
-      void error;
-    }
-  }
-
   async function resyncBatteryGauge() {
     try {
       await run(t("resyncBatteryGauge"), buildBatteryGaugeResyncCommand());
@@ -1664,6 +1674,9 @@ export function DeviceSettingsPage() {
               </button>
               <button className="button danger" type="button" disabled={isCommandBusy("reboot") || !deviceUid} onClick={() => void run("Reboot", { command: "reboot" })}>
                 {isCommandBusy("reboot") ? t("running") : "Reboot"}
+              </button>
+              <button className="button danger" type="button" disabled={isCommandBusy("reboot_wifi_setup") || !deviceUid || isControlUnavailable} onClick={() => setShowWifiSetupRebootModal(true)}>
+                {isCommandBusy("reboot_wifi_setup") ? t("running") : t("rebootWifiSetup")}
               </button>
             </div>
           </div>
@@ -1984,11 +1997,12 @@ export function DeviceSettingsPage() {
                   <Metric label={t("batteryRate")} value={battery.ratePercentPerHour === null ? t("batteryUnknown") : `${battery.ratePercentPerHour}%/h`} />
                   <Metric label={t("batteryPresent")} value={battery.batteryPresent === null ? t("batteryUnknown") : boolString(battery.batteryPresent)} />
                   <Metric label={t("batteryGaugeSyncState")} value={battery.syncState ?? t("batteryUnknown")} />
-                  <Metric label={t("batteryProfileSource")} value={battery.profileSource ?? t("batteryUnknown")} />
-                  <Metric label={t("batteryProfileResolved")} value={battery.profileResolved === null ? t("batteryUnknown") : boolString(battery.profileResolved)} />
-                  <Metric label={t("batteryProfileRequired")} value={battery.profileRequired === null ? t("batteryUnknown") : boolString(battery.profileRequired)} />
-                  <Metric label={t("batteryCapacityMah")} value={battery.capacityMah ?? t("batteryUnknown")} />
-                  <Metric label={t("batteryMaxChargeCurrent")} value={battery.maxChargeCurrentMa ?? t("batteryUnknown")} />
+                  {boardProfile.supportsBatteryPercentageIndicator ? (
+                    <>
+                      <Metric label={t("batteryCapacityMah")} value={battery.profileResolved === false ? t("batteryNotSet") : battery.capacityMah ?? t("batteryUnknown")} />
+                      <Metric label={t("batteryMaxChargeCurrent")} value={battery.maxChargeCurrentMa ?? t("batteryUnknown")} />
+                    </>
+                  ) : null}
                   <Metric label={t("batteryThermalBypass")} value={battery.thermalMonitoringBypassed === null ? t("batteryUnknown") : boolString(battery.thermalMonitoringBypassed)} />
                   <Metric label={t("chargeProfile")} value={batteryStatus.profile ?? "-"} />
                   <Metric label={t("chargeCurrentMa")} value={batteryStatus.charge_current_ma ?? "-"} />
@@ -2018,26 +2032,31 @@ export function DeviceSettingsPage() {
                     </div>
                   </div>
                 ) : null}
-                <div className="actions compact">
-                  <button className="button" type="button" disabled={isCommandBusy("detect_battery_profile") || !deviceUid} onClick={() => void detectBatteryProfile()}>{isCommandBusy("detect_battery_profile") ? t("running") : t("detectBatteryProfile")}</button>
-                  {boardProfile.supportsBatteryPercentageIndicator ? (
+                {boardProfile.supportsBatteryPercentageIndicator ? (
+                  <div className="actions compact">
                     <button className="button" type="button" disabled={batteryGaugeSyncing || isCommandBusy("resync_battery_gauge") || !deviceUid} onClick={() => void resyncBatteryGauge()}>
                       {batteryGaugeSyncing || isCommandBusy("resync_battery_gauge") ? t("batteryGaugeSyncing") : t("resyncBatteryGauge")}
                     </button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
                 {batteryGaugeSyncing ? <p className="notice">{t("batteryGaugeSyncing")}</p> : null}
                 {batteryGaugeSyncFailed ? <p className="notice error">{t("batteryGaugeSyncFailed")}</p> : null}
-                {batteryProfileSetupRequired(batteryStatus) ? (
-                  <div className="notice">
-                    <p>{t("batteryProfileSetupNotice")}</p>
+                {boardProfile.supportsBatteryPercentageIndicator ? (
+                  <div className="settings-subsection">
+                    <div>
+                      <h4>{t("batterySetup")}</h4>
+                      <p className="service-muted">{t("batterySetupCopy")}</p>
+                    </div>
+                    {batteryProfileSetupRequired(batteryStatus) ? <p className="notice">{t("batteryProfileSetupNotice")}</p> : null}
                     <div className="field-grid">
                       <div className="field"><label>{t("batteryCapacityMah")}</label><select value={batteryCapacityChoice} onChange={(event) => setBatteryCapacityChoice(event.target.value as "200" | "400" | "custom")}><option value="200">200mAh</option><option value="400">400mAh</option><option value="custom">{t("batteryCapacityCustom")}</option></select></div>
                       {batteryCapacityChoice === "custom" ? <div className="field"><label>{t("batteryCapacityCustom")}</label><input type="number" min="1" value={customBatteryCapacity} onChange={(event) => setCustomBatteryCapacity(event.target.value)} /></div> : null}
                       <div className="field"><label>{t("batteryMaxChargeCurrent")}</label><input type="number" min="100" max="350" step="10" value={maxBatteryChargeCurrent} onChange={(event) => setMaxBatteryChargeCurrent(event.target.value)} /></div>
                     </div>
                     {batteryProfileDraftError ? <p className="notice error">{t("batteryProfileInvalid")}</p> : null}
-                    <button className="button primary" type="button" disabled={isCommandBusy("set_battery_profile") || !deviceUid || batteryProfileDraftError !== null} onClick={() => void applyBatteryProfile()}>{isCommandBusy("set_battery_profile") ? t("running") : t("saveBatteryProfile")}</button>
+                    <div className="actions compact">
+                      <button className="button primary" type="button" disabled={isCommandBusy("set_battery_profile") || !deviceUid || batteryProfileDraftError !== null} onClick={() => void applyBatteryProfile()}>{isCommandBusy("set_battery_profile") ? t("running") : t("saveBatteryProfile")}</button>
+                    </div>
                   </div>
                 ) : null}
               </>
@@ -2641,11 +2660,31 @@ export function DeviceSettingsPage() {
 
       {errorMessage ? <p className="notice error">{errorMessage}</p> : null}
 
+      {showWifiSetupRebootModal ? (
+        <ConfirmModal
+          title={t("rebootWifiSetupConfirmTitle")}
+          message={t("rebootWifiSetupConfirmMessage")}
+          confirmLabel={t("rebootWifiSetup")}
+          cancelLabel={t("cancel")}
+          destructive
+          onConfirm={() => {
+            setShowWifiSetupRebootModal(false);
+            void run(t("rebootWifiSetup"), { command: "reboot_wifi_setup" }).catch(() => undefined);
+          }}
+          onCancel={() => setShowWifiSetupRebootModal(false)}
+        />
+      ) : null}
+
       <section className="settings-overview">
         <div className="settings-overview-card">
           <span>{t("mode")}</span>
           <strong>{connectionLabel}</strong>
           <small>{t("protocol")}: {normalized?.protocol ?? "-"}</small>
+          {inMaintenanceMode && !isControlUnavailable ? (
+            <button className="button tiny settings-overview-action" type="button" disabled={isCommandBusy("exit_maintenance") || !deviceUid} onClick={() => void run(t("exitMaintenance"), { command: "exit_maintenance" })}>
+              {isCommandBusy("exit_maintenance") ? t("running") : t("exitMaintenance")}
+            </button>
+          ) : null}
         </div>
         <div className="settings-overview-card">
           <span>{t("firmwareVersion")}</span>

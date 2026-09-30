@@ -10,6 +10,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "check_update",
     "apply_update",
     "reboot",
+    "reboot_wifi_setup",
     "enter_maintenance",
     "exit_maintenance",
     "memory_status",
@@ -66,7 +67,6 @@ DEVICE_COMMAND_ALLOWLIST = {
     "set_stream_buffer",
     "set_charge_profile",
     "set_battery_profile",
-    "detect_battery_profile",
     "resync_battery_gauge",
     "power_set_state",
     "set_action_button",
@@ -468,6 +468,11 @@ def terminal_help_items() -> list[dict[str, str]]:
             "description": "Reboot the current system.",
             "example": "reboot",
         },
+        {
+            "command": "reboot-wifi-setup",
+            "description": "Reboot into the Wi-Fi setup portal, as holding the action button at power-on does.",
+            "example": "reboot-wifi-setup",
+        },
     ]
 
 
@@ -496,6 +501,7 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "findme-discover": "findme_discover",
         "log-clear": "log_clear",
         "reboot": "reboot",
+        "reboot-wifi-setup": "reboot_wifi_setup",
         "task-list": "task_list",
         "service-list": "service_list",
         "crash-log": "crash_log",

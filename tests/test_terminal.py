@@ -117,13 +117,10 @@ class DeviceCommandValidationTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "invalid_battery_profile"):
                     validate_device_command_payload({"command": "set_battery_profile", "capacity_mah": capacity, "max_charge_current_ma": current})
 
-    def test_battery_profile_detection_command_is_allowed_without_manual_fields(self):
-        payload = validate_device_command_payload(
-            {"command": "detect_battery_profile", "request_id": "req-battery-detect"}
-        )
-
-        self.assertEqual(payload["command"], "detect_battery_profile")
-        self.assertEqual(payload["request_id"], "req-battery-detect")
+    def test_battery_detection_command_is_no_longer_accepted(self):
+        # The battery is set by hand; firmware v1.10.0 dropped the command.
+        with self.assertRaisesRegex(ValueError, "unknown_command"):
+            validate_device_command_payload({"command": "detect_battery_profile"})
 
     def test_battery_gauge_resync_command_is_allowed_without_manual_fields(self):
         payload = validate_device_command_payload(

@@ -130,10 +130,6 @@ export function buildBatteryProfileCommand(
   return { command: "set_battery_profile" as const, capacity_mah, max_charge_current_ma };
 }
 
-export function buildBatteryProfileDetectionCommand() {
-  return { command: "detect_battery_profile" as const };
-}
-
 export function buildBatteryGaugeResyncCommand() {
   return { command: "resync_battery_gauge" as const };
 }

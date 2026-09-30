@@ -6,7 +6,6 @@ import {
   batteryProfileSetupRequired,
   batteryProfileValidationError,
   buildBatteryProfileCommand,
-  buildBatteryProfileDetectionCommand,
   buildBatteryGaugeResyncCommand,
   normalizeBatteryStatus,
 } from "../src/lib/batteryProfile.ts";
@@ -19,10 +18,8 @@ test("builds a set_battery_profile command with a positive custom capacity and 1
   });
 });
 
-test("builds an explicit battery-ID detection command without changing manual settings", () => {
-  assert.deepEqual(buildBatteryProfileDetectionCommand(), {
-    command: "detect_battery_profile",
-  });
+test("offers no battery detection command: the battery is set by hand", () => {
+  assert.equal("buildBatteryProfileDetectionCommand" in batteryProfileModule, false);
 });
 
 test("builds a distinct MAX17048 fuel-gauge resync command", () => {
@@ -38,7 +35,7 @@ test("rejects unavailable profile settings rather than sending an invalid comman
 test("requires setup only when firmware explicitly requires or cannot resolve a profile", () => {
   assert.equal(batteryProfileSetupRequired({ battery_profile_required: true, profile_resolved: true }), true);
   assert.equal(batteryProfileSetupRequired({ battery_profile_required: false, profile_resolved: false }), true);
-  assert.equal(batteryProfileSetupRequired({ battery_profile_required: false, profile_resolved: true, profile_source: "pogo" }), false);
+  assert.equal(batteryProfileSetupRequired({ battery_profile_required: false, profile_resolved: true, profile_source: "manual" }), false);
 });
 
 test("normalizes the canonical Task 1 firmware battery status into display values", () => {

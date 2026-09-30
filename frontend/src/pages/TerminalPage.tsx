@@ -610,6 +610,7 @@ const COMMAND_BLOCKS: CommandBlock[] = [
   { command: "health", groupKey: "commandGroupFiles", params: [] },
   { command: "crash-clear", groupKey: "commandGroupFiles", params: [] },
   { command: "reboot", groupKey: "commandGroupDanger", params: [] },
+  { command: "reboot-wifi-setup", groupKey: "commandGroupDanger", params: [] },
 ];
 
 function updateStateOf(device: DeviceEntry | undefined): UpdateState {
