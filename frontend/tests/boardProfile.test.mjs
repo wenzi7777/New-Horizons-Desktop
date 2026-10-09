@@ -50,15 +50,25 @@ test("v2.2.C GCU LTS resolves to its own profile instead of falling back to v1.0
   assert.deepEqual(profile.defaultAnalogPins, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   assert.deepEqual(profile.defaultSelectPins, [17, 18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45]);
 
-  // No artwork exists for this revision; the IO modal names the board instead.
+  // No artwork exists for this revision; the IO modal names the board
+  // instead, but its own pins can still be picked.
   assert.equal(profile.overviewAsset, null);
-  assert.equal(profile.supportsIoVisualizer, false);
+  assert.equal(profile.supportsIoVisualizerArtwork, false);
+  assert.equal(profile.supportsIoVisualizer, true);
+  assert.deepEqual(
+    profile.analogPinSlots.filter((pin) => pin.role === "analog").map((pin) => pin.gpio),
+    profile.defaultAnalogPins,
+  );
+  assert.deepEqual(
+    profile.digitalPinSlots.filter((pin) => pin.role === "select").map((pin) => pin.gpio).sort((a, b) => a - b),
+    profile.defaultSelectPins,
+  );
 
   assert.equal(wikiSlugFromHardwareModel("VD-CTL/R v2.2.C GCU LTS"), "vd-ctl-r-v2-2-c-gcu-lts");
   assert.match(defaultManifestUrlForHardwareModel("VD-CTL/R v2.2.C GCU LTS"), /arduino-gcu-v22c-lts-latest\.json$/);
 });
 
-test("every known board profile declares artwork support only when it has artwork", async () => {
+test("artwork is claimed exactly when it exists, and every board has a pin picker", async () => {
   const { boardProfileForHardwareModel } = await loadBoardProfile();
   for (const model of [
     "TIA-CTL v1.0.F 2026.4",
@@ -69,9 +79,11 @@ test("every known board profile declares artwork support only when it has artwor
   ]) {
     const profile = boardProfileForHardwareModel(model);
     assert.equal(profile.hardwareModel, model, `${model} must resolve to itself`);
-    if (profile.supportsIoVisualizer) {
-      assert.ok(profile.overviewAsset, `${model} claims a pin visualizer but has no overview asset`);
-    }
+    assert.equal(profile.supportsIoVisualizerArtwork, Boolean(profile.overviewAsset), `${model} artwork flag`);
+    // The picker works from pin slots alone; a missing photo must not hide it.
+    assert.equal(profile.supportsIoVisualizer, true, `${model} pin picker`);
+    assert.ok(profile.analogPinSlots.some((pin) => pin.role === "analog"), `${model} analog slots`);
+    assert.ok(profile.digitalPinSlots.some((pin) => pin.role === "select"), `${model} select slots`);
   }
 });
 

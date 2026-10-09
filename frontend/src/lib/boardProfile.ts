@@ -15,9 +15,11 @@ export type BoardProfile = {
   defaultManifestUrl: string;
   defaultAnalogPins: number[];
   defaultSelectPins: number[];
+  /** The IO modal's pin picker; needs pin slots, not artwork. */
   supportsIoVisualizer: boolean;
   supportsExternalLed: boolean;
   supportsOled: boolean;
+  /** A board photograph exists (overviewAsset). */
   supportsIoVisualizerArtwork: boolean;
   supportsLocalButtonWake: boolean;
   supportsChargeControl: boolean;
@@ -330,9 +332,10 @@ const V22C_GCU_PROFILE: BoardProfile = {
   defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
   defaultSelectPins: [17, 18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45],
   // No board photograph has been shot for this revision yet, so the IO modal
-  // falls back to naming the board instead of showing a neighbouring board's
-  // artwork and implying a pin layout this one does not have.
-  supportsIoVisualizer: false,
+  // names the board instead of showing a neighbouring board's artwork and
+  // implying a pin layout this one does not have. The pin lists below are
+  // this board's own, so picking IO still works without the picture.
+  supportsIoVisualizer: true,
   supportsExternalLed: false,
   supportsOled: false,
   supportsIoVisualizerArtwork: false,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Check, ChevronRight, CircleCheck, TriangleAlert } from "lucide-react";
+import { Check, ChevronRight, CircleCheck, Download } from "lucide-react";
 
 import { ConfirmModal } from "../ConfirmModal";
 import {
@@ -11,6 +11,8 @@ import {
   isFullCalibrationStatus,
   parseCalibrationState,
   zeroBlockedReason,
+  type CalibrationFitSettings,
+  type CalibrationFitSummary,
   type CalibrationOverride,
   type CalibrationState,
   type CalibrationStep,
@@ -208,6 +210,13 @@ export function CalibrationWorkbench({
     await command(t("refreshStatus"), { command: "calibration_status" });
   }
 
+  // A capture whose reply was lost may still have been stored on the
+  // device, so re-read its state rather than keep showing the old one. Not
+  // when nothing answered at all: that refresh would only time out too.
+  async function refreshAfterFailedCapture(outcome: Outcome) {
+    if (outcome.code !== "no_response") await refreshCalibration();
+  }
+
   async function withPending(action: PendingAction, body: () => Promise<void>) {
     if (busy) return;
     setPending(action);
@@ -301,6 +310,7 @@ export function CalibrationWorkbench({
       );
       if (!outcome.ok) {
         setFlowError(errorText(outcome.code));
+        await refreshAfterFailedCapture(outcome);
         return;
       }
       setBaselineConfirmed(true);
@@ -319,6 +329,7 @@ export function CalibrationWorkbench({
       );
       if (!outcome.ok) {
         setFlowError(errorText(outcome.code));
+        await refreshAfterFailedCapture(outcome);
         return;
       }
       setLevelCells(previewCells(preferredLayer(recordValue(outcome.result))));
@@ -338,6 +349,7 @@ export function CalibrationWorkbench({
       );
       if (!outcome.ok) {
         setFlowError(errorText(outcome.code));
+        await refreshAfterFailedCapture(outcome);
         return;
       }
       const cells = previewCells(preferredLayer(recordValue(outcome.result)));
@@ -412,6 +424,45 @@ export function CalibrationWorkbench({
     });
   }
 
+  // Everything the device's fit was made from, plus the fit itself, as one
+  // JSON file: the record to keep with an experiment or a paper.
+  function exportCalibrationData() {
+    return withPending("advanced", async () => {
+      setAdvancedError("");
+      const dumps: Record<string, unknown> = {};
+      const steps: [string, Record<string, unknown>][] = [
+        ["status", { command: "calibration_status" }],
+        ["tare", { command: "calibration_dump_tare" }],
+        ["fit", { command: "calibration_dump_fit" }],
+        ...calibration.levels.map((item): [string, Record<string, unknown>] => (
+          [`level_${item.level}`, { command: "calibration_dump_level", level: item.level }]
+        )),
+      ];
+      for (const [key, payload] of steps) {
+        const outcome = await command(t("calExportData"), payload);
+        if (!outcome.ok) {
+          setAdvancedError(errorText(outcome.code));
+          return;
+        }
+        dumps[key] = recordValue(outcome.result).data ?? outcome.result;
+      }
+      const file = {
+        exported_at: new Date().toISOString(),
+        device_uid: deviceUid,
+        matrix_shape: { rows, cols },
+        model: "p = a + b*sqrt(x) + c*x, x = readout(raw - tare)",
+        ...dumps,
+      };
+      const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `calibration-${deviceUid}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
   function confirmAction(request: ConfirmRequest) {
     setConfirm(null);
     if (request.kind === "cancel") {
@@ -442,13 +493,6 @@ export function CalibrationWorkbench({
       </div>
 
       {!deviceConnected ? <p className="notice warning">{t("calOffline")}</p> : null}
-
-      {calibration.legacy_missing_tare ? (
-        <div className="calibration-warning-banner">
-          <span className="banner-icon"><TriangleAlert size={18} strokeWidth={1.8} /></span>
-          <div className="banner-text">{t("calLegacyTare")}</div>
-        </div>
-      ) : null}
 
       <section className="settings-card cal-card cal-zero-card">
         <div className="cal-card-body">
@@ -579,7 +623,7 @@ export function CalibrationWorkbench({
                     const pct = item.total_points > 0 ? Math.round((item.captured_points / item.total_points) * 100) : 0;
                     return (
                       <li key={item.level} className="cal-level-row">
-                        <strong>{formatNumber(item.level)} kPa</strong>
+                        <strong>{levelLabel(t, item.level, item.reference)}</strong>
                         <div className="app-budget-track" aria-hidden="true">
                           <div className={`app-budget-fill${item.complete ? "" : " partial"}`} style={{ width: `${pct}%` }} />
                         </div>
@@ -596,6 +640,7 @@ export function CalibrationWorkbench({
               ) : (
                 <p className="cal-empty">{t("calNoLevelsYet")}</p>
               )}
+              <FitProgress t={t} fit={calibration.draft_fit} settings={calibration.fit_settings} />
             </div>
 
             <details className="cal-disclosure" open={singleSensorOpen} onToggle={(event) => setSingleSensorOpen(event.currentTarget.open)}>
@@ -709,7 +754,7 @@ export function CalibrationWorkbench({
               <ul className="app-group-list">
                 {calibration.levels.map((item) => (
                   <li key={item.level} className="cal-level-row">
-                    <strong>{formatNumber(item.level)} kPa</strong>
+                    <strong>{levelLabel(t, item.level, item.reference)}</strong>
                     <span className="cal-level-count">{item.captured_points}/{item.total_points}</span>
                     <button
                       className="button ghost compact"
@@ -733,6 +778,31 @@ export function CalibrationWorkbench({
             ) : (
               <p className="cal-empty">{t("noCalibrationLevels")}</p>
             )}
+          </div>
+
+          <FitProgress t={t} fit={calibration.fit} settings={calibration.fit_settings} saved />
+
+          <FitSettingsEditor
+            t={t}
+            settings={calibration.fit_settings}
+            disabled={busy || !deviceConnected || calibration.session_active}
+            onApply={(values) => void advanced(t("calFitSettingsTitle"), { command: "calibration_set_fit", ...values }, true)}
+          />
+
+          <div className="cal-setting-row">
+            <div>
+              <strong>{t("calExportData")}</strong>
+              <p>{t("calExportDataHint")}</p>
+            </div>
+            <button
+              className="button compact"
+              type="button"
+              disabled={busy || !deviceConnected || !calibration.tare_complete}
+              onClick={() => void exportCalibrationData()}
+            >
+              <Download size={14} strokeWidth={2} aria-hidden="true" />
+              {t("calExportAction")}
+            </button>
           </div>
 
           {preview ? (
@@ -874,6 +944,136 @@ function SensorMatrix({
   return (
     <div className={`cal-matrix${showValues ? " values" : ""}`} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
       {items}
+    </div>
+  );
+}
+
+function levelLabel(t: (key: string) => string, level: number, reference: number) {
+  const base = `${formatNumber(level)} kPa`;
+  // A pressure chamber records what it actually reached; show it when it
+  // differs from the level's name, since that is what the fit uses.
+  return Math.abs(reference - level) >= 0.0005
+    ? `${base} (${t("calReferenceMeasured").replace("{value}", formatNumber(reference))})`
+    : base;
+}
+
+function FitProgress({
+  t,
+  fit,
+  settings,
+  saved = false,
+}: {
+  t: (key: string) => string;
+  fit: CalibrationFitSummary | null;
+  settings: CalibrationFitSettings | null;
+  saved?: boolean;
+}) {
+  if (!fit || fit.cells_total === 0) return null;
+  const needPoints = fit.failures.too_few_points + fit.failures.no_tare;
+  const failedList = fit.failed.map((item) => `P${item.sensor_index}`).join(", ");
+  const more = fit.cells_total - fit.cells_fitted - fit.failed.length;
+  return (
+    <div className="cal-fit-progress" aria-live="polite">
+      <p className={fit.complete ? "cal-done" : "cal-hint"}>
+        {fit.complete ? <CircleCheck size={16} strokeWidth={2} aria-hidden="true" /> : null}
+        {t(saved ? "calFitSaved" : "calFitProgress")
+          .replace("{fitted}", String(fit.cells_fitted))
+          .replace("{total}", String(fit.cells_total))}
+      </p>
+      {!fit.complete && needPoints > 0 ? (
+        <p className="cal-hint">
+          {t("calFitNeedPoints")
+            .replace("{count}", String(needPoints))
+            .replace("{points}", String(settings?.min_points ?? 3))
+            .replace("{level}", formatNumber(settings?.min_level ?? 3))}
+        </p>
+      ) : null}
+      {fit.failures.singular > 0 ? (
+        <p className="cal-hint">{t("calFitSingular").replace("{count}", String(fit.failures.singular))}</p>
+      ) : null}
+      {failedList ? (
+        <p className="cal-hint">
+          {t("calFitFailedList").replace("{sensors}", more > 0 ? `${failedList} +${more}` : failedList)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// The paper's readout curves (AC14, Rfb 8.2 kOhm): ADC1 and ADC2 measured
+// separately, analysis/r01b_adc{1,2}_fit.json.
+const PAPER_READOUT = { adc1_c1: 2.6656779, adc1_c2: -9.4473953e-05, adc2_c1: 2.6606, adc2_c2: -8.871e-05 };
+const IDENTITY_READOUT = { adc1_c1: 1, adc1_c2: 0, adc2_c1: 1, adc2_c2: 0 };
+
+type FitSettingsValues = {
+  min_level: number;
+  adc1_c1: number;
+  adc1_c2: number;
+  adc2_c1: number;
+  adc2_c2: number;
+};
+
+function FitSettingsEditor({
+  t,
+  settings,
+  disabled,
+  onApply,
+}: {
+  t: (key: string) => string;
+  settings: CalibrationFitSettings | null;
+  disabled: boolean;
+  onApply: (values: FitSettingsValues) => void;
+}) {
+  const fromDevice = (): FitSettingsValues => ({
+    min_level: settings?.min_level ?? 3,
+    adc1_c1: settings?.readout[0]?.c1 ?? 1,
+    adc1_c2: settings?.readout[0]?.c2 ?? 0,
+    adc2_c1: settings?.readout[1]?.c1 ?? 1,
+    adc2_c2: settings?.readout[1]?.c2 ?? 0,
+  });
+  const [values, setValues] = useState<FitSettingsValues>(fromDevice);
+  const deviceKey = JSON.stringify(settings);
+  useEffect(() => {
+    setValues(fromDevice());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceKey]);
+  if (!settings) return null;
+  const field = (key: keyof FitSettingsValues, label: string) => (
+    <label className="field cal-field cal-field-narrow" key={key}>
+      <span>{label}</span>
+      <input
+        type="number"
+        step="any"
+        value={values[key]}
+        disabled={disabled}
+        onChange={(event) => setValues((current) => ({ ...current, [key]: Number(event.target.value) }))}
+      />
+    </label>
+  );
+  return (
+    <div className="app-group cal-fit-settings">
+      <div className="app-group-header">
+        <h4>{t("calFitSettingsTitle")}</h4>
+      </div>
+      <p className="cal-hint">{t("calFitSettingsCopy")}</p>
+      <div className="cal-capture-row">
+        {field("min_level", t("paramFitMinLevel"))}
+        {field("adc1_c1", t("paramAdc1C1"))}
+        {field("adc1_c2", t("paramAdc1C2"))}
+        {field("adc2_c1", t("paramAdc2C1"))}
+        {field("adc2_c2", t("paramAdc2C2"))}
+      </div>
+      <div className="actions compact">
+        <button className="button ghost compact" type="button" disabled={disabled} onClick={() => setValues((current) => ({ ...current, ...PAPER_READOUT }))}>
+          {t("calFitPresetPaper")}
+        </button>
+        <button className="button ghost compact" type="button" disabled={disabled} onClick={() => setValues((current) => ({ ...current, ...IDENTITY_READOUT }))}>
+          {t("calFitPresetIdentity")}
+        </button>
+        <button className="button compact" type="button" disabled={disabled} onClick={() => onApply(values)}>
+          {t("calFitApply")}
+        </button>
+      </div>
     </div>
   );
 }

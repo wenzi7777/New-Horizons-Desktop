@@ -156,6 +156,18 @@ class VisualizationPageStaticTest(unittest.TestCase):
         # The search box must not scroll away with the list.
         self.assertIn(".add-device-modal .device-grid", styles)
 
+    def test_device_card_link_opens_that_device(self):
+        launchpad = (ROOT / "frontend" / "src" / "pages" / "LaunchpadPage.tsx").read_text()
+        source = VISUALIZATION_PAGE.read_text()
+
+        self.assertIn("to={`/visualization?device=${encodeURIComponent(device.uid)}`}", launchpad)
+        self.assertIn('searchParams.get("device")', source)
+        self.assertIn("addDeviceView(requested)", source)
+        # The parameter is consumed so a reload does not reopen the view.
+        self.assertIn('next.delete("device")', source)
+        self.assertIn("setSearchParams(next, { replace: true })", source)
+        self.assertIn("data-device-uid={normalizeUid(view.deviceUid)}", source)
+
 
 if __name__ == "__main__":
     unittest.main()

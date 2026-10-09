@@ -98,6 +98,27 @@ export function functionDoc(name: string) {
 }
 
 /**
+ * The shape of every statement, as the compiler's grammar accepts it. Shown in
+ * Studio's Reference tab and quoted in its AI prompt.
+ */
+export const STATEMENT_FORMS: readonly (readonly [statement: string, form: string])[] = [
+  ["app", 'app <id> { name "…"  version 1.0.0  author you  summary "…"  [category <word>]  [icon <word>]  [background yes] }'],
+  ["region", "region <name> = rows <a>..<b>, cols <c>..<d>"],
+  ["region", "region <name> = rows <a>%..<b>%, cols <c>%..<d>%"],
+  ["signal", "signal <name> = <expression> [persist]"],
+  ["event", "event <name> when <expression> > <number> [hyst <n>] [for <n>ms]"],
+  ["event", "event <name> when <event expression> [for <n>ms]"],
+  ["emit", "emit <name> value <expression> on rise(<event>)"],
+  ["emit", "emit <name> value <expression> on fall(<event>)"],
+  ["led", "led <colour> when <event>"],
+  ["show", 'show <row> "<label>" <expression> [digits <n>]'],
+  ["bar", 'bar <row> "<label>" <expression> range <lo>..<hi>'],
+  ["pixel", "pixel <index> <colour> when <event>"],
+  ["meter", "meter <expression> range <lo>..<hi>"],
+  ["gate", "gate (<expression> < <number>) { signal / event / emit / led / show / bar / pixel / meter … }"],
+];
+
+/**
  * Completion for .nhs. `symbols` is the last successful compile report, so
  * the names an author has declared are offered alongside the language's own.
  */

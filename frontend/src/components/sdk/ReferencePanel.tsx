@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 
 import { useI18n } from "../../i18n";
-import { functionDoc } from "../../lib/nhsLanguage";
+import { STATEMENT_FORMS, functionDoc } from "../../lib/nhsLanguage";
+import { READOUT_SECTION_FORMS } from "../../lib/sdkPrompt";
 import type { SdkKind } from "../../lib/sdkProject";
 import {
   DEFAULT_BUDGET_US,
@@ -25,20 +26,6 @@ import {
 
 // Everything here is read from the SDK itself, so the reference cannot
 // describe a language the compiler does not accept.
-
-const STATEMENTS = [
-  ["app", 'app <id> { name "…"  version 1.0.0  author you  summary "…" }'],
-  ["region", "region <name> = rows <a>..<b>, cols <c>..<d>"],
-  ["signal", "signal <name> = <expression>"],
-  ["event", "event <name> when <expression> > <number> [hyst <n>] [for <n>ms]"],
-  ["emit", "emit <name> value <expression> on rise(<event>)"],
-  ["led", "led <colour> when <event>"],
-  ["show", 'show <row> "<label>" <expression> [digits <n>]'],
-  ["bar", 'bar <row> "<label>" <expression> range <lo>..<hi>'],
-  ["pixel", "pixel <index> <colour> when <event>"],
-  ["meter", "meter <expression> range <lo>..<hi>"],
-  ["gate", "gate (<expression> < <number>) { signal / event / emit / led / show / bar / pixel / meter … }"],
-] as const;
 
 export function ReferencePanel({ kind }: { kind: SdkKind }) {
   const { t } = useI18n();
@@ -75,8 +62,8 @@ export function ReferencePanel({ kind }: { kind: SdkKind }) {
           <section className="sdk-section">
             <h3>{t("sdkRefStatements")}</h3>
             <div className="sdk-ref-list">
-              {STATEMENTS.filter(([name, form]) => match(name, form)).map(([name, form]) => (
-                <code key={name} className="sdk-ref-form">{form}</code>
+              {STATEMENT_FORMS.filter(([name, form]) => match(name, form)).map(([, form]) => (
+                <code key={form} className="sdk-ref-form">{form}</code>
               ))}
             </div>
             <p className="sdk-hint">{t("sdkRefComparisonNote")}</p>
@@ -140,8 +127,9 @@ export function ReferencePanel({ kind }: { kind: SdkKind }) {
           <section className="sdk-section">
             <h3>{t("sdkRefSections")}</h3>
             <div className="sdk-ref-list">
-              <code className="sdk-ref-form">{'{ "kind": "stats", "title": "…", "items": [{ "label", "source", "field", "format", "hint" }] }'}</code>
-              <code className="sdk-ref-form">{'{ "kind": "table", "title": "…", "source": "…", "columns": [{ "label", "field", "format", "bar", "bar_max" }] }'}</code>
+              {READOUT_SECTION_FORMS.filter(([kind, form]) => match(kind, form)).map(([kind, form]) => (
+                <code key={kind} className="sdk-ref-form">{form}</code>
+              ))}
             </div>
           </section>
         </>

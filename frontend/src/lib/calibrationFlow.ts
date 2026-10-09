@@ -19,7 +19,27 @@ export type CalibrationCaptureSummary = {
 };
 
 export type CalibrationSummary = CalibrationCaptureSummary & {
+  // The nominal level that names it (and that dump/delete address).
   level: number;
+  // The pressure actually applied, which the fit uses.
+  reference: number;
+};
+
+// How far the per-sensor fit p = a + b*sqrt(x) + c*x got: the saved
+// profile's, or what Save would produce from the current draft.
+export type CalibrationFitSummary = {
+  cells_total: number;
+  cells_fitted: number;
+  complete: boolean;
+  failures: { no_tare: number; too_few_points: number; singular: number };
+  // The first few sensors that could not be fitted.
+  failed: { sensor_index: number; reason: string }[];
+};
+
+export type CalibrationFitSettings = {
+  min_level: number;
+  min_points: number;
+  readout: { adc: number; c1: number; c2: number; clip_mv: number }[];
 };
 
 export type CalibrationState = {
@@ -28,8 +48,6 @@ export type CalibrationState = {
   session_active: boolean;
   complete: boolean;
   tare_complete: boolean;
-  levels_complete: boolean;
-  legacy_missing_tare: boolean;
   // Firmware before v1.5.1 reports neither; `output_mode` is then derived.
   tare_enabled: boolean | null;
   output_mode: CalibrationOutputMode;
@@ -38,6 +56,9 @@ export type CalibrationState = {
   draft_tare: CalibrationCaptureSummary | null;
   levels: CalibrationSummary[];
   draft_levels: CalibrationSummary[];
+  fit: CalibrationFitSummary | null;
+  draft_fit: CalibrationFitSummary | null;
+  fit_settings: CalibrationFitSettings | null;
   metadata: Record<string, unknown>;
 };
 
@@ -62,14 +83,15 @@ const CALIBRATION_STATUS_KEYS = [
   "session_active",
   "complete",
   "tare_complete",
-  "levels_complete",
-  "legacy_missing_tare",
   "tare_enabled",
   "output_mode",
   "tare",
   "draft_tare",
   "levels",
   "draft_levels",
+  "fit",
+  "draft_fit",
+  "fit_settings",
   "metadata",
 ];
 
@@ -118,6 +140,7 @@ function parseSummaryList(value: unknown, fallbackSource: string): CalibrationSu
     .filter((item) => Object.keys(item).length > 0)
     .map((item) => ({
       level: numberValue(item.level, 0),
+      reference: numberValue(item.reference, numberValue(item.level, 0)),
       captured_points: numberValue(item.captured_points, 0),
       total_points: numberValue(item.total_points, 0),
       missing_points: numberValue(item.missing_points, 0),
@@ -125,6 +148,44 @@ function parseSummaryList(value: unknown, fallbackSource: string): CalibrationSu
       source: typeof item.source === "string" ? item.source : fallbackSource,
     }))
     .sort((a, b) => a.level - b.level);
+}
+
+function parseFitSummary(value: unknown): CalibrationFitSummary | null {
+  const source = recordValue(value);
+  if (Object.keys(source).length === 0) return null;
+  const failures = recordValue(source.failures);
+  return {
+    cells_total: numberValue(source.cells_total, 0),
+    cells_fitted: numberValue(source.cells_fitted, 0),
+    complete: source.complete === true,
+    failures: {
+      no_tare: numberValue(failures.no_tare, 0),
+      too_few_points: numberValue(failures.too_few_points, 0),
+      singular: numberValue(failures.singular, 0),
+    },
+    failed: (Array.isArray(source.failed) ? source.failed : [])
+      .map((item) => recordValue(item))
+      .map((item) => ({ sensor_index: numberValue(item.sensor_index, -1), reason: String(item.reason ?? "") }))
+      .filter((item) => item.sensor_index >= 0),
+  };
+}
+
+function parseFitSettings(value: unknown): CalibrationFitSettings | null {
+  const source = recordValue(value);
+  if (Object.keys(source).length === 0) return null;
+  return {
+    min_level: numberValue(source.min_level, 0),
+    min_points: numberValue(source.min_points, 3),
+    readout: (Array.isArray(source.readout) ? source.readout : []).map((item) => {
+      const entry = recordValue(item);
+      return {
+        adc: numberValue(entry.adc, 0),
+        c1: numberValue(entry.c1, 1),
+        c2: numberValue(entry.c2, 0),
+        clip_mv: numberValue(entry.clip_mv, 0),
+      };
+    }),
+  };
 }
 
 export function parseCalibrationState(value: unknown): CalibrationState {
@@ -139,8 +200,6 @@ export function parseCalibrationState(value: unknown): CalibrationState {
     session_active: source.session_active === true,
     complete,
     tare_complete: source.tare_complete === true,
-    levels_complete: source.levels_complete === true,
-    legacy_missing_tare: source.legacy_missing_tare === true,
     tare_enabled: typeof source.tare_enabled === "boolean" ? source.tare_enabled : null,
     output_mode: outputModeReported ? reportedMode as CalibrationOutputMode : enabled && complete ? "calibrated" : "raw",
     output_mode_reported: outputModeReported,
@@ -148,6 +207,9 @@ export function parseCalibrationState(value: unknown): CalibrationState {
     draft_tare: parseCaptureSummary(source.draft_tare, "draft"),
     levels: parseSummaryList(source.levels, "saved"),
     draft_levels: parseSummaryList(source.draft_levels, "draft"),
+    fit: parseFitSummary(source.fit),
+    draft_fit: parseFitSummary(source.draft_fit),
+    fit_settings: parseFitSettings(source.fit_settings),
     metadata: recordValue(source.metadata),
   };
 }
@@ -176,14 +238,13 @@ export function getCalibrationStep(snapshot: CalibrationFlowSnapshot): Calibrati
   return "levels";
 }
 
-// Save needs a baseline and at least one pressure, with every draft pressure
-// captured on every sensor -- the firmware refuses auto_enable otherwise.
+// Save needs a baseline and a fit for every sensor -- the firmware refuses
+// auto_enable otherwise. Sensors need not share levels: one pressed alone
+// under a weight is fitted from its own captures.
 export function canSaveCalibration(state: CalibrationState) {
-  const draftTareComplete = state.draft_tare?.complete === true;
   return state.session_active
-    && draftTareComplete
-    && state.draft_levels.length > 0
-    && state.draft_levels.every((item) => item.complete);
+    && state.draft_tare?.complete === true
+    && state.draft_fit?.complete === true;
 }
 
 export type ZeroBlockedReason = "device_offline" | "session_active";
@@ -208,6 +269,14 @@ export function calibrationErrorKey(code: string) {
     case "":
     case "no_response":
       return "calErrorNoResponse";
+    // Relay failures (a Hub, or a Gateway) rather than device errors.
+    case "command_delivery_timeout":
+    case "result_page_timeout":
+      return "calErrorReplyTimeout";
+    case "response_too_large":
+    case "result_page_expired":
+    case "command_too_large":
+      return "calErrorReplyTooLarge";
     default:
       return "calErrorGeneric";
   }

@@ -2531,6 +2531,12 @@ button:disabled {
   width: 100%;
   max-width: 760px;
   min-width: 0;
+  transition: box-shadow 0.4s ease;
+}
+
+/* The card a device card's "Visualize" link just opened. */
+.visualization-device-card.is-focused {
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent);
 }
 
 .visualization-card-header {
@@ -7343,6 +7349,34 @@ button.sdk-diagnostic:hover {
 .sdk-library-header h3 {
   margin: 0;
   font-size: 17px;
+}
+
+.sdk-ai-prompt-panel {
+  width: min(620px, 100%);
+}
+
+.field textarea.sdk-ai-prompt-request {
+  min-height: 120px;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.sdk-ai-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.sdk-ai-prompt-actions > .sdk-hint:first-child {
+  margin-right: auto;
+}
+
+.sdk-ai-prompt-actions .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .sdk-library-list {

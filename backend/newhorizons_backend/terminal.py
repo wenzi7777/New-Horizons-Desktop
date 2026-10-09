@@ -53,6 +53,9 @@ DEVICE_COMMAND_ALLOWLIST = {
     "calibration_session_abort",
     "calibration_session_commit",
     "calibration_dump_tare",
+    "calibration_dump_fit",
+    "calibration_set_fit",
+    "calibration_set_reference",
     "calibration_dump_level",
     "calibration_delete_level",
     "calibration_capture_tare",
@@ -344,6 +347,21 @@ def terminal_help_items() -> list[dict[str, str]]:
             "example": "calibration-dump-level --level 10",
         },
         {
+            "command": "calibration-dump-fit",
+            "description": "Dump every sensor's fitted coefficients (p = a + b*sqrt(x) + c*x) and fit result.",
+            "example": "calibration-dump-fit",
+        },
+        {
+            "command": "calibration-set-fit",
+            "description": "Set the fit inputs: lowest level used, each ADC's readout curve (dV = c1*x + c2*x^2) and clip level.",
+            "example": "calibration-set-fit --min-level 3 --adc1-c1 2.6657 --adc1-c2 -9.447e-05",
+        },
+        {
+            "command": "calibration-set-reference",
+            "description": "Set the pressure actually applied for one captured level (what the fit uses).",
+            "example": "calibration-set-reference --level 10 --reference 10.12",
+        },
+        {
             "command": "calibration-delete-level",
             "description": "Delete one calibration level from the saved profile or current draft session.",
             "example": "calibration-delete-level --level 10",
@@ -351,17 +369,17 @@ def terminal_help_items() -> list[dict[str, str]]:
         {
             "command": "calibration-capture-cell",
             "description": "Capture one sensor into the current draft calibration session.",
-            "example": "calibration-capture-cell --sensor-index 3 --level 10 --duration-ms 2500",
+            "example": "calibration-capture-cell --sensor-index 3 --level 10 --duration-ms 3000",
         },
         {
             "command": "calibration-capture-tare",
             "description": "Capture the no-load tare baseline into the current draft calibration session.",
-            "example": "calibration-capture-tare --duration-ms 2500",
+            "example": "calibration-capture-tare --duration-ms 3000",
         },
         {
             "command": "calibration-capture-all",
             "description": "Capture all active sensors into the current draft calibration session.",
-            "example": "calibration-capture-all --level 10 --duration-ms 2500",
+            "example": "calibration-capture-all --level 10 --reference 10.12 --duration-ms 10000",
         },
         {
             "command": "findme-discover",
@@ -498,6 +516,7 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "calibration-session-begin": "calibration_session_begin",
         "calibration-session-abort": "calibration_session_abort",
         "calibration-dump-tare": "calibration_dump_tare",
+        "calibration-dump-fit": "calibration_dump_fit",
         "findme-discover": "findme_discover",
         "log-clear": "log_clear",
         "reboot": "reboot",
@@ -568,6 +587,8 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         }
         if "level" in parsed:
             payload["level"] = float(parsed["level"])
+        if "reference" in parsed:
+            payload["reference"] = float(parsed["reference"])
         return {"command": "calibration_capture_cell", "payload": payload, "argv": argv}
 
     if command == "calibration-capture-all":
@@ -577,7 +598,29 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
             "level": float(parsed["level"]),
             "duration_ms": int(parsed.get("duration_ms", 3000)),
         }
+        if "reference" in parsed:
+            payload["reference"] = float(parsed["reference"])
         return {"command": "calibration_capture_all", "payload": payload, "argv": argv}
+
+    if command == "calibration-set-reference":
+        parsed = _parse_options(args)
+        payload = {
+            "command": "calibration_set_reference",
+            "level": float(parsed["level"]),
+            "reference": float(parsed["reference"]),
+        }
+        return {"command": "calibration_set_reference", "payload": payload, "argv": argv}
+
+    if command == "calibration-set-fit":
+        parsed = _parse_options(args)
+        keys = ("min_level", "adc1_c1", "adc1_c2", "adc2_c1", "adc2_c2", "adc1_clip_mv", "adc2_clip_mv")
+        payload = {"command": "calibration_set_fit"}
+        for key in keys:
+            if key in parsed:
+                payload[key] = float(parsed[key])
+        if len(payload) == 1:
+            raise ValueError("fit_setting_required")
+        return {"command": "calibration_set_fit", "payload": payload, "argv": argv}
 
     if command == "set-matrix-layout":
         parsed = _parse_options(args)

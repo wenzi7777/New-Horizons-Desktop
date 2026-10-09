@@ -1,3 +1,5 @@
+import re
+import shlex
 import sys
 import unittest
 from pathlib import Path
@@ -12,12 +14,76 @@ from newhorizons_backend.terminal import compile_terminal_command, terminal_help
 
 
 TERMINAL_PAGE = ROOT / "frontend" / "src" / "pages" / "TerminalPage.tsx"
+# COMMAND_BLOCKS and the builder <-> command line helpers live here.
+TERMINAL_COMMANDS = ROOT / "frontend" / "src" / "lib" / "terminalCommands.ts"
 BOARD_PROFILE = ROOT / "frontend" / "src" / "lib" / "boardProfile.ts"
 
 
+# Blocks whose params are all optional but need at least one of them.
+EITHER_OR_PARAM_COMMANDS = {"app-deactivate": "id_or_slot_required"}
+
+
+def command_blocks_from_source() -> list[dict]:
+    """Reads COMMAND_BLOCKS out of terminalCommands.ts as plain text.
+
+    Each block is split at `command: "`, each param at `key: "` (option entries
+    use `labelKey`/`value`, so they stay inside their param's slice).
+    """
+    source = TERMINAL_COMMANDS.read_text(encoding="utf-8")
+    start = source.index("export const COMMAND_BLOCKS")
+    body = source[start:source.index("\n];", start)]
+    blocks = []
+    for chunk in re.split(r'\bcommand: "', body)[1:]:
+        name = chunk.split('"', 1)[0]
+        params = []
+        for part in re.split(r'\bkey: "', chunk)[1:]:
+            default = re.search(r'\bdefaultValue: "([^"]*)"', part)
+            placeholder = re.search(r'\bplaceholder: "([^"]*)"', part)
+            params.append({
+                "key": part.split('"', 1)[0],
+                "required": "required: true" in part,
+                "default": default.group(1) if default else None,
+                "placeholder": placeholder.group(1) if placeholder else None,
+            })
+        blocks.append({"command": name, "params": params})
+    return blocks
+
+
 class DeviceCommandValidationTest(unittest.TestCase):
+    def test_every_command_block_compiles_with_its_defaults(self):
+        # What Run sends for a block straight after selecting it (defaults
+        # only) must compile and validate on the backend. A required param
+        # with no default borrows its placeholder; board-aware defaults
+        # (pins, manifest URL) come from boardProfile.ts and are not here.
+        blocks = command_blocks_from_source()
+        self.assertGreater(len(blocks), 60)
+        compiled = 0
+        for block in blocks:
+            if block["command"] in {"io-config", "visualize-io"}:
+                continue
+            parts = [block["command"]]
+            runnable = True
+            for param in block["params"]:
+                value = param["default"] or (param["placeholder"] if param["required"] else None)
+                if param["required"] and not value:
+                    runnable = False
+                if value:
+                    parts += [f"--{param['key']}", shlex.quote(value)]
+            if not runnable:
+                continue
+            line = " ".join(parts)
+            with self.subTest(line=line):
+                if block["command"] in EITHER_OR_PARAM_COMMANDS:
+                    # The builder cannot mark "one of these" as required.
+                    with self.assertRaisesRegex(ValueError, EITHER_OR_PARAM_COMMANDS[block["command"]]):
+                        compile_terminal_command(line)
+                    continue
+                validate_device_command_payload(compile_terminal_command(line)["payload"])
+                compiled += 1
+        self.assertGreater(compiled, 55)
+
     def test_terminal_command_builder_covers_every_help_command(self):
-        source = TERMINAL_PAGE.read_text(encoding="utf-8")
+        source = TERMINAL_COMMANDS.read_text(encoding="utf-8")
         block_commands = set()
         for line in source.splitlines():
             marker = 'command: "'
@@ -329,7 +395,7 @@ class DeviceCommandValidationTest(unittest.TestCase):
 
     def test_set_indicators_terminal_help_and_prompt_call_out_decimal_brightness(self):
         item = next(entry for entry in terminal_help_items() if entry["command"] == "set-indicators")
-        source = TERMINAL_PAGE.read_text(encoding="utf-8")
+        source = TERMINAL_COMMANDS.read_text(encoding="utf-8")
 
         self.assertIn("0.10", item["description"])
         self.assertIn("--preset solid_marker", item["example"])
@@ -338,7 +404,7 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertIn('placeholder: "0.10, 0.20, 0.35, 0.50, 1.00"', source)
 
     def test_terminal_page_uses_v011_external_led_presets_and_color_picker(self):
-        source = TERMINAL_PAGE.read_text(encoding="utf-8")
+        source = TERMINAL_COMMANDS.read_text(encoding="utf-8")
 
         self.assertIn('key: "external-led-color"', source)
         self.assertIn('labelKey: "externalLedColor"', source)

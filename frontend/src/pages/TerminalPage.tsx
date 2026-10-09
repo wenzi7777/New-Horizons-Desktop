@@ -1,9 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { useParams } from "react-router-dom";
 
 import { api, type DeviceEntry, type TerminalHelpEntry } from "../lib/api";
 import { DEFAULT_BOARD_PROFILE, boardProfileForHardwareModel, displayHardwareModel, type BoardPinSlot, type BoardProfile } from "../lib/boardProfile";
 import { commandDescriptionKey, useI18n } from "../i18n";
+import { copyText } from "../lib/clipboard";
+import {
+  COMMAND_BLOCKS,
+  COMMAND_GROUP_ORDER,
+  LOCAL_ONLY_COMMANDS,
+  buildCommandLine,
+  findCommandBlock,
+  missingRequiredParams,
+  parsePastedCommand,
+  type PasteErrorCode,
+  type PasteWarning,
+} from "../lib/terminalCommands";
 import { valueToCsv } from "../lib/valueFormat";
 
 type UpdateState = {
@@ -27,591 +39,11 @@ type TerminalLogEntry =
   | { type: "line"; text: string }
   | { type: "result"; result: Record<string, unknown> };
 
-type CommandParam = {
-  key: string;
-  labelKey: string;
-  type: "text" | "number" | "select";
-  required?: boolean;
-  placeholder?: string;
-  defaultValue?: string;
-  options?: { labelKey: string; value: string }[];
-};
-
-type CommandBlock = {
-  command: string;
-  groupKey: string;
-  params: CommandParam[];
-};
-
 const LOCAL_HELP: TerminalHelpEntry = {
   command: "io-config",
   description: "Open the board pin layout helper.",
   example: "io-config",
 };
-
-const COMMAND_GROUP_ORDER = [
-  "commandGroupCore",
-  "commandGroupMaintenance",
-  "commandGroupConfig",
-  "commandGroupFiles",
-  "commandGroupDanger",
-];
-
-const COMMAND_BLOCKS: CommandBlock[] = [
-  { command: "status", groupKey: "commandGroupCore", params: [] },
-  { command: "check-update", groupKey: "commandGroupCore", params: [{ key: "manifest-url", labelKey: "paramManifestUrl", type: "text", placeholder: "https://..." }] },
-  { command: "apply-update", groupKey: "commandGroupDanger", params: [{ key: "manifest-url", labelKey: "paramManifestUrl", type: "text", placeholder: "https://..." }] },
-  {
-    command: "enter-maintenance",
-    groupKey: "commandGroupMaintenance",
-    params: [{ key: "reason", labelKey: "paramReason", type: "text", placeholder: "calibration", defaultValue: "calibration" }],
-  },
-  { command: "exit-maintenance", groupKey: "commandGroupMaintenance", params: [] },
-  { command: "scan-health", groupKey: "commandGroupCore", params: [] },
-  { command: "sensor-sample", groupKey: "commandGroupCore", params: [] },
-  { command: "task-list", groupKey: "commandGroupCore", params: [] },
-  { command: "service-list", groupKey: "commandGroupCore", params: [] },
-  { command: "capabilities", groupKey: "commandGroupCore", params: [] },
-  { command: "app-list", groupKey: "commandGroupCore", params: [] },
-  {
-    command: "app-enable",
-    groupKey: "commandGroupConfig",
-    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "flow" }],
-  },
-  {
-    command: "app-disable",
-    groupKey: "commandGroupConfig",
-    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "flow1" }],
-  },
-  {
-    command: "app-revive",
-    groupKey: "commandGroupMaintenance",
-    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "flow" }],
-  },
-  {
-    command: "app-events",
-    groupKey: "commandGroupCore",
-    params: [
-      { key: "since_seq", labelKey: "paramSinceSeq", type: "number", placeholder: "0" },
-      { key: "limit", labelKey: "paramLimit", type: "number", placeholder: "32" },
-    ],
-  },
-  { command: "app-list-packages", groupKey: "commandGroupCore", params: [] },
-  { command: "app-view", groupKey: "commandGroupCore", params: [] },
-  {
-    command: "app-install",
-    groupKey: "commandGroupMaintenance",
-    params: [
-      { key: "path", labelKey: "paramPackagePath", type: "text", required: true, placeholder: "apps/heel_strike.nha" },
-      { key: "sha256", labelKey: "paramSha256", type: "text" },
-    ],
-  },
-  {
-    command: "app-uninstall",
-    groupKey: "commandGroupMaintenance",
-    params: [{ key: "id", labelKey: "paramAppId", type: "text", required: true, placeholder: "heel_strike" }],
-  },
-  {
-    command: "app-activate",
-    groupKey: "commandGroupMaintenance",
-    params: [
-      { key: "id", labelKey: "paramAppId", type: "text", required: true, placeholder: "heel_strike" },
-      { key: "slot", labelKey: "paramSlot", type: "number", placeholder: "1" },
-    ],
-  },
-  {
-    command: "app-deactivate",
-    groupKey: "commandGroupMaintenance",
-    params: [{ key: "id", labelKey: "paramAppId", type: "text", required: true, placeholder: "heel_strike" }],
-  },
-  {
-    command: "app-verify",
-    groupKey: "commandGroupCore",
-    params: [{ key: "id", labelKey: "paramAppId", type: "text", required: true, placeholder: "heel_strike" }],
-  },
-  { command: "app-reindex", groupKey: "commandGroupMaintenance", params: [] },
-  {
-    command: "app-load-flow",
-    groupKey: "commandGroupConfig",
-    params: [{ key: "path", labelKey: "paramFlowPath", type: "text", placeholder: "apps/flow.json" }],
-  },
-  { command: "app-unload-flow", groupKey: "commandGroupConfig", params: [] },
-  { command: "config-schema", groupKey: "commandGroupConfig", params: [] },
-  {
-    command: "config-get",
-    groupKey: "commandGroupConfig",
-    params: [{ key: "path", labelKey: "paramConfigPath", type: "text", placeholder: "scan.target_fps" }],
-  },
-  {
-    command: "config-set",
-    groupKey: "commandGroupConfig",
-    params: [
-      { key: "path", labelKey: "paramConfigPath", type: "text", required: true, placeholder: "scan.target_fps" },
-      { key: "value", labelKey: "paramConfigValue", type: "text", required: true, placeholder: "60" },
-    ],
-  },
-  {
-    command: "set-power-profile",
-    groupKey: "commandGroupConfig",
-    params: [
-      {
-        key: "profile",
-        labelKey: "paramProfile",
-        type: "select",
-        defaultValue: "performance",
-        options: [
-          { labelKey: "powerProfilePerformance", value: "performance" },
-          { labelKey: "powerProfileBalanced", value: "balanced" },
-          { labelKey: "powerProfilePowersave", value: "powersave" },
-        ],
-      },
-    ],
-  },
-  {
-    command: "service-restart",
-    groupKey: "commandGroupMaintenance",
-    params: [{ key: "name", labelKey: "paramServiceName", type: "text", required: true, placeholder: "imu" }],
-  },
-  { command: "dmesg", groupKey: "commandGroupFiles", params: [] },
-  {
-    command: "set-time",
-    groupKey: "commandGroupConfig",
-    params: [{ key: "epoch-ms", labelKey: "paramEpochMs", type: "text", required: true, placeholder: "1780000000000" }],
-  },
-  {
-    command: "set-stream-buffer",
-    groupKey: "commandGroupConfig",
-    params: [
-      {
-        key: "enabled",
-        labelKey: "paramEnabled",
-        type: "select",
-        defaultValue: "true",
-        options: [
-          { labelKey: "optionTrue", value: "true" },
-          { labelKey: "optionFalse", value: "false" },
-        ],
-      },
-      {
-        key: "mode",
-        labelKey: "logMode",
-        type: "select",
-        defaultValue: "standard",
-        options: [
-          { labelKey: "capacityDefault", value: "standard" },
-          { labelKey: "capacityExtended", value: "extended" },
-        ],
-      },
-    ],
-  },
-  { command: "calibration-status", groupKey: "commandGroupMaintenance", params: [] },
-  { command: "calibration-enable", groupKey: "commandGroupMaintenance", params: [] },
-  { command: "calibration-disable", groupKey: "commandGroupMaintenance", params: [] },
-  { command: "calibration-clear-profile", groupKey: "commandGroupDanger", params: [] },
-  { command: "calibration-session-begin", groupKey: "commandGroupMaintenance", params: [] },
-  { command: "calibration-session-abort", groupKey: "commandGroupMaintenance", params: [] },
-  {
-    command: "calibration-session-commit",
-    groupKey: "commandGroupMaintenance",
-    params: [
-      {
-        key: "auto-enable",
-        labelKey: "paramAutoEnable",
-        type: "select",
-        defaultValue: "true",
-        options: [
-          { labelKey: "optionTrue", value: "true" },
-          { labelKey: "optionFalse", value: "false" },
-        ],
-      },
-    ],
-  },
-  {
-    command: "calibration-dump-tare",
-    groupKey: "commandGroupMaintenance",
-    params: [],
-  },
-  {
-    command: "calibration-dump-level",
-    groupKey: "commandGroupMaintenance",
-    params: [{ key: "level", labelKey: "paramLevel", type: "number", required: true, defaultValue: "10" }],
-  },
-  {
-    command: "calibration-delete-level",
-    groupKey: "commandGroupDanger",
-    params: [{ key: "level", labelKey: "paramLevel", type: "number", required: true, defaultValue: "10" }],
-  },
-  {
-    command: "calibration-capture-tare",
-    groupKey: "commandGroupMaintenance",
-    params: [
-      { key: "duration-ms", labelKey: "paramDurationMs", type: "number", defaultValue: "2500" },
-    ],
-  },
-  {
-    command: "calibration-capture-cell",
-    groupKey: "commandGroupMaintenance",
-    params: [
-      { key: "sensor-index", labelKey: "paramSensorIndex", type: "number", required: true, defaultValue: "0" },
-      { key: "level", labelKey: "paramLevel", type: "number", defaultValue: "10" },
-      { key: "duration-ms", labelKey: "paramDurationMs", type: "number", defaultValue: "2500" },
-    ],
-  },
-  {
-    command: "calibration-capture-all",
-    groupKey: "commandGroupMaintenance",
-    params: [
-      { key: "level", labelKey: "paramLevel", type: "number", required: true, defaultValue: "10" },
-      { key: "duration-ms", labelKey: "paramDurationMs", type: "number", defaultValue: "2500" },
-    ],
-  },
-  { command: "findme-discover", groupKey: "commandGroupConfig", params: [] },
-  {
-    command: "findme-switch-gateway",
-    groupKey: "commandGroupConfig",
-    params: [
-      { key: "preferred-gateway-id", labelKey: "paramGatewayId", type: "text", required: true },
-      { key: "claim-id", labelKey: "paramClaimId", type: "text" },
-      { key: "ttl-ms", labelKey: "paramTtlMs", type: "number", defaultValue: "30000" },
-    ],
-  },
-  {
-    command: "set-matrix-layout",
-    groupKey: "commandGroupConfig",
-    params: [
-      { key: "analog-pins", labelKey: "analogPins", type: "text", required: true },
-      { key: "select-pins", labelKey: "selectPins", type: "text", required: true },
-    ],
-  },
-  {
-    command: "set-scan-timing",
-    groupKey: "commandGroupConfig",
-    params: [
-      { key: "target-fps", labelKey: "paramTargetFps", type: "number", defaultValue: "60" },
-      { key: "settle-us", labelKey: "paramSettleUs", type: "number", defaultValue: "20" },
-      { key: "send-every-n-frames", labelKey: "paramSendEveryNFrames", type: "number", defaultValue: "1" },
-    ],
-  },
-  {
-    command: "set-charge-profile",
-    groupKey: "commandGroupConfig",
-    params: [
-      {
-        key: "profile",
-        labelKey: "paramProfile",
-        type: "select",
-        defaultValue: "compatible",
-        options: [
-          { labelKey: "compatibleChargingMode", value: "compatible" },
-          { labelKey: "fastChargingMode", value: "fast" },
-        ],
-      },
-    ],
-  },
-  {
-    command: "power-set-state",
-    groupKey: "commandGroupDanger",
-    params: [
-      {
-        key: "state",
-        labelKey: "paramState",
-        type: "select",
-        defaultValue: "soft_off_auto",
-        options: [
-          { labelKey: "resumeNormalMode", value: "normal" },
-          { labelKey: "softOffAuto", value: "soft_off_auto" },
-        ],
-      },
-    ],
-  },
-  {
-    command: "set-log",
-    groupKey: "commandGroupConfig",
-    params: [
-      {
-        key: "enabled",
-        labelKey: "paramEnabled",
-        type: "select",
-        defaultValue: "true",
-        options: [
-          { labelKey: "optionTrue", value: "true" },
-          { labelKey: "optionFalse", value: "false" },
-        ],
-      },
-      {
-        key: "level",
-        labelKey: "logLevel",
-        type: "select",
-        defaultValue: "error",
-        options: [
-          { labelKey: "error", value: "error" },
-          { labelKey: "warn", value: "warn" },
-          { labelKey: "info", value: "info" },
-          { labelKey: "debug", value: "debug" },
-        ],
-      },
-      {
-        key: "mode",
-        labelKey: "logMode",
-        type: "select",
-        defaultValue: "standard",
-        options: [
-          { labelKey: "capacityDefault", value: "standard" },
-          { labelKey: "capacityExtended", value: "extended" },
-        ],
-      },
-    ],
-  },
-  {
-    command: "set-ota-config",
-    groupKey: "commandGroupConfig",
-    params: [
-      {
-        key: "auto-apply-on-boot",
-        labelKey: "autoOtaOnBoot",
-        type: "select",
-        defaultValue: "true",
-        options: [
-          { labelKey: "optionTrue", value: "true" },
-          { labelKey: "optionFalse", value: "false" },
-        ],
-      },
-      { key: "manifest-url", labelKey: "paramManifestUrl", type: "text", placeholder: "https://..." },
-    ],
-  },
-  {
-    command: "set-indicators",
-    groupKey: "commandGroupConfig",
-    params: [
-      {
-        key: "external-led-mode",
-        labelKey: "paramExternalLedMode",
-        type: "select",
-        defaultValue: "off",
-        options: [
-          { labelKey: "indicatorMode_off", value: "off" },
-          { labelKey: "indicatorMode_enabled", value: "enabled" },
-        ],
-      },
-      {
-        key: "preset",
-        labelKey: "paramPreset",
-        type: "select",
-        options: [
-          { labelKey: "indicatorPreset_system_status", value: "system_status" },
-          { labelKey: "indicatorPreset_connectivity", value: "connectivity" },
-          { labelKey: "indicatorPreset_pressure_meter", value: "pressure_meter" },
-          { labelKey: "indicatorPreset_stream_heartbeat", value: "stream_heartbeat" },
-          { labelKey: "indicatorPreset_calibration_auto", value: "calibration_auto" },
-          { labelKey: "indicatorPreset_solid_marker", value: "solid_marker" },
-          { labelKey: "indicatorPreset_identify", value: "identify" },
-          { labelKey: "indicatorPreset_off", value: "off" },
-        ],
-      },
-      {
-        key: "external-led-color",
-        labelKey: "externalLedColor",
-        type: "select",
-        options: [
-          { labelKey: "indicatorColor_teal", value: "teal" },
-          { labelKey: "indicatorColor_green", value: "green" },
-          { labelKey: "indicatorColor_blue", value: "blue" },
-          { labelKey: "indicatorColor_purple", value: "purple" },
-          { labelKey: "indicatorColor_amber", value: "amber" },
-          { labelKey: "indicatorColor_red", value: "red" },
-          { labelKey: "indicatorColor_white", value: "white" },
-        ],
-      },
-      { key: "brightness", labelKey: "paramBrightness", type: "number", defaultValue: "0.35", placeholder: "0.10, 0.20, 0.35, 0.50, 1.00" },
-      {
-        key: "oled-mode",
-        labelKey: "paramOledMode",
-        type: "select",
-        defaultValue: "off",
-        options: [
-          { labelKey: "indicatorMode_off", value: "off" },
-          { labelKey: "indicatorMode_auto", value: "auto" },
-          { labelKey: "indicatorMode_enabled", value: "enabled" },
-        ],
-      },
-      {
-        key: "oled-page",
-        labelKey: "paramOledPage",
-        type: "select",
-        options: [
-          { labelKey: "oledPage_live_status", value: "live_status" },
-          { labelKey: "oledPage_sensor_snapshot", value: "sensor_snapshot" },
-          { labelKey: "oledPage_recording_status", value: "recording_status" },
-          { labelKey: "oledPage_app", value: "app" },
-        ],
-      },
-      { key: "oled-update-hz", labelKey: "paramOledUpdateHz", type: "number" },
-      { key: "oled-contrast", labelKey: "paramOledContrast", type: "number" },
-    ],
-  },
-  {
-    command: "set-imu",
-    groupKey: "commandGroupConfig",
-    params: [
-      {
-        key: "enabled",
-        labelKey: "paramEnabled",
-        type: "select",
-        defaultValue: "true",
-        options: [
-          { labelKey: "optionTrue", value: "true" },
-          { labelKey: "optionFalse", value: "false" },
-        ],
-      },
-    ],
-  },
-  { command: "io-config", groupKey: "commandGroupConfig", params: [] },
-  {
-    command: "file-list",
-    groupKey: "commandGroupFiles",
-    params: [
-      {
-        key: "scope",
-        labelKey: "paramScope",
-        type: "select",
-        defaultValue: "user",
-        options: [
-          { labelKey: "fileScope_user", value: "user" },
-          { labelKey: "fileScope_logs", value: "logs" },
-          { labelKey: "fileScope_calibration", value: "calibration" },
-          { labelKey: "fileScope_proc", value: "proc" },
-        ],
-      },
-    ],
-  },
-  {
-    command: "file-read-begin",
-    groupKey: "commandGroupFiles",
-    params: [
-      {
-        key: "scope",
-        labelKey: "paramScope",
-        type: "select",
-        defaultValue: "user",
-        options: [
-          { labelKey: "fileScope_user", value: "user" },
-          { labelKey: "fileScope_logs", value: "logs" },
-          { labelKey: "fileScope_calibration", value: "calibration" },
-          { labelKey: "fileScope_proc", value: "proc" },
-        ],
-      },
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "device.log" },
-    ],
-  },
-  {
-    command: "file-read-chunk",
-    groupKey: "commandGroupFiles",
-    params: [
-      {
-        key: "scope",
-        labelKey: "paramScope",
-        type: "select",
-        defaultValue: "user",
-        options: [
-          { labelKey: "fileScope_user", value: "user" },
-          { labelKey: "fileScope_logs", value: "logs" },
-          { labelKey: "fileScope_calibration", value: "calibration" },
-          { labelKey: "fileScope_proc", value: "proc" },
-        ],
-      },
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "device.log" },
-      { key: "offset", labelKey: "paramOffset", type: "number", defaultValue: "0" },
-      { key: "length", labelKey: "paramLength", type: "number", defaultValue: "1024" },
-    ],
-  },
-  {
-    command: "file-write-begin",
-    groupKey: "commandGroupFiles",
-    params: [
-      {
-        key: "scope",
-        labelKey: "paramScope",
-        type: "select",
-        defaultValue: "user",
-        options: [
-          { labelKey: "fileScope_user", value: "user" },
-          { labelKey: "fileScope_logs", value: "logs" },
-          { labelKey: "fileScope_calibration", value: "calibration" },
-        ],
-      },
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "configs/profile.json" },
-      { key: "size", labelKey: "paramSize", type: "number", required: true, defaultValue: "2" },
-      { key: "sha256", labelKey: "paramSha256", type: "text", placeholder: "optional" },
-    ],
-  },
-  {
-    command: "file-write-chunk",
-    groupKey: "commandGroupFiles",
-    params: [
-      {
-        key: "scope",
-        labelKey: "paramScope",
-        type: "select",
-        defaultValue: "user",
-        options: [
-          { labelKey: "fileScope_user", value: "user" },
-          { labelKey: "fileScope_logs", value: "logs" },
-          { labelKey: "fileScope_calibration", value: "calibration" },
-        ],
-      },
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "configs/profile.json" },
-      { key: "offset", labelKey: "paramOffset", type: "number", defaultValue: "0" },
-      { key: "data", labelKey: "paramDataHex", type: "text", required: true, placeholder: "7b7d" },
-    ],
-  },
-  {
-    command: "file-write-finish",
-    groupKey: "commandGroupFiles",
-    params: [
-      {
-        key: "scope",
-        labelKey: "paramScope",
-        type: "select",
-        defaultValue: "user",
-        options: [
-          { labelKey: "fileScope_user", value: "user" },
-          { labelKey: "fileScope_logs", value: "logs" },
-          { labelKey: "fileScope_calibration", value: "calibration" },
-        ],
-      },
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "configs/profile.json" },
-    ],
-  },
-  {
-    command: "file-delete",
-    groupKey: "commandGroupFiles",
-    params: [
-      {
-        key: "scope",
-        labelKey: "paramScope",
-        type: "select",
-        defaultValue: "user",
-        options: [
-          { labelKey: "fileScope_user", value: "user" },
-          { labelKey: "fileScope_logs", value: "logs" },
-          { labelKey: "fileScope_calibration", value: "calibration" },
-        ],
-      },
-      { key: "path", labelKey: "paramPath", type: "text", required: true, placeholder: "tmp/sample.csv" },
-    ],
-  },
-  {
-    command: "log-tail",
-    groupKey: "commandGroupFiles",
-    params: [{ key: "lines", labelKey: "paramLines", type: "number", defaultValue: "50" }],
-  },
-  { command: "log-clear", groupKey: "commandGroupFiles", params: [] },
-  { command: "crash-log", groupKey: "commandGroupFiles", params: [] },
-  { command: "health", groupKey: "commandGroupFiles", params: [] },
-  { command: "crash-clear", groupKey: "commandGroupFiles", params: [] },
-  { command: "reboot", groupKey: "commandGroupDanger", params: [] },
-  { command: "reboot-wifi-setup", groupKey: "commandGroupDanger", params: [] },
-];
 
 function updateStateOf(device: DeviceEntry | undefined): UpdateState {
   const value = device?.update_state ?? device?.last_status?.update_state;
@@ -864,7 +296,7 @@ function pinCommand(analogPins: number[], selectPins: number[]) {
 }
 
 function commandBlock(command: string) {
-  return COMMAND_BLOCKS.find((block) => block.command === command) ?? COMMAND_BLOCKS[0];
+  return findCommandBlock(command) ?? COMMAND_BLOCKS[0];
 }
 
 function commandParamDefaultValue(command: string, key: string, profile = DEFAULT_BOARD_PROFILE) {
@@ -888,44 +320,22 @@ function commandParamDefaults(command: string, profile = DEFAULT_BOARD_PROFILE) 
   }, {});
 }
 
-function quoteCommandValue(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  if (/^[A-Za-z0-9_./:@,+-]+$/.test(trimmed)) return trimmed;
-  return `"${trimmed.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+type PasteResult =
+  | { ok: true; command: string; warnings: PasteWarning[] }
+  | { ok: false; error: PasteErrorCode; detail?: string };
+
+// The paste box is one line: fold shell line continuations and newlines (a
+// pasted multi-line JSON payload) into spaces so the text stays readable.
+function singleLine(text: string) {
+  return text.replace(/\\\r?\n/g, " ").replace(/\r?\n/g, " ");
 }
 
-function buildCommandLine(block: CommandBlock, values: Record<string, string>) {
-  const parts = [block.command];
-  for (const param of block.params) {
-    const value = values[param.key]?.trim() ?? "";
-    if (!value) continue;
-    parts.push(`--${param.key}`, quoteCommandValue(value));
-  }
-  return parts.join(" ");
+function pasteErrorMessage(result: { error: PasteErrorCode; detail?: string }, t: (key: string) => string) {
+  return t(`terminalPasteError_${result.error}`).replace("{command}", result.detail ?? "");
 }
 
-function missingRequiredParams(block: CommandBlock, values: Record<string, string>) {
-  return block.params.filter((param) => param.required && !(values[param.key] ?? "").trim());
-}
-
-async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  document.body.appendChild(textarea);
-  textarea.select();
-  const copied = document.execCommand("copy");
-  document.body.removeChild(textarea);
-  if (!copied) {
-    throw new Error("copy_failed");
-  }
+function pasteWarningMessage(warning: PasteWarning, t: (key: string) => string) {
+  return t(`terminalPasteWarn_${warning.code}`).replace("{key}", warning.key).replace("{value}", warning.value ?? "");
 }
 
 function commandUnavailableReason(command: string, profile: BoardProfile, t: (key: string) => string) {
@@ -1164,6 +574,8 @@ export function TerminalPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [running, setRunning] = useState(false);
   const [showIoModal, setShowIoModal] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [pasteResult, setPasteResult] = useState<PasteResult | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -1225,13 +637,45 @@ export function TerminalPage() {
     [selectedCommand, selectedDeviceProfile, t],
   );
 
+  // Board-aware defaults (pins, manifest URL) follow the selected device's
+  // board. Picking a command sets its defaults in selectCommand rather than in
+  // an effect on selectedCommand, which would also wipe a pasted command's values.
+  const selectedCommandRef = useRef(selectedCommand);
+  selectedCommandRef.current = selectedCommand;
   useEffect(() => {
-    setParamValues(commandParamDefaults(selectedCommand, selectedDeviceProfile));
-  }, [selectedCommand, selectedDeviceProfile]);
+    setParamValues(commandParamDefaults(selectedCommandRef.current, selectedDeviceProfile));
+  }, [selectedDeviceProfile]);
 
   function selectCommand(command: string) {
     setSelectedCommand(command);
+    setParamValues(commandParamDefaults(command, selectedDeviceProfile));
     setErrorMessage("");
+  }
+
+  function applyPastedCommand(text: string) {
+    const parsed = parsePastedCommand(text);
+    if (!parsed.ok) {
+      setPasteResult({ ok: false, error: parsed.error, detail: parsed.detail });
+      return;
+    }
+    // Only what was pasted is filled -- no builder defaults -- so Run sends
+    // exactly the pasted command; missing required params still gate Run.
+    setSelectedCommand(parsed.command);
+    setParamValues(parsed.values);
+    setErrorMessage("");
+    setPasteResult({ ok: true, command: parsed.command, warnings: parsed.warnings });
+  }
+
+  function handlePaste(event: ClipboardEvent<HTMLInputElement>) {
+    const pasted = event.clipboardData.getData("text");
+    if (!pasted) return;
+    event.preventDefault();
+    const input = event.currentTarget;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const next = singleLine(`${input.value.slice(0, start)}${pasted}${input.value.slice(end)}`);
+    setPasteText(next);
+    applyPastedCommand(next);
   }
 
   function updateParam(key: string, value: string) {
@@ -1296,7 +740,7 @@ export function TerminalPage() {
     }
     setErrorMessage("");
     appendLog([`$ ${command}`]);
-    if (command === "io-config" || command === "visualize-io") {
+    if (LOCAL_ONLY_COMMANDS.includes(command)) {
       setShowIoModal(true);
       appendLog([`< ${t("ioConfigOpen")}`]);
       return;
@@ -1363,6 +807,49 @@ export function TerminalPage() {
                 ))}
               </select>
             </div>
+          </div>
+          <div className="field terminal-paste">
+            <div className="terminal-input-row">
+              <input
+                type="text"
+                value={pasteText}
+                placeholder={t("terminalPlaceholder")}
+                aria-label={t("terminalPlaceholder")}
+                spellCheck={false}
+                autoComplete="off"
+                onPaste={handlePaste}
+                onChange={(event) => {
+                  setPasteText(event.target.value);
+                  setPasteResult(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    applyPastedCommand(pasteText);
+                  }
+                }}
+              />
+              <button className="button" type="button" onClick={() => applyPastedCommand(pasteText)} disabled={!pasteText.trim()}>
+                {t("terminalPasteFill")}
+              </button>
+            </div>
+            <span className="field-hint">{t("terminalHints")}</span>
+            {pasteResult ? (
+              <div aria-live="polite">
+                {pasteResult.ok ? (
+                  <p className="notice success">{t("terminalPasteFilled").replace("{command}", pasteResult.command)}</p>
+                ) : (
+                  <p className="notice error">{pasteErrorMessage(pasteResult, t)}</p>
+                )}
+                {pasteResult.ok && pasteResult.warnings.length ? (
+                  <div className="notice warning">
+                    {pasteResult.warnings.map((warning, index) => (
+                      <div key={`${warning.code}-${warning.key}-${index}`}>{pasteWarningMessage(warning, t)}</div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <div className="command-card-shell">
             <div className="command-builder">

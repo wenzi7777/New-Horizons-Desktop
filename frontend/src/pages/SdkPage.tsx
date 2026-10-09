@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, Cpu, FilePlus2, FolderOpen, Library, Trash2, X } from "lucide-react";
+import { BookOpen, Cpu, FilePlus2, FolderOpen, Library, Sparkles, Trash2, X } from "lucide-react";
 
+import { AiPromptDialog } from "../components/sdk/AiPromptDialog";
 import { BuildPanel } from "../components/sdk/BuildPanel";
 import { CodeEditor, type CodeEditorHandle } from "../components/sdk/CodeEditor";
 import { EmulatorPanel } from "../components/sdk/EmulatorPanel";
@@ -135,6 +136,8 @@ export function SdkPage() {
   const [targetKey, setTargetKey] = useState(loadTargetKey);
   const [virtual, setVirtual] = useState(loadVirtualDevice);
   const [picking, setPicking] = useState(false);
+  const [prompting, setPrompting] = useState(false);
+  const [aiRequest, setAiRequest] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<SdkProject | null>(null);
   const [storageFailed, setStorageFailed] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -230,7 +233,16 @@ export function SdkPage() {
     setConfirmDelete(null);
   };
 
+  const author = user?.username ?? "author";
+  // The prompt quotes the editor as it is now, not as of the last debounce.
+  const promptAnalysis = prompting
+    ? (pending.id === active.id && pending.source === active.source ? analysis : analyze(active, cellCount))
+    : null;
+  const untouchedTemplate = active.source.trim() === ""
+    || active.source === (active.kind === "flow" ? flowTemplate : readoutTemplate)(appIdOf(active), author);
+
   const errorCount = analysis.diagnostics.filter((d) => d.severity === "error").length;
+  const closePrompt = useCallback(() => setPrompting(false), []);
   const revealLine = (line: number) => editorRef.current?.revealLine(line);
   const tabs: { id: Tab; label: string }[] = [
     { id: "build", label: t("sdkTabBuild") },
@@ -257,6 +269,9 @@ export function SdkPage() {
           </button>
           <button type="button" className="button compact" onClick={() => setPicking(true)}>
             <Library size={14} strokeWidth={2} />{t("sdkOpenFromLibrary")}
+          </button>
+          <button type="button" className="button compact" onClick={() => setPrompting(true)}>
+            <Sparkles size={14} strokeWidth={2} />{t("sdkAiPrompt")}
           </button>
           <input
             ref={fileInput}
@@ -350,6 +365,19 @@ export function SdkPage() {
       </div>
 
       {picking ? <LibraryPicker onOpen={openFromLibrary} onClose={() => setPicking(false)} /> : null}
+      {prompting && promptAnalysis ? (
+        <AiPromptDialog
+          kind={active.kind}
+          target={target}
+          source={active.source}
+          diagnostics={promptAnalysis.diagnostics}
+          author={author}
+          request={aiRequest}
+          onRequestChange={setAiRequest}
+          defaultIncludeCurrent={!untouchedTemplate}
+          onClose={closePrompt}
+        />
+      ) : null}
       {confirmDelete ? (
         <ConfirmModal
           title={t("sdkDeleteProject")}

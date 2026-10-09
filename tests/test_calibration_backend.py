@@ -114,6 +114,13 @@ class CalibrationRuleTests(CalibrationTestCase):
         self.run_command({"command": "calibration_session_begin"})
         self.run_command({"command": "calibration_capture_tare"})
         self.run_command({"command": "calibration_capture_all", "level": 10})
+        # One pressure cannot fit a three-coefficient model.
+        result = self.run_command({"command": "calibration_session_commit", "auto_enable": True})
+        self.assertEqual(result["error"], "calibration_incomplete")
+        self.assertEqual(self.snapshot_calibration()["draft_fit"]["cells_fitted"], 0)
+
+        self.run_command({"command": "calibration_capture_all", "level": 15})
+        self.run_command({"command": "calibration_capture_all", "level": 20})
         result = self.run_command({"command": "calibration_session_commit", "auto_enable": True})
 
         self.assertEqual(result["message"], "calibration_committed")

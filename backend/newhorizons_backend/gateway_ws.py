@@ -217,6 +217,20 @@ class GatewaySocketSession:
             self.service.record_gateway_result(device_uid, payload)
             return
 
+        if msg_type == "device_result_chunk":
+            # One page of a reply a Hub relays in pieces; see
+            # service.record_gateway_result_chunk().
+            payload = _payload_from_message(message)
+            device_uid = str(message.get("device_uid") or payload.get("device_uid") or "").strip()
+            if not device_uid:
+                self._send_json({"type": "error", "code": "device_uid_required", "message": "device_uid is required"})
+                return
+            payload.setdefault("gateway_id", self.gateway_id)
+            payload.setdefault("transport_path", "gateway_wss")
+            self.service.register_gateway_device(device_uid, self.sender, gateway_id=self.gateway_id)
+            self.service.record_gateway_result_chunk(device_uid, payload)
+            return
+
         self._send_json({"type": "error", "code": "unknown_gateway_type", "message": "Unknown gateway message type"})
 
     def _maybe_push_time(self, device_uid: str, payload: dict[str, Any]) -> None:

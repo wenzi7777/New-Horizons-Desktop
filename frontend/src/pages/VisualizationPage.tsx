@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
@@ -90,8 +91,6 @@ type CalibrationStateSummary = {
   enabled: boolean;
   complete: boolean;
   tare_complete: boolean;
-  levels_complete: boolean;
-  legacy_missing_tare: boolean;
   max_level: number;
   levels: CalibrationSummary[];
 };
@@ -100,8 +99,6 @@ const EMPTY_CALIBRATION_STATE: CalibrationStateSummary = {
   enabled: false,
   complete: false,
   tare_complete: false,
-  levels_complete: false,
-  legacy_missing_tare: false,
   max_level: 0,
   levels: [],
 };
@@ -216,8 +213,6 @@ function parseCalibrationState(value: unknown): CalibrationStateSummary {
     enabled: source.enabled === true,
     complete: source.complete === true,
     tare_complete: source.tare_complete === true,
-    levels_complete: source.levels_complete === true,
-    legacy_missing_tare: source.legacy_missing_tare === true,
     max_level: Math.max(asFiniteNumber(metadata.max_level, 0), maxLevelFromLevels),
     levels,
   };
@@ -1176,6 +1171,30 @@ export function VisualizationPage() {
     setAddFilter("");
   }
 
+  // A device card's "Visualize" link lands here as ?device=<uid>: open that
+  // device's view (addDeviceView skips one already open), bring it into
+  // sight, and drop the parameter so a reload does not repeat it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [focusedUid, setFocusedUid] = useState("");
+  useEffect(() => {
+    const requested = searchParams.get("device");
+    if (!requested) return;
+    addDeviceView(requested);
+    setFocusedUid(normalizeUid(requested));
+    const next = new URLSearchParams(searchParams);
+    next.delete("device");
+    setSearchParams(next, { replace: true });
+    // addDeviceView only touches state setters, which are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams]);
+  useEffect(() => {
+    if (!focusedUid) return undefined;
+    const card = document.querySelector(`[data-device-uid="${focusedUid}"]`);
+    card?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = window.setTimeout(() => setFocusedUid(""), 2000);
+    return () => window.clearTimeout(timer);
+  }, [focusedUid, views]);
+
   function addDeviceView(deviceUid: string) {
     const normalized = normalizeUid(deviceUid);
     if (!normalized) return;
@@ -1355,7 +1374,11 @@ export function VisualizationPage() {
           const badgeState = visualizationBadgeState(device, item, clockTick);
           const badgeLabel = badgeState === "live" ? t("live") : badgeState === "waiting" ? t("waitingForData") : t("offline");
           return (
-            <article key={view.id} className="panel visualization-device-card">
+            <article
+              key={view.id}
+              className={`panel visualization-device-card${focusedUid === normalizeUid(view.deviceUid) ? " is-focused" : ""}`}
+              data-device-uid={normalizeUid(view.deviceUid)}
+            >
               <div className="visualization-card-header">
                 <label className="visualization-select-row">
                   <input

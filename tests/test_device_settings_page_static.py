@@ -456,30 +456,26 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn("setCalibrationState(parseCalibrationState(calibrationStatus))", source)
         # Old firmware only zeroes in maintenance mode.
         self.assertIn('outcome.code === "maintenance_required"', workbench)
-        self.assertIn("legacy_missing_tare", workbench)
+        # Saving waits for every sensor to be fitted, not every level complete.
+        self.assertIn("calibration.draft_fit", workbench)
+        self.assertNotIn("legacy_missing_tare", workbench)
         self.assertNotIn("calibrationAnalogPin", source)
         self.assertNotIn("calibrationSelectPin", source)
         self.assertIn("appHref(`device/${encodeURIComponent(deviceUid)}/files`)", source)
 
-    def test_pressure_calibration_low_end_stability_uses_effective_floor_target(self):
+    def test_pressure_calibration_stability_follows_the_paper_script(self):
+        # run_sweep.py's settle(): within 0.5 kPa for 5 polls 0.5 s apart, and
+        # after 90 s it logs a warning and carries on. No looser windows.
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
 
         self.assertIn("const PRESSURE_STABLE_TOLERANCE_KPA = 0.5;", source)
         self.assertIn("const PRESSURE_STABLE_CONFIRMATION_SAMPLES = 5;", source)
-        self.assertIn("const PRESSURE_STABLE_ADAPTIVE_DELAY_MS = 8000;", source)
-        self.assertIn("const PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES = 8;", source)
-        self.assertIn("const PRESSURE_STABLE_ADAPTIVE_RANGE_KPA = 0.25;", source)
-        self.assertIn("const PRESSURE_STABLE_ADAPTIVE_TARGET_SLACK_KPA = 1.0;", source)
-        self.assertIn("const PRESSURE_STABLE_MAX_WAIT_MS = 20000;", source)
-        self.assertIn("function hasStablePressureWindow(", source)
+        self.assertIn("const PRESSURE_STABLE_SAMPLE_INTERVAL_MS = 500;", source)
+        self.assertIn("const PRESSURE_STABLE_TIMEOUT_MS = 90000;", source)
         self.assertIn("Math.abs(r.uno.pressure_kpa - targetKpa) < PRESSURE_STABLE_TOLERANCE_KPA", source)
-        self.assertIn("elapsedMs >= PRESSURE_STABLE_ADAPTIVE_DELAY_MS", source)
-        self.assertIn("elapsedMs >= PRESSURE_STABLE_MAX_WAIT_MS", source)
-        self.assertIn('reason: "adaptive_window"', source)
-        self.assertIn('reason: "timeout_window"', source)
-        self.assertIn("Pressure settled at ${stability.settledKpa?.toFixed(3) ?? \"-\"} kPa after", source)
-        self.assertIn("Pressure held within ${PRESSURE_STABLE_TIMEOUT_RANGE_KPA.toFixed(2)} kPa window", source)
-        self.assertNotIn("Math.abs(r.uno.pressure_kpa - targetKpa) < 0.5", source)
+        self.assertIn('reason: "timeout"', source)
+        for gone in ("PRESSURE_STABLE_ADAPTIVE", "hasStablePressureWindow", '"adaptive_window"', '"timeout_window"'):
+            self.assertNotIn(gone, source)
 
     def test_pressure_calibration_stabilizing_ui_and_manual_confirm_exist(self):
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
@@ -502,7 +498,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('className="pressure-live-bar-fill"', source)
         self.assertIn('Math.max(0, Math.min(100, ((currentKpa ?? 0) / PRESSURE_MAX_KPA) * 100))', source)
         self.assertIn('t("manualConfirmCapture")', source)
-        self.assertIn('Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, reference sensor ${stability.referenceN?.toFixed(3) ?? "-"} ${currentImadaUnit}', source)
+        self.assertIn('Manual confirm at target ${target.toFixed(3)} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, reference sensor ${stability.referenceN?.toFixed(3) ?? "-"} ${currentImadaUnit}', source)
         self.assertIn('Metric label={t("pressureCalReferencePressure")}', source)
         self.assertIn('currentImadaValue !== null ? `${currentImadaValue.toFixed(3)} ${currentImadaUnit}` : t("pressureCalRefNotConnected")', source)
 
@@ -526,7 +522,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("const PRESSURE_POST_CAL_HOLD_SETTLE_MS = 3000;", source)
         self.assertIn('addLog("Returning pressure system to baseline hold…");', source)
         self.assertIn("await api.pressureCalSetTarget(PRESSURE_POST_CAL_HOLD_KPA);", source)
-        self.assertIn("await new Promise<void>((res) => setTimeout(res, PRESSURE_POST_CAL_HOLD_SETTLE_MS));", source)
+        self.assertIn("await sleep(PRESSURE_POST_CAL_HOLD_SETTLE_MS);", source)
         self.assertIn('addLog("Calibration complete! Holding at baseline. Please turn OFF the air compressor.");', source)
         self.assertIn('setPhase("awaiting_compressor_off");', source)
         self.assertIn("setShowCompressorOffModal(true);", source)
@@ -547,27 +543,54 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn("pressureCalSetControlEnabled", api_source)
         self.assertNotIn("pressureCalSafeMode", api_source)
 
-    def test_pressure_calibration_uses_imada_reference_and_stores_differential_kpa(self):
+    def test_pressure_calibration_reference_is_the_window_mean_above_zero(self):
+        # As analyze_sweep.py: the pressure zero is the median over the
+        # baseline window, and each level's reference is the mean gauge
+        # pressure over the very window its capture ran in.
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
 
         self.assertIn("referenceN: currentImadaValue,", source)
-        self.assertIn("let lastReferenceN: number | null = null;", source)
         self.assertIn("lastReferenceN = r.imada.value;", source)
-        self.assertIn("referenceN: lastReferenceN,", source)
-        self.assertIn("const absoluteKpa = stability.settledKpa ?? targetKpa;", source)
-        self.assertIn("const differentialKpa = Math.max(0, absoluteKpa - baselineKpa);", source)
-        self.assertIn('addLog(`Capturing at ${absoluteKpa.toFixed(3)} kPa (differential: ${differentialKpa.toFixed(3)} kPa)`);', source)
-        self.assertIn("level: differentialKpa,", source)
+        self.assertIn("zeroKpa = medianOf(zero.samples);", source)
+        self.assertIn("const target = level + zeroKpa;", source)
+        self.assertIn("const reference = meanOf(plateau.samples) - zeroKpa;", source)
+        self.assertIn('command: "calibration_set_reference",', source)
+        self.assertNotIn("differentialKpa", source)
+        self.assertNotIn("const baselineKpa = currentKpa ?? 0;", source)
 
-    def test_pressure_calibration_flow_captures_tare_before_pressure_levels(self):
+    def test_pressure_calibration_flow_follows_the_paper_procedure(self):
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
+        body = source[source.index("async function runCalibration()"):source.index("async function waitForResidualOrTimeout(")]
 
-        self.assertIn('await api.queueDeviceCommand(deviceUid, { command: "calibration_session_begin" });', source)
-        self.assertIn('await api.queueDeviceCommand(deviceUid, { command: "calibration_capture_tare", duration_ms: 3000 });', source)
-        self.assertIn('await api.queueDeviceCommand(deviceUid, {', source)
-        self.assertIn('command: "calibration_capture_all",', source)
-        self.assertIn('await api.queueDeviceCommand(deviceUid, { command: "calibration_session_commit", auto_enable: true });', source)
-        self.assertNotIn("level: stability.imadaValue", source)
+        # Every device step waits for its result instead of a fixed sleep.
+        self.assertNotIn("queueDeviceCommand", body)
+        order = [
+            '{ command: "enter_maintenance", reason: "calibration" }',
+            '{ command: "calibration_session_begin" }',
+            "for (let cycle = 1; cycle <= preloadCycles; cycle++)",
+            'command: "calibration_capture_tare",',
+            'command: "calibration_capture_all",',
+            'command: "calibration_set_reference",',
+            '{ command: "calibration_session_commit", auto_enable: true }',
+        ]
+        positions = [body.index(item) for item in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("const PRESSURE_PRELOAD_DEFAULT_CYCLES = 8;", source)
+        self.assertIn("const PRESSURE_PRELOAD_KPA = 20;", source)
+        self.assertIn("const PRESSURE_PLATEAU_HOLD_MS = 5000;", source)
+        self.assertIn("const PRESSURE_WINDOW_MS = 10000;", source)
+        self.assertIn("duration_ms: PRESSURE_WINDOW_MS,", body)
+        self.assertIn("useState<number[]>(PRESSURE_CAL_PRESETS.experiment)", source)
+
+    def test_pressure_calibration_never_stops_control_while_running(self):
+        # Stopping pressure control with the compressor on can open the intake
+        # (2026-09-24). A failed or aborted run returns to the baseline hold
+        # and goes through the compressor-off and residual-pressure test.
+        source = SETTINGS_PAGE.read_text(encoding="utf-8")
+        body = source[source.index("async function waitForStable("):source.index("async function waitForResidualOrTimeout(")]
+        self.assertNotIn("stopPressureControl", body)
+        self.assertNotIn("pressureCalStop", body)
+        self.assertIn("await api.pressureCalSetTarget(PRESSURE_BASELINE_KPA); } catch", body)
 
     def test_filter_ui_is_experimental_only(self):
         source = SETTINGS_PAGE.read_text()

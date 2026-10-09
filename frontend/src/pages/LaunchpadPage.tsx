@@ -98,6 +98,9 @@ function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) 
         </div>
       </Link>
       <div className="device-card-actions">
+        <Link className="button" to={`/visualization?device=${encodeURIComponent(device.uid)}`}>
+          {t("navVisualize")}
+        </Link>
         <Link className="button" to={`/device/${encodeURIComponent(device.uid)}/settings`}>
           {t("settingsApp")}
         </Link>

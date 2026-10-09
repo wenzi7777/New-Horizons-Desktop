@@ -14,7 +14,7 @@ import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { BoardIoModal } from "./TerminalPage";
 import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
 import { ConfirmModal } from "../components/ConfirmModal";
-import { CalibrationWorkbench } from "../components/calibration/CalibrationWorkbench";
+import { CalibrationWorkbench, type CalibrationRun } from "../components/calibration/CalibrationWorkbench";
 import { DeviceAppsPanel } from "../components/DeviceAppsPanel";
 import { DeviceHealthCard } from "../components/DeviceHealthCard";
 import { compareVersions } from "../lib/appLibrary";
@@ -191,57 +191,73 @@ const PRESSURE_BASELINE_KPA = 0.5;
 // 結束後的殘壓安全測試：嘗試穩定在此壓力，達標代表殘壓仍高、不可安全關閉氣壓控制。
 const PRESSURE_RESIDUAL_TEST_KPA = 5;
 const PRESSURE_RESIDUAL_TEST_TIMEOUT_MS = 15000;
+// The procedure below follows the paper's sweep script
+// (air_pressure_patent/lab_tools/run_sweep.py): stable = within 0.5 kPa for 5
+// polls 0.5 s apart, giving up after 90 s and carrying on with a warning.
 const PRESSURE_STABLE_TOLERANCE_KPA = 0.5;
 const PRESSURE_STABLE_CONFIRMATION_SAMPLES = 5;
 const PRESSURE_STABLE_SAMPLE_INTERVAL_MS = 500;
-const PRESSURE_STABLE_ADAPTIVE_DELAY_MS = 8000;
-const PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES = 8;
-const PRESSURE_STABLE_ADAPTIVE_RANGE_KPA = 0.25;
-const PRESSURE_STABLE_ADAPTIVE_TARGET_SLACK_KPA = 1.0;
-const PRESSURE_STABLE_MAX_WAIT_MS = 20000;
-const PRESSURE_STABLE_TIMEOUT_RANGE_KPA = 0.4;
+const PRESSURE_STABLE_TIMEOUT_MS = 90000;
+// Preconditioning: N cycles to 20 kPa gauge, held 5 s, vented below 0.3 kPa.
+const PRESSURE_PRELOAD_DEFAULT_CYCLES = 8;
+const PRESSURE_PRELOAD_KPA = 20;
+const PRESSURE_PRELOAD_HOLD_MS = 5000;
+const PRESSURE_VENT_GAUGE_KPA = 0.3;
+const PRESSURE_VENT_TIMEOUT_MS = 120000;
+// Venting is the intake shut and the chamber leaking down; a rise this big
+// means the intake is not shut.
+const PRESSURE_VENT_RISE_ABORT_KPA = 1.5;
+// Each plateau is held 15 s and its value taken over the last 10 s: hold
+// 5 s, then capture for 10 s while sampling the pressure. The zero is taken
+// the same way at the baseline.
+const PRESSURE_PLATEAU_HOLD_MS = 5000;
+const PRESSURE_WINDOW_MS = 10000;
+const PRESSURE_ZERO_HOLD_MS = 10000;
+// A capture blocks the device for its duration before it answers.
+const PRESSURE_CAPTURE_TIMEOUT_MARGIN_MS = 40000;
 const PRESSURE_OVERSHOOT_ABORT_KPA = 2.0;
 const PRESSURE_OVERSHOOT_ABORT_SAMPLES = 3;
 const PRESSURE_POST_CAL_HOLD_KPA = PRESSURE_BASELINE_KPA;
 const PRESSURE_POST_CAL_HOLD_SETTLE_MS = 3000;
 
 type PressureCalPhase =
-  | "idle" | "starting_session" | "holding_baseline" | "setting_pressure" | "stabilizing"
+  | "idle" | "starting_session" | "holding_baseline" | "preloading" | "setting_pressure" | "stabilizing"
   | "capturing" | "stopping_pressure" | "committing" | "done" | "error" | "aborting"
   | "awaiting_compressor_off" | "testing_residual" | "residual_unsafe" | "safe_done";
 
 type PressureStableResult = {
   referenceN: number | null;
-  reason: "strict" | "adaptive_window" | "timeout_window" | "manual_confirm";
+  reason: "strict" | "timeout" | "manual_confirm";
   settledKpa: number | null;
   elapsedMs: number;
 };
 
-function recentPressureWindow(values: number[]) {
-  return values.slice(-PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES);
+function medianOf(values: number[]) {
+  if (values.length === 0) return NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function pressureWindowRangeKpa(values: number[]) {
-  if (values.length === 0) return Number.POSITIVE_INFINITY;
-  return Math.max(...values) - Math.min(...values);
+function meanOf(values: number[]) {
+  return values.length === 0 ? NaN : values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function pressureWindowAverageKpa(values: number[]) {
-  if (values.length === 0) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-function hasStablePressureWindow(targetKpa: number, values: number[], rangeLimitKpa: number, targetSlackKpa: number) {
-  const recent = recentPressureWindow(values);
-  if (recent.length < PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES) return false;
-  return pressureWindowRangeKpa(recent) <= rangeLimitKpa
-    && Math.abs(pressureWindowAverageKpa(recent) - targetKpa) <= targetSlackKpa;
+class PressureCalAborted extends Error {
+  constructor() {
+    super("aborted");
+  }
 }
 
-function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string; deviceUid: string }) {
+function PressureCalibrationPanel({ t, deviceUid, run }: { t: (key: string) => string; deviceUid: string; run: CalibrationRun }) {
   const [phase, setPhase] = useState<PressureCalPhase>("idle");
   const [pointIndex, setPointIndex] = useState(0);
-  const [points, setPoints] = useState<number[]>(PRESSURE_CAL_PRESETS.standard);
+  const [points, setPoints] = useState<number[]>(PRESSURE_CAL_PRESETS.experiment);
+  const [preloadCycles, setPreloadCycles] = useState(PRESSURE_PRELOAD_DEFAULT_CYCLES);
   const [currentKpa, setCurrentKpa] = useState<number | null>(null);
   const [currentImadaValue, setCurrentImadaValue] = useState<number | null>(null);
   const [currentImadaUnit, setCurrentImadaUnit] = useState<string>("N");
@@ -257,7 +273,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   const [customToken, setCustomToken] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState("");
-  const [presetKey, setPresetKey] = useState("standard");
+  const [presetKey, setPresetKey] = useState("experiment");
   const [newPointInput, setNewPointInput] = useState("");
   const [activeTargetKpa, setActiveTargetKpa] = useState<number | null>(null);
   const abortRef = useRef(false);
@@ -276,6 +292,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       case "idle":              return t("pressureCalStateIdle");
       case "starting_session":  return t("pressureCalStateStartingSession");
       case "holding_baseline":  return t("pressureCalStateHoldingBaseline");
+      case "preloading":        return t("pressureCalStatePreloading");
       case "setting_pressure":  return t("pressureCalStateSettingPressure");
       case "stabilizing":       return t("pressureCalStateStabilizing");
       case "capturing":         return t("pressureCalStateCapturing");
@@ -373,24 +390,18 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
   async function waitForStable(targetKpa: number): Promise<PressureStableResult> {
     let lastReferenceN: number | null = null;
     let lastKpa: number | null = null;
-    const pressureSamples: number[] = [];
     const startedAt = Date.now();
     while (true) {
-      if (abortRef.current) {
-        return {
-          referenceN: lastReferenceN,
-          reason: "timeout_window",
-          settledKpa: lastKpa,
-          elapsedMs: Date.now() - startedAt,
-        };
-      }
+      if (abortRef.current) throw new PressureCalAborted();
       if (manualConfirmRef.current) {
         const manual = manualConfirmRef.current;
         manualConfirmRef.current = null;
-        return {
-          ...manual,
-          elapsedMs: Date.now() - startedAt,
-        };
+        return { ...manual, elapsedMs: Date.now() - startedAt };
+      }
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs >= PRESSURE_STABLE_TIMEOUT_MS) {
+        // The paper's script logs this and carries on; so does this.
+        return { referenceN: lastReferenceN, reason: "timeout", settledKpa: lastKpa, elapsedMs };
       }
       try {
         const r: PressureCalReadings = await api.pressureCalReadings();
@@ -401,11 +412,6 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           lastReferenceN = r.imada.value;
         }
         lastKpa = r.uno.pressure_kpa;
-        pressureSamples.push(r.uno.pressure_kpa);
-        if (pressureSamples.length > PRESSURE_STABLE_ADAPTIVE_WINDOW_SAMPLES * 2) {
-          pressureSamples.shift();
-        }
-        const elapsedMs = Date.now() - startedAt;
 
         // UNO safety clamp: the firmware closes the intake but PRESERVES the target
         // and auto-recovers via hysteresis. Do NOT re-issue the target here — a fresh
@@ -415,7 +421,7 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
           setSafetyLatchedWarning(true);
           stableCountRef.current = 0;
           addLogRef.current?.(`Safety clamp active at ${r.uno.pressure_kpa.toFixed(2)} kPa — holding, will auto-resume.`);
-          await new Promise<void>((res) => setTimeout(res, PRESSURE_STABLE_SAMPLE_INTERVAL_MS));
+          await sleep(PRESSURE_STABLE_SAMPLE_INTERVAL_MS);
           continue;
         }
         setSafetyLatchedWarning(false);
@@ -426,7 +432,6 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         ) {
           overshootCountRef.current++;
           if (overshootCountRef.current >= PRESSURE_OVERSHOOT_ABORT_SAMPLES) {
-            try { await stopPressureControl(); } catch { /* ignore */ }
             throw new Error(`pressure_runaway_detected target=${targetKpa.toFixed(2)} current=${r.uno.pressure_kpa.toFixed(2)}`);
           }
         } else {
@@ -435,51 +440,95 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
         if (Math.abs(r.uno.pressure_kpa - targetKpa) < PRESSURE_STABLE_TOLERANCE_KPA) {
           stableCountRef.current++;
           if (stableCountRef.current >= PRESSURE_STABLE_CONFIRMATION_SAMPLES) {
-            return {
-              referenceN: lastReferenceN,
-              reason: "strict",
-              settledKpa: r.uno.pressure_kpa,
-              elapsedMs,
-            };
+            return { referenceN: lastReferenceN, reason: "strict", settledKpa: r.uno.pressure_kpa, elapsedMs };
           }
         } else {
           stableCountRef.current = 0;
         }
-        if (
-          elapsedMs >= PRESSURE_STABLE_ADAPTIVE_DELAY_MS
-          && hasStablePressureWindow(
-            targetKpa,
-            pressureSamples,
-            PRESSURE_STABLE_ADAPTIVE_RANGE_KPA,
-            PRESSURE_STABLE_ADAPTIVE_TARGET_SLACK_KPA,
-          )
-        ) {
-          return {
-            referenceN: lastReferenceN,
-            reason: "adaptive_window",
-            settledKpa: pressureWindowAverageKpa(recentPressureWindow(pressureSamples)),
-            elapsedMs,
-          };
-        }
-        if (
-          elapsedMs >= PRESSURE_STABLE_MAX_WAIT_MS
-          && hasStablePressureWindow(
-            targetKpa,
-            pressureSamples,
-            PRESSURE_STABLE_TIMEOUT_RANGE_KPA,
-            Number.POSITIVE_INFINITY,
-          )
-        ) {
-          return {
-            referenceN: lastReferenceN,
-            reason: "timeout_window",
-            settledKpa: pressureWindowAverageKpa(recentPressureWindow(pressureSamples)),
-            elapsedMs,
-          };
-        }
-      } catch { /* ignore */ }
-      await new Promise<void>((res) => setTimeout(res, PRESSURE_STABLE_SAMPLE_INTERVAL_MS));
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("pressure_runaway_detected")) throw error;
+        /* a missed reading: try again */
+      }
+      await sleep(PRESSURE_STABLE_SAMPLE_INTERVAL_MS);
     }
+  }
+
+  // Sets the target and waits for it, as the paper's settle() does.
+  async function settleAt(targetKpa: number) {
+    stableCountRef.current = 0;
+    overshootCountRef.current = 0;
+    manualConfirmRef.current = null;
+    await api.pressureCalSetTarget(targetKpa);
+    return waitForStable(targetKpa);
+  }
+
+  // Keeps polling (so the live readout moves) for `ms`; returns the samples.
+  async function sampleFor(ms: number) {
+    const samples: number[] = [];
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (abortRef.current) throw new PressureCalAborted();
+      try {
+        const r = await api.pressureCalReadings();
+        setCurrentKpa(r.uno.pressure_kpa);
+        samples.push(r.uno.pressure_kpa);
+      } catch { /* a missed reading */ }
+      await sleep(PRESSURE_STABLE_SAMPLE_INTERVAL_MS);
+    }
+    return samples;
+  }
+
+  // The paper's to_zero(): back to the baseline target -- the intake shuts
+  // and the chamber leaks down -- until the gauge reads under 0.3 kPa.
+  async function ventToZero(zeroKpa: number) {
+    let start: number | null = null;
+    await api.pressureCalSetTarget(PRESSURE_BASELINE_KPA);
+    const until = Date.now() + PRESSURE_VENT_TIMEOUT_MS;
+    while (Date.now() < until) {
+      if (abortRef.current) throw new PressureCalAborted();
+      try {
+        const r = await api.pressureCalReadings();
+        setCurrentKpa(r.uno.pressure_kpa);
+        const gauge = r.uno.pressure_kpa - zeroKpa;
+        start ??= gauge;
+        if (gauge > start + PRESSURE_VENT_RISE_ABORT_KPA) {
+          throw new Error(`pressure_rising_while_venting ${start.toFixed(2)} -> ${gauge.toFixed(2)} kPa`);
+        }
+        if (gauge < PRESSURE_VENT_GAUGE_KPA) return;
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("pressure_rising_while_venting")) throw error;
+      }
+      await sleep(PRESSURE_STABLE_SAMPLE_INTERVAL_MS);
+    }
+    addLogRef.current?.(`Vent did not reach ${PRESSURE_VENT_GAUGE_KPA} kPa within ${PRESSURE_VENT_TIMEOUT_MS / 1000} s; continuing.`);
+  }
+
+  // A device command that must succeed; throws its error code otherwise.
+  async function deviceCommand(label: string, payload: Record<string, unknown>, timeoutMs = 20000) {
+    const response = await run(label, payload, timeoutMs, { waitForLock: true });
+    const result = response.result;
+    if (!result || result.status === "error" || result.ok === false) {
+      throw new Error(String(result?.error || result?.message || "no_response"));
+    }
+    return result;
+  }
+
+  // Runs a capture while sampling the pressure over the same window.
+  async function captureWithWindow(label: string, payload: Record<string, unknown>) {
+    let finished = false;
+    const capture = deviceCommand(label, payload, PRESSURE_WINDOW_MS + PRESSURE_CAPTURE_TIMEOUT_MARGIN_MS)
+      .finally(() => { finished = true; });
+    const samples: number[] = [];
+    while (!finished) {
+      try {
+        const r = await api.pressureCalReadings();
+        setCurrentKpa(r.uno.pressure_kpa);
+        samples.push(r.uno.pressure_kpa);
+      } catch { /* a missed reading */ }
+      await sleep(PRESSURE_STABLE_SAMPLE_INTERVAL_MS);
+    }
+    const result = await capture;
+    return { result, samples };
   }
 
   async function runCalibration() {
@@ -492,104 +541,107 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
     const addLog = (line: string) => setCalLog((prev) => [...prev, line]);
     addLogRef.current = addLog;
     const sortedPoints = [...points].sort((a, b) => a - b);
+    let sessionStarted = false;
 
     try {
       setPhase("starting_session");
       setActiveTargetKpa(null);
-      addLog("Starting calibration session...");
-      await api.queueDeviceCommand(deviceUid, { command: "calibration_session_begin" });
-      await new Promise<void>((res) => setTimeout(res, 1000));
+      addLog("Entering maintenance and starting a calibration session…");
+      await deviceCommand(t("enterMaintenance"), { command: "enter_maintenance", reason: "calibration" });
+      await deviceCommand(t("pressureCalStateStartingSession"), { command: "calibration_session_begin" });
+      sessionStarted = true;
 
-      // Hold the pressure controller at the baseline (≈0.5 kPa) BEFORE sampling the
-      // tare/zero point. Otherwise the intake valve keeps feeding air and the pressure
-      // drifts upward, contaminating the tare baseline.
+      // A first zero estimate, for the preconditioning targets and venting.
       setPhase("holding_baseline");
       setActiveTargetKpa(PRESSURE_BASELINE_KPA);
-      addLog(`Holding at baseline ${PRESSURE_BASELINE_KPA} kPa before tare…`);
-      await api.pressureCalSetTarget(PRESSURE_BASELINE_KPA);
-      stableCountRef.current = 0;
-      overshootCountRef.current = 0;
-      manualConfirmRef.current = null;
-      await waitForStable(PRESSURE_BASELINE_KPA);
-      if (abortRef.current) {
-        setPhase("aborting");
-        setActiveTargetKpa(null);
-        addLog("Aborting…");
-        try { await stopPressureControl(); } catch { /* ignore */ }
-        try { await api.queueDeviceCommand(deviceUid, { command: "calibration_session_abort" }); } catch { /* ignore */ }
-        addLog(t("pressureCalSessionAborted"));
-        setPhase("idle");
-        return;
+      addLog(`Holding at baseline ${PRESSURE_BASELINE_KPA} kPa…`);
+      await settleAt(PRESSURE_BASELINE_KPA);
+      let zeroKpa = medianOf(await sampleFor(5000));
+      addLog(`Zero estimate ${zeroKpa.toFixed(3)} kPa.`);
+
+      for (let cycle = 1; cycle <= preloadCycles; cycle++) {
+        setPhase("preloading");
+        const target = PRESSURE_PRELOAD_KPA + zeroKpa;
+        setActiveTargetKpa(target);
+        addLog(`Preload ${cycle}/${preloadCycles}: ${PRESSURE_PRELOAD_KPA} kPa…`);
+        const stability = await settleAt(target);
+        if (stability.reason === "timeout") addLog(`  not strictly stable after ${PRESSURE_STABLE_TIMEOUT_MS / 1000} s; continuing.`);
+        await sampleFor(PRESSURE_PRELOAD_HOLD_MS);
+        setActiveTargetKpa(PRESSURE_BASELINE_KPA);
+        await ventToZero(zeroKpa);
       }
 
+      // The zero: hold the baseline, then take the baseline capture (the
+      // tare) and the pressure zero over the same window.
+      setPhase("holding_baseline");
+      setActiveTargetKpa(PRESSURE_BASELINE_KPA);
+      await settleAt(PRESSURE_BASELINE_KPA);
+      await sampleFor(PRESSURE_ZERO_HOLD_MS);
       setPhase("capturing");
-      addLog("Capturing tare baseline at baseline pressure…");
-      await api.queueDeviceCommand(deviceUid, { command: "calibration_capture_tare", duration_ms: 3000 });
-      await new Promise<void>((res) => setTimeout(res, 4000));
-      const baselineKpa = currentKpa ?? 0;
-      addLog(`Tare baseline captured. Baseline pressure: ${baselineKpa.toFixed(3)} kPa (levels will be stored as differential).`);
+      addLog("Capturing the baseline…");
+      const zero = await captureWithWindow(t("pressureCalStateCapturing"), {
+        command: "calibration_capture_tare",
+        duration_ms: PRESSURE_WINDOW_MS,
+      });
+      zeroKpa = medianOf(zero.samples);
+      addLog(`Baseline captured. Pressure zero ${zeroKpa.toFixed(3)} kPa (median of ${zero.samples.length} readings).`);
 
+      const timedOut: number[] = [];
       for (let i = 0; i < sortedPoints.length; i++) {
-        if (abortRef.current) break;
-        const targetKpa = sortedPoints[i];
+        const level = sortedPoints[i];
+        const target = level + zeroKpa;
         setPointIndex(i);
-        setActiveTargetKpa(targetKpa);
-        manualConfirmRef.current = null;
-        overshootCountRef.current = 0;
-
-        setPhase("setting_pressure");
-        addLog(`Setting pressure → ${targetKpa} kPa`);
-        await api.pressureCalSetTarget(targetKpa);
-        stableCountRef.current = 0;
+        setActiveTargetKpa(target);
 
         setPhase("stabilizing");
-        addLog(`Stabilizing at ${targetKpa} kPa…`);
-        const stability = await waitForStable(targetKpa);
-        if (abortRef.current) break;
-        if (stability.reason === "adaptive_window") {
-          addLog(`Pressure settled at ${stability.settledKpa?.toFixed(3) ?? "-"} kPa after ${Math.round(stability.elapsedMs / 1000)}s; continuing with adaptive window.`);
+        addLog(`Level ${level} kPa (target ${target.toFixed(3)})…`);
+        const stability = await settleAt(target);
+        if (stability.reason === "timeout") {
+          timedOut.push(level);
+          addLog(`  not strictly stable after ${PRESSURE_STABLE_TIMEOUT_MS / 1000} s; continuing.`);
         } else if (stability.reason === "manual_confirm") {
-          addLog(`Manual confirm at target ${targetKpa} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, reference sensor ${stability.referenceN?.toFixed(3) ?? "-"} ${currentImadaUnit}`);
-        } else if (stability.reason === "timeout_window") {
-          addLog(`Pressure held within ${PRESSURE_STABLE_TIMEOUT_RANGE_KPA.toFixed(2)} kPa window at ${stability.settledKpa?.toFixed(3) ?? "-"} kPa after ${Math.round(stability.elapsedMs / 1000)}s; continuing without waiting longer.`);
+          addLog(`Manual confirm at target ${target.toFixed(3)} kPa, UNO ${stability.settledKpa?.toFixed(3) ?? "-"} kPa, reference sensor ${stability.referenceN?.toFixed(3) ?? "-"} ${currentImadaUnit}`);
         }
+        await sampleFor(PRESSURE_PLATEAU_HOLD_MS);
 
         setPhase("capturing");
-        const absoluteKpa = stability.settledKpa ?? targetKpa;
-        const differentialKpa = Math.max(0, absoluteKpa - baselineKpa);
-        addLog(`Capturing at ${absoluteKpa.toFixed(3)} kPa (differential: ${differentialKpa.toFixed(3)} kPa)`);
-        await api.queueDeviceCommand(deviceUid, {
+        const plateau = await captureWithWindow(t("pressureCalStateCapturing"), {
           command: "calibration_capture_all",
-          level: differentialKpa,
-          duration_ms: 3000,
+          level,
+          duration_ms: PRESSURE_WINDOW_MS,
         });
-        await new Promise<void>((res) => setTimeout(res, 4000));
-        if (abortRef.current) break;
-        addLog(`Point ${i + 1}/${sortedPoints.length} done.`);
-      }
-
-      if (abortRef.current) {
-        setPhase("aborting");
-        setActiveTargetKpa(null);
-        addLog("Aborting…");
-        try { await stopPressureControl(); } catch { /* ignore */ }
-        try { await api.queueDeviceCommand(deviceUid, { command: "calibration_session_abort" }); } catch { /* ignore */ }
-        addLog(t("pressureCalSessionAborted"));
-        setPhase("idle");
-        setShowCompressorOffBanner(true);
-        return;
+        // The reference is what the chamber actually held over the capture.
+        const reference = meanOf(plateau.samples) - zeroKpa;
+        if (Number.isFinite(reference)) {
+          await deviceCommand(t("pressureCalStateCapturing"), {
+            command: "calibration_set_reference",
+            level,
+            reference: Number(reference.toFixed(3)),
+          });
+        }
+        addLog(`  captured; reference ${Number.isFinite(reference) ? reference.toFixed(3) : "-"} kPa.`);
       }
 
       setPhase("committing");
-      addLog("Committing session…");
-      await api.queueDeviceCommand(deviceUid, { command: "calibration_session_commit", auto_enable: true });
-      await new Promise<void>((res) => setTimeout(res, 1000));
-      await api.queueDeviceCommand(deviceUid, { command: "calibration_status" });
+      addLog("Saving…");
+      let committed: Record<string, unknown>;
+      try {
+        committed = await deviceCommand(t("pressureCalStateCommitting"), { command: "calibration_session_commit", auto_enable: true });
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== "calibration_incomplete") throw error;
+        // Keep what was captured even though some sensors cannot be fitted.
+        committed = await deviceCommand(t("pressureCalStateCommitting"), { command: "calibration_session_commit", auto_enable: false });
+        addLog("Saved, but not every sensor could be fitted, so calibration is not switched on.");
+      }
+      sessionStarted = false;
+      const fit = (committed.data as Record<string, unknown> | undefined)?.fit as Record<string, unknown> | undefined;
+      if (fit) addLog(`Fitted ${String(fit.cells_fitted ?? "?")}/${String(fit.cells_total ?? "?")} sensors.`);
+      if (timedOut.length) addLog(`Levels that never met the strict stability rule: ${timedOut.join(", ")} kPa.`);
 
       addLog("Returning pressure system to baseline hold…");
       setActiveTargetKpa(PRESSURE_POST_CAL_HOLD_KPA);
       await api.pressureCalSetTarget(PRESSURE_POST_CAL_HOLD_KPA);
-      await new Promise<void>((res) => setTimeout(res, PRESSURE_POST_CAL_HOLD_SETTLE_MS));
+      await sleep(PRESSURE_POST_CAL_HOLD_SETTLE_MS);
 
       addLog("Calibration complete! Holding at baseline. Please turn OFF the air compressor.");
       // Hold at baseline and ask the user (full-screen) to turn off the compressor.
@@ -597,13 +649,27 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
       setPhase("awaiting_compressor_off");
       setShowCompressorOffModal(true);
     } catch (err) {
+      const aborted = err instanceof PressureCalAborted;
       const msg = err instanceof Error ? err.message : String(err);
-      setCalError(msg);
-      setActiveTargetKpa(null);
-      setPhase("error");
-      addLog(`Error: ${msg}`);
-      try { await stopPressureControl(); } catch { /* ignore */ }
-      setShowCompressorOffBanner(true);
+      if (aborted) {
+        setPhase("aborting");
+        addLog("Aborting…");
+      } else {
+        setCalError(msg);
+        addLog(`Error: ${msg}`);
+      }
+      if (sessionStarted) {
+        try { await deviceCommand(t("pressureCalSessionAborted"), { command: "calibration_session_abort" }); } catch { /* ignore */ }
+        addLog(t("pressureCalSessionAborted"));
+      }
+      // Never stop pressure control here: with the compressor still on, a
+      // stop can open the intake (see the residual test below). Return to
+      // the baseline hold instead and take the same compressor-off route a
+      // finished calibration takes.
+      setActiveTargetKpa(PRESSURE_BASELINE_KPA);
+      try { await api.pressureCalSetTarget(PRESSURE_BASELINE_KPA); } catch { /* ignore */ }
+      setPhase(aborted ? "awaiting_compressor_off" : "error");
+      setShowCompressorOffModal(true);
     }
   }
 
@@ -796,6 +862,21 @@ function PressureCalibrationPanel({ t, deviceUid }: { t: (key: string) => string
               )}
             </div>
           ))}
+        </div>
+        <div className="field-grid">
+          <div className="field">
+            <label>{t("pressureCalPreloadCycles")}</label>
+            <input
+              type="number"
+              min={0}
+              max={20}
+              step={1}
+              value={preloadCycles}
+              disabled={isRunning}
+              onChange={(e) => setPreloadCycles(Math.max(0, Math.min(20, Math.round(Number(e.target.value) || 0))))}
+            />
+            <span className="field-hint">{t("pressureCalPreloadHint")}</span>
+          </div>
         </div>
         {!isRunning && (
           <div className="field-grid">
@@ -2361,7 +2442,7 @@ export function DeviceSettingsPage() {
             maintenanceMode={normalized?.mode === "maintenance" || normalized?.mode === "safe_maintenance"}
             run={run}
           />
-          <PressureCalibrationPanel t={t} deviceUid={deviceUid} />
+          <PressureCalibrationPanel t={t} deviceUid={deviceUid} run={run} />
         </div>
       );
     }

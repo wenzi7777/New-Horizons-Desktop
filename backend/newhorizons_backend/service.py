@@ -16,6 +16,7 @@ from .app_event_log import append_dropped_marker, append_events, events_lost_sin
 from .arduino_protocol import CONTROL_PORT, is_arduino_heartbeat_packet, is_arduino_stream_packet, packet_device_uid, send_control_command
 from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_for_hardware_model, normalize_hardware_model
 from .packet_parser import PacketParseError, parse_binary_packet
+from .result_chunks import RESULT_CHUNK_TYPE, ResultChunkReassembler, normalize_device_result
 from .terminal import DEVICE_COMMAND_ALLOWLIST
 from .discovery import DiscoveryResponder
 from .hub_channel_watch import HubChannelWatcher
@@ -149,6 +150,7 @@ class NewHorizonsService:
         "calibration_disable",
         "calibration_dump_tare",
         "calibration_dump_level",
+        "calibration_dump_fit",
         # Zeroing pauses the scan itself (firmware v1.5.1+); older firmware
         # answers maintenance_required and the Desktop falls back.
         "calibration_tare_capture",
@@ -164,6 +166,8 @@ class NewHorizonsService:
         "calibration_capture_tare",
         "calibration_capture_cell",
         "calibration_capture_all",
+        "calibration_set_fit",
+        "calibration_set_reference",
         "file_write_begin",
         "file_write_chunk",
         "file_write_finish",
@@ -236,6 +240,8 @@ class NewHorizonsService:
         self._gateway_session_senders: dict[str, Callable[[dict[str, Any]], None]] = {}
         self._gateway_device_ids: dict[str, str] = {}
         self._udp_control_sessions: dict[str, tuple[str, int]] = {}
+        # Replies that arrive in pieces: Hub pages and direct-UDP chunks.
+        self._result_chunks = ResultChunkReassembler()
         self._arduino_control_sessions: dict[str, tuple[str, int]] = {}
         self._arduino_stream_status_at: dict[str, float] = {}
         self._gateways: dict[str, dict[str, Any]] = {}
@@ -1754,6 +1760,31 @@ class NewHorizonsService:
     def record_gateway_result(self, device_uid: str, payload: dict[str, Any]) -> None:
         self._record_result(device_uid, payload)
 
+    def record_gateway_result_chunk(self, device_uid: str, payload: dict[str, Any]) -> None:
+        """One page of a reply a Hub relays in pieces.
+
+        The Hub forwards each page of the device's paged reply as it arrives
+        (`page` is the device's own result_chunk envelope). Once every page
+        is in, the joined reply is recorded like any single-frame result.
+        """
+        page = payload.get("page") if isinstance(payload.get("page"), dict) else {}
+        assembled = self._result_chunks.add({
+            "device_uid": device_uid,
+            "request_id": payload.get("request_id"),
+            "chunk": page.get("chunk"),
+            "chunks": page.get("chunks"),
+            "data": page.get("data"),
+        })
+        if assembled is None:
+            return
+        result = normalize_device_result(assembled["payload"], fallback_command=str(payload.get("command") or ""))
+        result["device_uid"] = device_uid
+        result["request_id"] = assembled["request_id"]
+        for key in ("gateway_id", "transport_path"):
+            if payload.get(key):
+                result[key] = payload[key]
+        self._record_result(device_uid, result)
+
     def record_gateway_packet(self, payload: bytes) -> None:
         self._handle_udp_datagram(payload, ("gateway", 0))
 
@@ -2276,6 +2307,13 @@ class NewHorizonsService:
             return
         if not isinstance(frame, dict):
             return
+        if str(frame.get("type") or "") == RESULT_CHUNK_TYPE:
+            # A reply over ~1.2 KB arrives split across datagrams
+            # (ControlServer::sendUdpResult); nothing to do until it is whole.
+            assembled = self._result_chunks.add(frame)
+            if assembled is None:
+                return
+            frame = {"type": "result", **assembled}
         frame_payload = frame.get("payload") if isinstance(frame.get("payload"), dict) else {}
         device_uid = self._device_uid_from_payload(
             frame.get("device_uid") or frame_payload.get("device_uid") or frame_payload.get("device_id"),
@@ -2609,8 +2647,8 @@ class NewHorizonsService:
 
     CALIBRATION_STATUS_KEYS = (
         "enabled", "mode_active", "session_active", "complete", "tare_complete",
-        "levels_complete", "legacy_missing_tare", "tare_enabled", "output_mode",
-        "tare", "draft_tare", "levels", "draft_levels", "metadata",
+        "tare_enabled", "output_mode",
+        "tare", "draft_tare", "levels", "draft_levels", "fit", "draft_fit", "fit_settings", "metadata",
     )
 
     @classmethod
@@ -3889,16 +3927,33 @@ class NewHorizonsService:
             return {"captured_points": points, "total_points": total, "missing_points": total - points,
                     "complete": captured and total > 0, "source": source}
 
-        def level_summaries(levels: dict[float, int], source: str) -> list[dict[str, Any]]:
+        # Levels map nominal kPa -> the set of sensor indexes captured at it.
+        def level_summaries(levels: dict[float, set[int]], source: str) -> list[dict[str, Any]]:
             return [
-                {"level": level, "captured_points": points, "total_points": total,
-                 "missing_points": max(0, total - points), "complete": points >= total > 0, "source": source}
-                for level, points in sorted(levels.items())
+                {"level": level, "reference": level, "captured_points": len(cells), "total_points": total,
+                 "missing_points": max(0, total - len(cells)), "complete": len(cells) >= total > 0, "source": source}
+                for level, cells in sorted(levels.items())
             ]
 
+        # Like Calibration::fitAll: a sensor fits with 3+ levels from 3 kPa up.
+        def fit_summary(levels: dict[float, set[int]], tare: bool) -> dict[str, Any]:
+            fitted = 0
+            failed = []
+            for index in range(total):
+                points = sum(1 for level, cells in levels.items() if level >= 3 and index in cells)
+                if tare and points >= 3:
+                    fitted += 1
+                elif len(failed) < 16:
+                    failed.append({"sensor_index": index, "reason": "too_few_points" if tare else "no_tare"})
+            missing = total - fitted
+            return {"cells_total": total, "cells_fitted": fitted, "complete": total > 0 and fitted == total,
+                    "failures": {"no_tare": 0 if tare else missing, "too_few_points": missing if tare else 0,
+                                 "singular": 0},
+                    "failed": failed}
+
         tare_complete = bool(state["tare"])
-        levels_complete = bool(state["levels"]) and all(points >= total for points in state["levels"].values())
-        complete = tare_complete and levels_complete
+        fit = fit_summary(state["levels"], tare_complete)
+        complete = tare_complete and fit["complete"]
         enabled = bool(state["enabled"]) and complete
         if enabled:
             output_mode = "calibrated"
@@ -3912,18 +3967,20 @@ class NewHorizonsService:
             "session_active": bool(state["session"]),
             "complete": complete,
             "tare_complete": tare_complete,
-            "levels_complete": levels_complete,
-            "legacy_missing_tare": bool(state["levels"]) and not tare_complete,
             "tare_enabled": bool(state["tare_enabled"]),
             "output_mode": output_mode,
             "tare": tare_summary(tare_complete, "saved"),
             "draft_tare": tare_summary(bool(state["session"] and state["draft_tare"]), "draft"),
             "levels": level_summaries(state["levels"], "saved"),
             "draft_levels": level_summaries(state["draft_levels"] if state["session"] else {}, "draft"),
+            "fit": fit,
+            "draft_fit": fit_summary(state["draft_levels"], bool(state["draft_tare"])) if state["session"] else None,
+            "fit_settings": {"min_points": 3, "min_level": 3,
+                             "readout": [{"adc": 1, "c1": 1, "c2": 0, "clip_mv": 3150},
+                                         {"adc": 2, "c1": 1, "c2": 0, "clip_mv": 3100}]},
             "metadata": {
                 "rows": int(shape.get("rows") or 0), "cols": int(shape.get("cols") or 0), "point_count": total,
-                "max_level": max(state["levels"], default=0),
-                "tare_complete": tare_complete, "levels_complete": levels_complete,
+                "max_level": max(state["levels"], default=0), "tare_complete": tare_complete,
             },
         }
 
@@ -3954,7 +4011,8 @@ class NewHorizonsService:
         if command == "calibration_session_begin":
             if state["session"]:
                 return ok("calibration_session_already_active")
-            state.update(session=True, draft_tare=state["tare"], draft_levels=dict(state["levels"]))
+            state.update(session=True, draft_tare=state["tare"],
+                         draft_levels={level: set(cells) for level, cells in state["levels"].items()})
             return ok("calibration_session_started")
         if command == "calibration_session_abort":
             state.update(session=False, draft_tare=False, draft_levels={})
@@ -3967,19 +4025,23 @@ class NewHorizonsService:
         if command in ("calibration_capture_cell", "calibration_capture_all"):
             if not state["session"] or not state["draft_tare"]:
                 return fail("calibration_tare_required" if state["session"] else "calibration_capture_failed")
-            captured = state["draft_levels"].get(level, 0)
-            state["draft_levels"][level] = total if command == "calibration_capture_all" else min(total, captured + 1)
+            cells = state["draft_levels"].setdefault(level, set())
+            if command == "calibration_capture_all":
+                cells.update(range(total))
+            else:
+                cells.add(int(payload.get("sensor_index") or 0))
             message = "calibration_all_captured" if command == "calibration_capture_all" else "calibration_cell_captured"
             return ok(message, {"level": level, "total_points": total, "session_active": True})
         if command == "calibration_session_commit":
             if not state["session"]:
                 return fail("calibration_session_required")
-            levels_ok = bool(state["draft_levels"]) and all(p >= total for p in state["draft_levels"].values())
-            if payload.get("auto_enable") and not (state["draft_tare"] and levels_ok):
+            draft = self._mock_calibration_status(device_uid, shape, mode)["draft_fit"] or {}
+            fits_ok = bool(draft.get("complete"))
+            if payload.get("auto_enable") and not (state["draft_tare"] and fits_ok):
                 return fail("calibration_incomplete")
-            state.update(tare=state["draft_tare"], levels=dict(state["draft_levels"]), session=False,
+            state.update(tare=state["draft_tare"], levels=state["draft_levels"], session=False,
                          draft_tare=False, draft_levels={})
-            state["enabled"] = bool(payload.get("auto_enable")) and state["tare"] and levels_ok
+            state["enabled"] = bool(payload.get("auto_enable")) and state["tare"] and fits_ok
             return ok("calibration_committed")
         if command == "calibration_tare_capture":
             if state["session"]:

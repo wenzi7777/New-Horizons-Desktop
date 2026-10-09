@@ -22,6 +22,12 @@ export type CommandRunner = (
 export const MAX_USER_PATH = 24;
 /** One command per chunk, so this trades round trips against payload size. */
 export const CHUNK_BYTES = 96;
+/**
+ * Bytes asked for per file_read_chunk. The reply carries them as hex, so
+ * about 8 KB: two UDP-chunked datagram bursts, or two ESP-NOW pages through a
+ * Hub. Bigger chunks mean fewer round trips but a bigger buffer on the device.
+ */
+export const READ_CHUNK_BYTES = 4096;
 
 export type TransferProgress = {
   loaded: number;
@@ -180,7 +186,7 @@ export async function installAppPackage(queue: CommandRunner, options: InstallOp
 export type ReadOptions = {
   path: string;
   scope?: string;
-  /** Bytes per request. The device caps a chunk well below this. */
+  /** Bytes per request; READ_CHUNK_BYTES unless a caller needs otherwise. */
   chunkBytes?: number;
 };
 
@@ -193,7 +199,7 @@ export type ReadOptions = {
  */
 export async function readDeviceFile(
   queue: CommandRunner,
-  { path, scope = "user", chunkBytes = 256 }: ReadOptions,
+  { path, scope = "user", chunkBytes = READ_CHUNK_BYTES }: ReadOptions,
 ): Promise<Uint8Array> {
   const begin = await queue({ command: "file_read_begin", scope, path });
   ensureReadOk(begin.result);

@@ -7,6 +7,7 @@ import { normalizeDevice, useDevicesPolling } from "../lib/device";
 import { useDeviceCommand } from "../lib/deviceCommand";
 import {
   MAX_USER_PATH,
+  READ_CHUNK_BYTES,
   bytesToHex,
   ensureReadAdvanced,
   ensureReadOk,
@@ -19,6 +20,9 @@ import { storageSnapshotFromResult } from "../lib/storageStatus";
 
 const SCOPES = ["user", "logs", "calibration"] as const;
 type FileScope = typeof SCOPES[number];
+
+// How much of the end of a log the preview shows.
+const LOG_PREVIEW_BYTES = 32768;
 
 function chunkDataText(result: Record<string, unknown> | null | undefined) {
   const chunkResult = result ?? {};
@@ -164,20 +168,40 @@ export function DeviceFilesPage() {
         const begin = await queue({ command: "file_read_begin", scope: file.scope, path: file.path });
         ensureReadOk(begin.result);
         const size = Number(begin.result?.size ?? file.size ?? 0);
-        const length = Math.min(size || 32768, 32768);
-        const offset = Math.max(size - length, 0);
-        const chunk = await queue({
-          command: "file_read_chunk",
-          scope: file.scope,
-          path: file.path,
-          offset,
-          length,
-        });
-        ensureReadOk(chunk.result);
-        const data = chunkDataText(chunk.result);
-        const bytes = /^[0-9a-fA-F]*$/.test(data) ? hexToBytes(data) : new TextEncoder().encode(data);
+        // The newest LOG_PREVIEW_BYTES, read READ_CHUNK_BYTES at a time like
+        // a download rather than in one request the device must buffer whole.
+        const length = Math.min(size || LOG_PREVIEW_BYTES, LOG_PREVIEW_BYTES);
+        let offset = Math.max(size - length, 0);
+        const parts: Uint8Array[] = [];
+        let loaded = 0;
+        while (!cancelled && loaded < length) {
+          const chunk = await queue({
+            command: "file_read_chunk",
+            scope: file.scope,
+            path: file.path,
+            offset,
+            length: READ_CHUNK_BYTES,
+          });
+          ensureReadOk(chunk.result);
+          const data = chunkDataText(chunk.result);
+          const bytes = /^[0-9a-fA-F]*$/.test(data) ? hexToBytes(data) : new TextEncoder().encode(data);
+          parts.push(bytes);
+          loaded += bytes.length;
+          const chunkResult = chunk.result ?? {};
+          const nextOffset = Number(chunkResult.next_offset ?? offset + bytes.length);
+          const hasMore = Boolean(chunkResult.has_more ?? nextOffset < size);
+          if (!bytes.length || !hasMore) break;
+          ensureReadAdvanced(offset, nextOffset, hasMore);
+          offset = nextOffset;
+        }
+        const merged = new Uint8Array(loaded);
+        let cursor = 0;
+        for (const part of parts) {
+          merged.set(part, cursor);
+          cursor += part.length;
+        }
         if (!cancelled) {
-          setPreviewText(new TextDecoder().decode(bytes));
+          setPreviewText(new TextDecoder().decode(merged));
         }
       } catch (error) {
         if (!cancelled) {
@@ -216,7 +240,7 @@ export function DeviceFilesPage() {
         scope: file.scope,
         path: file.path,
         offset,
-        length: 4096,
+        length: READ_CHUNK_BYTES,
       });
       const failure = readFailure(chunk.result);
       if (failure) {

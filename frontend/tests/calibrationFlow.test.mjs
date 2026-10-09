@@ -19,8 +19,6 @@ function status(overrides = {}) {
     session_active: false,
     complete: false,
     tare_complete: false,
-    levels_complete: false,
-    legacy_missing_tare: false,
     tare_enabled: false,
     output_mode: "raw",
     tare: { captured_points: 0, total_points: 16, missing_points: 16, complete: false, source: "saved" },
@@ -94,12 +92,35 @@ test("the flow is not started, then baseline, then pressures", () => {
   assert.equal(getCalibrationStep({ sessionActive: true, draftTareComplete: true, baselineConfirmed: true }), "levels");
 });
 
-test("save needs a baseline and every pressure captured on every sensor", () => {
-  const level = (complete) => ({ level: 10, captured_points: complete ? 16 : 3, total_points: 16, missing_points: complete ? 0 : 13, complete, source: "draft" });
+test("save needs a baseline and a fit for every sensor", () => {
+  const fit = (fitted) => ({
+    cells_total: 16, cells_fitted: fitted, complete: fitted === 16,
+    failures: { no_tare: 0, too_few_points: 16 - fitted, singular: 0 },
+    failed: fitted === 16 ? [] : [{ sensor_index: 3, reason: "too_few_points" }],
+  });
   assert.equal(canSaveCalibration(parseCalibrationState(status({ session_active: true, draft_tare: completeTare }))), false);
-  assert.equal(canSaveCalibration(parseCalibrationState(status({ session_active: true, draft_tare: completeTare, draft_levels: [level(false)] }))), false);
-  assert.equal(canSaveCalibration(parseCalibrationState(status({ session_active: true, draft_tare: completeTare, draft_levels: [level(true)] }))), true);
-  assert.equal(canSaveCalibration(parseCalibrationState(status({ session_active: false, draft_tare: completeTare, draft_levels: [level(true)] }))), false);
+  assert.equal(canSaveCalibration(parseCalibrationState(status({ session_active: true, draft_tare: completeTare, draft_fit: fit(15) }))), false);
+  assert.equal(canSaveCalibration(parseCalibrationState(status({ session_active: true, draft_tare: completeTare, draft_fit: fit(16) }))), true);
+  assert.equal(canSaveCalibration(parseCalibrationState(status({ session_active: false, draft_tare: completeTare, draft_fit: fit(16) }))), false);
+  // Sensors fitted from their own captures need not share levels, so an
+  // incomplete level does not block saving.
+  const partial = { level: 10, reference: 10, captured_points: 3, total_points: 16, missing_points: 13, complete: false, source: "draft" };
+  assert.equal(canSaveCalibration(parseCalibrationState(status({ session_active: true, draft_tare: completeTare, draft_levels: [partial], draft_fit: fit(16) }))), true);
+});
+
+test("fit summaries and settings are parsed", () => {
+  const state = parseCalibrationState(status({
+    fit: { cells_total: 16, cells_fitted: 14, complete: false, failures: { no_tare: 0, too_few_points: 1, singular: 1 },
+      failed: [{ sensor_index: 2, reason: "too_few_points" }, { sensor_index: 9, reason: "singular" }] },
+    fit_settings: { min_level: 3, min_points: 3, readout: [{ adc: 1, c1: 2.6657, c2: -9.447e-5, clip_mv: 3150 }] },
+    levels: [{ level: 10, reference: 10.12, captured_points: 16, total_points: 16, missing_points: 0, complete: true, source: "saved" }],
+  }));
+  assert.equal(state.fit.cells_fitted, 14);
+  assert.equal(state.fit.failures.singular, 1);
+  assert.deepEqual(state.fit.failed.map((item) => item.sensor_index), [2, 9]);
+  assert.equal(state.draft_fit, null);
+  assert.equal(state.fit_settings.readout[0].c2, -9.447e-5);
+  assert.equal(state.levels[0].reference, 10.12);
 });
 
 test("zero is blocked offline and during a calibration only", () => {
@@ -114,4 +135,12 @@ test("error codes map to readable messages", () => {
   assert.equal(calibrationErrorKey("no_response"), "calErrorNoResponse");
   assert.equal(calibrationErrorKey(""), "calErrorNoResponse");
   assert.equal(calibrationErrorKey("something_else"), "calErrorGeneric");
+});
+
+test("relay failures get their own message instead of the raw code", () => {
+  assert.equal(calibrationErrorKey("command_delivery_timeout"), "calErrorReplyTimeout");
+  assert.equal(calibrationErrorKey("result_page_timeout"), "calErrorReplyTimeout");
+  assert.equal(calibrationErrorKey("response_too_large"), "calErrorReplyTooLarge");
+  assert.equal(calibrationErrorKey("result_page_expired"), "calErrorReplyTooLarge");
+  assert.equal(calibrationErrorKey("command_too_large"), "calErrorReplyTooLarge");
 });
