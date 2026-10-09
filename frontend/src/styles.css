@@ -8166,6 +8166,101 @@ button.sdk-diagnostic:hover {
   grid-template-columns: minmax(72px, 1fr) auto auto auto;
 }
 
+/* Manual calibration: the level list doubles as the level picker. */
+.cal-level-row.selectable {
+  border-radius: 8px;
+  transition: background var(--dur-med) var(--ease-out), box-shadow var(--dur-med) var(--ease-out);
+}
+
+.cal-level-row.selectable.active {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.cal-level-select {
+  all: unset;
+  cursor: pointer;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.cal-level-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.cal-level-select:disabled {
+  cursor: default;
+}
+
+.cal-add-level {
+  padding: 8px 14px 4px;
+}
+
+.cal-add-level .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cal-add-level-error {
+  padding: 0 14px;
+  color: var(--danger);
+}
+
+.cal-level-detail {
+  gap: 10px;
+}
+
+.cal-matrix-wrap {
+  position: relative;
+}
+
+/* While a level's cells are being read, its old picture must not pass for
+   the current one. */
+.cal-matrix-wrap.loading .cal-matrix {
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+.cal-matrix-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.cal-matrix-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.cal-matrix-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cal-legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel-soft);
+}
+
+.cal-legend-swatch.captured {
+  border-color: rgba(31, 107, 84, 0.25);
+  background: var(--accent-soft);
+}
+
 .cal-level-row strong {
   font-weight: 600;
   font-variant-numeric: tabular-nums;

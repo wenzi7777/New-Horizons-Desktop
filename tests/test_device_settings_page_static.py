@@ -463,6 +463,26 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn("calibrationSelectPin", source)
         self.assertIn("appHref(`device/${encodeURIComponent(deviceUid)}/files`)", source)
 
+    def test_manual_calibration_adds_and_selects_levels_with_honest_matrices(self):
+        workbench = (ROOT / "frontend" / "src" / "components" / "calibration" / "CalibrationWorkbench.tsx").read_text(encoding="utf-8")
+
+        # A level is created with its own button, not by typing a pressure
+        # and capturing.
+        self.assertIn('t("calAddLevel")', workbench)
+        self.assertIn("function addLevel()", workbench)
+        self.assertIn("setAddedLevels((current) => [...current, level]);", workbench)
+        # Captures go to the selected level.
+        self.assertIn('{ command: "calibration_capture_all", level: row.level, duration_ms: durationMs }', workbench)
+        self.assertIn('{ command: "calibration_capture_cell", sensor_index: captured, level: row.level, duration_ms: durationMs }', workbench)
+        self.assertNotIn("pressureKpa", workbench)
+        # Each level keeps its own cells, read from the device when what is
+        # shown would not match the device's count -- and never shown as
+        # another level's picture in the meantime.
+        self.assertIn("Map<number, Map<number, PreviewCell>>", workbench)
+        self.assertIn("capturedCount(cachedSelectedCells) === deviceCapturedAtSelected", workbench)
+        self.assertIn('{ command: "calibration_dump_level", level: row.level }', workbench)
+        self.assertIn("cal-matrix-wrap${selectedCellsKnown ? \"\" : \" loading\"}", workbench)
+
     def test_pressure_calibration_stability_follows_the_paper_script(self):
         # run_sweep.py's settle(): within 0.5 kPa for 5 polls 0.5 s apart, and
         # after 90 s it logs a warning and carries on. No looser windows.

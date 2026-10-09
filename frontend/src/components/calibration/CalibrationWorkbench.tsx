@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Check, ChevronRight, CircleCheck, Download } from "lucide-react";
+import { Check, ChevronRight, CircleCheck, Download, Plus } from "lucide-react";
 
 import { ConfirmModal } from "../ConfirmModal";
 import {
@@ -16,6 +16,7 @@ import {
   type CalibrationOverride,
   type CalibrationState,
   type CalibrationStep,
+  type CalibrationSummary,
 } from "../../lib/calibrationFlow";
 
 export type CalibrationCommandResult = {
@@ -108,6 +109,35 @@ function previewCells(layer: unknown): Map<number, PreviewCell> {
   return cells;
 }
 
+// A reply's payload: under `data` when relayed by a Gateway or Hub, at the
+// top level on the direct TCP path.
+function replyData(result: Record<string, unknown> | null | undefined) {
+  const source = recordValue(result);
+  const data = recordValue(source.data);
+  return Object.keys(data).length > 0 ? data : source;
+}
+
+// The firmware names a level by round(kPa * 1000); so does this page.
+function levelKey(level: number) {
+  return Math.round(level * 1000);
+}
+
+function capturedCount(cells: Map<number, PreviewCell>) {
+  let count = 0;
+  cells.forEach((cell) => {
+    if (cell.value != null) count += 1;
+  });
+  return count;
+}
+
+type LevelRow = {
+  key: number;
+  level: number;
+  // null for a level added here that has no capture yet: the device only
+  // learns a level from its first capture.
+  summary: CalibrationSummary | null;
+};
+
 // Draft layer while a session is open, otherwise the saved one.
 function preferredLayer(source: Record<string, unknown>) {
   const draft = recordValue(source.draft);
@@ -140,11 +170,19 @@ export function CalibrationWorkbench({
   const [lastZeroAt, setLastZeroAt] = useState("");
   const [zeroNeedsFirmware, setZeroNeedsFirmware] = useState(false);
   const [baselineConfirmed, setBaselineConfirmed] = useState(false);
-  const [pressureKpa, setPressureKpa] = useState(10);
   const [durationSeconds, setDurationSeconds] = useState(3);
-  const [singleSensorOpen, setSingleSensorOpen] = useState(false);
+  const [newLevelInput, setNewLevelInput] = useState("");
+  const [addLevelError, setAddLevelError] = useState("");
+  // Levels added with "Add level" that have not been captured yet.
+  const [addedLevels, setAddedLevels] = useState<number[]>([]);
+  const [selectedLevelKey, setSelectedLevelKey] = useState<number | null>(null);
   const [selectedSensor, setSelectedSensor] = useState(0);
-  const [levelCells, setLevelCells] = useState<Map<number, PreviewCell>>(new Map());
+  // Each level's cells as the device last reported them, by levelKey().
+  const [levelCells, setLevelCells] = useState<Map<number, Map<number, PreviewCell>>>(new Map());
+  const [loadingLevelKey, setLoadingLevelKey] = useState<number | null>(null);
+  // "key:captured" pairs whose dump failed, so a failing read is not retried
+  // in a loop; a new capture count tries again.
+  const failedLoadsRef = useRef(new Set<string>());
   const [preview, setPreview] = useState<MatrixPreview | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   // Set when this flow put the device into maintenance, so saving or
@@ -166,8 +204,49 @@ export function CalibrationWorkbench({
     if (!calibration.session_active) {
       setBaselineConfirmed(false);
       setLevelCells(new Map());
+      setAddedLevels([]);
+      setSelectedLevelKey(null);
+      failedLoadsRef.current.clear();
     }
   }, [calibration.session_active]);
+
+  // The draft's levels plus the ones added here and not captured yet.
+  const levelRows = useMemo<LevelRow[]>(() => {
+    const rows = new Map<number, LevelRow>();
+    calibration.draft_levels.forEach((item) => rows.set(levelKey(item.level), { key: levelKey(item.level), level: item.level, summary: item }));
+    addedLevels.forEach((level) => {
+      if (!rows.has(levelKey(level))) rows.set(levelKey(level), { key: levelKey(level), level, summary: null });
+    });
+    return [...rows.values()].sort((a, b) => a.level - b.level);
+  }, [calibration.draft_levels, addedLevels]);
+  const selectedRow = levelRows.find((row) => row.key === selectedLevelKey) ?? null;
+  const deviceCapturedAtSelected = selectedRow?.summary?.captured_points ?? 0;
+  const cachedSelectedCells = selectedRow ? levelCells.get(selectedRow.key) : undefined;
+  // Known when the device has nothing at this level, or when the cells read
+  // back agree with the device's own count; otherwise the matrix waits for a
+  // fresh read rather than showing another level's (or stale) state.
+  const selectedCellsKnown = selectedRow !== null
+    && (deviceCapturedAtSelected === 0 || (cachedSelectedCells !== undefined && capturedCount(cachedSelectedCells) === deviceCapturedAtSelected));
+  const selectedCells = selectedCellsKnown && deviceCapturedAtSelected > 0 ? cachedSelectedCells ?? new Map() : new Map<number, PreviewCell>();
+
+  // Keep a level selected: the first one when none is (or it was deleted).
+  useEffect(() => {
+    if (selectedRow || levelRows.length === 0) {
+      if (levelRows.length === 0 && selectedLevelKey !== null) setSelectedLevelKey(null);
+      return;
+    }
+    setSelectedLevelKey(levelRows[0].key);
+  }, [levelRows, selectedRow, selectedLevelKey]);
+
+  // Read the selected level's cells from the device whenever what is shown
+  // would not match what the device holds.
+  useEffect(() => {
+    if (!selectedRow || selectedCellsKnown || busy || loadingLevelKey !== null || !deviceConnected) return;
+    const attempt = `${selectedRow.key}:${deviceCapturedAtSelected}`;
+    if (failedLoadsRef.current.has(attempt)) return;
+    void loadLevelCells(selectedRow, attempt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRow?.key, deviceCapturedAtSelected, selectedCellsKnown, busy, loadingLevelKey, deviceConnected]);
 
   useEffect(() => {
     if (selectedSensor >= totalSensors) setSelectedSensor(0);
@@ -318,13 +397,69 @@ export function CalibrationWorkbench({
     });
   }
 
+  function rememberLevelCells(key: number, cells: Map<number, PreviewCell>) {
+    setLevelCells((current) => new Map(current).set(key, cells));
+  }
+
+  function firstUncaptured(cells: Map<number, PreviewCell>, from = 0) {
+    for (let offset = 0; offset < totalSensors; offset += 1) {
+      const index = (from + offset) % totalSensors;
+      if (cells.get(index)?.value == null) return index;
+    }
+    return from;
+  }
+
+  async function loadLevelCells(row: LevelRow, attempt: string) {
+    setLoadingLevelKey(row.key);
+    try {
+      const outcome = await command(t("calLoadingLevel"), { command: "calibration_dump_level", level: row.level });
+      if (!outcome.ok) {
+        failedLoadsRef.current.add(attempt);
+        return;
+      }
+      const cells = previewCells(preferredLayer(replyData(outcome.result)));
+      rememberLevelCells(row.key, cells);
+      setSelectedSensor((current) => (cells.get(current)?.value == null ? current : firstUncaptured(cells, current)));
+    } finally {
+      setLoadingLevelKey(null);
+    }
+  }
+
+  function selectLevel(row: LevelRow) {
+    setSelectedLevelKey(row.key);
+    const cells = levelCells.get(row.key);
+    setSelectedSensor(cells ? firstUncaptured(cells) : 0);
+  }
+
+  function addLevel() {
+    setAddLevelError("");
+    const level = Number(newLevelInput);
+    if (!newLevelInput.trim() || !Number.isFinite(level) || level <= 0) {
+      setAddLevelError(t("calLevelInvalid"));
+      return;
+    }
+    const key = levelKey(level);
+    const existing = levelRows.find((row) => row.key === key);
+    if (existing) {
+      setAddLevelError(t("calLevelExists").replace("{level}", formatNumber(existing.level)));
+      selectLevel(existing);
+      return;
+    }
+    setAddedLevels((current) => [...current, level]);
+    setSelectedLevelKey(key);
+    setSelectedSensor(0);
+    setNewLevelInput("");
+  }
+
   function captureAll() {
+    if (!selectedRow) return undefined;
+    const row = selectedRow;
     const durationMs = Math.max(500, Math.round(durationSeconds * 1000));
     return withPending("capture_all", async () => {
       setFlowError("");
       const outcome = await command(
         t("calCaptureAll"),
-        { command: "calibration_capture_all", level: pressureKpa, duration_ms: durationMs },
+        { command: "calibration_capture_all", level: row.level, duration_ms: durationMs },
         durationMs + CAPTURE_TIMEOUT_MARGIN_MS,
       );
       if (!outcome.ok) {
@@ -332,19 +467,21 @@ export function CalibrationWorkbench({
         await refreshAfterFailedCapture(outcome);
         return;
       }
-      setLevelCells(previewCells(preferredLayer(recordValue(outcome.result))));
+      rememberLevelCells(row.key, previewCells(preferredLayer(replyData(outcome.result))));
       await refreshCalibration();
     });
   }
 
   function captureSelectedSensor() {
+    if (!selectedRow) return undefined;
+    const row = selectedRow;
     const durationMs = Math.max(500, Math.round(durationSeconds * 1000));
     const captured = selectedSensor;
     return withPending("capture_one", async () => {
       setFlowError("");
       const outcome = await command(
         t("calSingleSensor"),
-        { command: "calibration_capture_cell", sensor_index: captured, level: pressureKpa, duration_ms: durationMs },
+        { command: "calibration_capture_cell", sensor_index: captured, level: row.level, duration_ms: durationMs },
         durationMs + CAPTURE_TIMEOUT_MARGIN_MS,
       );
       if (!outcome.ok) {
@@ -352,24 +489,35 @@ export function CalibrationWorkbench({
         await refreshAfterFailedCapture(outcome);
         return;
       }
-      const cells = previewCells(preferredLayer(recordValue(outcome.result)));
-      setLevelCells(cells);
-      for (let offset = 1; offset < totalSensors; offset += 1) {
-        const next = (captured + offset) % totalSensors;
-        if (cells.get(next)?.value == null) {
-          setSelectedSensor(next);
-          break;
-        }
-      }
+      const cells = previewCells(preferredLayer(replyData(outcome.result)));
+      rememberLevelCells(row.key, cells);
+      setSelectedSensor(firstUncaptured(cells, captured + 1));
       await refreshCalibration();
     });
   }
 
-  function deleteDraftLevel(level: number) {
+  function deleteDraftLevel(row: LevelRow) {
+    const forget = () => {
+      setAddedLevels((current) => current.filter((level) => levelKey(level) !== row.key));
+      setLevelCells((current) => {
+        const next = new Map(current);
+        next.delete(row.key);
+        return next;
+      });
+      if (selectedLevelKey === row.key) setSelectedLevelKey(null);
+    };
+    if (!row.summary) {
+      forget();
+      return undefined;
+    }
     return withPending("delete_level", async () => {
       setFlowError("");
-      const outcome = await command(t("deleteCalibrationLevel"), { command: "calibration_delete_level", level });
-      if (!outcome.ok) setFlowError(errorText(outcome.code));
+      const outcome = await command(t("deleteCalibrationLevel"), { command: "calibration_delete_level", level: row.level });
+      if (!outcome.ok) {
+        setFlowError(errorText(outcome.code));
+        return;
+      }
+      forget();
     });
   }
 
@@ -420,7 +568,7 @@ export function CalibrationWorkbench({
         setAdvancedError(errorText(outcome.code));
         return;
       }
-      setPreview({ title, cells: previewCells(preferredLayer(recordValue(outcome.result))) });
+      setPreview({ title, cells: previewCells(preferredLayer(replyData(outcome.result))) });
     });
   }
 
@@ -444,7 +592,7 @@ export function CalibrationWorkbench({
           setAdvancedError(errorText(outcome.code));
           return;
         }
-        dumps[key] = recordValue(outcome.result).data ?? outcome.result;
+        dumps[key] = replyData(outcome.result);
       }
       const file = {
         exported_at: new Date().toISOString(),
@@ -583,54 +731,41 @@ export function CalibrationWorkbench({
         {step === "levels" ? (
           <div className="cal-step-panel" key="levels">
             <p>{t("calLevelsCopy")}</p>
-            <div className="cal-capture-row">
-              <label className="field cal-field">
-                <span>{t("calPressureKpa")}</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  step="any"
-                  value={pressureKpa}
-                  onChange={(event) => setPressureKpa(Math.max(0, Number(event.target.value) || 0))}
-                />
-              </label>
-              <label className="field cal-field cal-field-narrow">
-                <span>{t("calDurationSeconds")}</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0.5}
-                  step={0.5}
-                  value={durationSeconds}
-                  onChange={(event) => setDurationSeconds(Math.max(0.5, Number(event.target.value) || 3))}
-                />
-              </label>
-              <button className="button primary" type="button" disabled={busy || !deviceConnected || pressureKpa <= 0} onClick={() => void captureAll()}>
-                {pending === "capture_all" ? t("calCapturing") : t("calCaptureAll")}
-              </button>
-            </div>
-            {pending === "capture_all" || pending === "capture_one" ? <CaptureProgress durationMs={durationSeconds * 1000} /> : null}
 
             <div className="app-group cal-level-group">
               <div className="app-group-header">
-                <h4>{t("calCapturedPressures")}</h4>
+                <h4>{t("calLevelsTitle")}</h4>
                 <span>{t("calSensorCount").replace("{count}", String(totalSensors))}</span>
               </div>
-              {calibration.draft_levels.length > 0 ? (
+              {levelRows.length > 0 ? (
                 <ul className="app-group-list">
-                  {calibration.draft_levels.map((item) => {
-                    const pct = item.total_points > 0 ? Math.round((item.captured_points / item.total_points) * 100) : 0;
+                  {levelRows.map((row) => {
+                    const captured = row.summary?.captured_points ?? 0;
+                    const total = row.summary?.total_points || totalSensors;
+                    const pct = total > 0 ? Math.round((captured / total) * 100) : 0;
+                    const active = row.key === selectedRow?.key;
                     return (
-                      <li key={item.level} className="cal-level-row">
-                        <strong>{levelLabel(t, item.level, item.reference)}</strong>
+                      <li key={row.key} className={`cal-level-row selectable${active ? " active" : ""}`}>
+                        <button
+                          className="cal-level-select"
+                          type="button"
+                          aria-pressed={active}
+                          disabled={busy}
+                          onClick={() => selectLevel(row)}
+                        >
+                          <strong>{row.summary ? levelLabel(t, row.level, row.summary.reference) : `${formatNumber(row.level)} kPa`}</strong>
+                        </button>
                         <div className="app-budget-track" aria-hidden="true">
-                          <div className={`app-budget-fill${item.complete ? "" : " partial"}`} style={{ width: `${pct}%` }} />
+                          <div className={`app-budget-fill${row.summary?.complete ? "" : " partial"}`} style={{ width: `${pct}%` }} />
                         </div>
                         <span className="cal-level-count">
-                          {item.complete ? <Check size={14} strokeWidth={2.4} aria-label={t("profileComplete")} /> : `${item.captured_points}/${item.total_points}`}
+                          {captured === 0
+                            ? t("calLevelNotCaptured")
+                            : row.summary?.complete
+                              ? <Check size={14} strokeWidth={2.4} aria-label={t("profileComplete")} />
+                              : `${captured}/${total}`}
                         </span>
-                        <button className="button ghost compact app-destructive" type="button" disabled={busy} onClick={() => void deleteDraftLevel(item.level)}>
+                        <button className="button ghost compact app-destructive" type="button" disabled={busy} onClick={() => void deleteDraftLevel(row)}>
                           {t("delete")}
                         </button>
                       </li>
@@ -640,30 +775,93 @@ export function CalibrationWorkbench({
               ) : (
                 <p className="cal-empty">{t("calNoLevelsYet")}</p>
               )}
+              <div className="cal-capture-row cal-add-level">
+                <label className="field cal-field">
+                  <span>{t("calNewLevelKpa")}</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="any"
+                    value={newLevelInput}
+                    placeholder="10"
+                    onChange={(event) => {
+                      setNewLevelInput(event.target.value);
+                      setAddLevelError("");
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") addLevel();
+                    }}
+                  />
+                </label>
+                <button className="button" type="button" disabled={busy} onClick={addLevel}>
+                  <Plus size={14} strokeWidth={2.2} aria-hidden="true" />
+                  {t("calAddLevel")}
+                </button>
+              </div>
+              {addLevelError ? <p className="cal-hint cal-add-level-error">{addLevelError}</p> : null}
               <FitProgress t={t} fit={calibration.draft_fit} settings={calibration.fit_settings} />
             </div>
 
-            <details className="cal-disclosure" open={singleSensorOpen} onToggle={(event) => setSingleSensorOpen(event.currentTarget.open)}>
-              <summary>
-                <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
-                {t("calSingleSensor")}
-              </summary>
-              <div className="cal-disclosure-body">
+            {selectedRow ? (
+              <div className="app-group cal-level-detail" key={selectedRow.key}>
+                <div className="app-group-header">
+                  <h4>{t("calLevelDetailTitle").replace("{level}", formatNumber(selectedRow.level))}</h4>
+                  <span>
+                    {selectedCellsKnown
+                      ? t("calLevelCapturedCount")
+                        .replace("{captured}", String(deviceCapturedAtSelected))
+                        .replace("{total}", String(totalSensors))
+                      : t("calLoadingLevel")}
+                  </span>
+                </div>
                 <p className="cal-hint">{t("calSingleSensorCopy")}</p>
-                <SensorMatrix
-                  rows={rows}
-                  cols={cols}
-                  cells={levelCells}
-                  selected={selectedSensor}
-                  onSelect={setSelectedSensor}
-                />
-                <div className="actions compact">
-                  <button className="button" type="button" disabled={busy || !deviceConnected || pressureKpa <= 0} onClick={() => void captureSelectedSensor()}>
+                <div className={`cal-matrix-wrap${selectedCellsKnown ? "" : " loading"}`} aria-busy={!selectedCellsKnown}>
+                  <SensorMatrix
+                    rows={rows}
+                    cols={cols}
+                    cells={selectedCells}
+                    selected={selectedSensor}
+                    onSelect={setSelectedSensor}
+                  />
+                  {!selectedCellsKnown ? <div className="cal-matrix-loading">{t("calLoadingLevel")}</div> : null}
+                </div>
+                <div className="cal-matrix-legend" aria-hidden="true">
+                  <span><i className="cal-legend-swatch captured" />{t("calLegendCaptured")}</span>
+                  <span><i className="cal-legend-swatch" />{t("calLegendMissing")}</span>
+                </div>
+                <div className="cal-capture-row">
+                  <label className="field cal-field cal-field-narrow">
+                    <span>{t("calDurationSeconds")}</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min={0.5}
+                      step={0.5}
+                      value={durationSeconds}
+                      onChange={(event) => setDurationSeconds(Math.max(0.5, Number(event.target.value) || 3))}
+                    />
+                  </label>
+                  <button
+                    className="button primary"
+                    type="button"
+                    disabled={busy || !deviceConnected || !selectedCellsKnown}
+                    onClick={() => void captureSelectedSensor()}
+                  >
                     {pending === "capture_one" ? t("calCapturing") : t("calCaptureOne").replace("{sensor}", `P${selectedSensor}`)}
                   </button>
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={busy || !deviceConnected || !selectedCellsKnown}
+                    onClick={() => void captureAll()}
+                  >
+                    {pending === "capture_all" ? t("calCapturing") : t("calCaptureAll")}
+                  </button>
                 </div>
+                {pending === "capture_all" || pending === "capture_one" ? <CaptureProgress durationMs={durationSeconds * 1000} /> : null}
               </div>
-            </details>
+            ) : null}
           </div>
         ) : null}
 
