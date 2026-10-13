@@ -58,12 +58,14 @@ def normalize_legacy_profile(data: dict[str, Any], *, profile_stem: str) -> dict
     normalized_sensors: list[dict[str, Any]] = []
     for index, raw_sensor in enumerate(sensors):
         sensor = raw_sensor if isinstance(raw_sensor, dict) else {}
+        sensor_index = max(0, int(_number_or(sensor.get("index"), index)))
         normalized_sensors.append(
             {
-                "index": max(0, int(_number_or(sensor.get("index"), index))),
+                "index": sensor_index,
                 "x": round(_clamp(_number_or(sensor.get("x"), 0.5), 0.0, 1.0), 6),
                 "y": round(_clamp(_number_or(sensor.get("y"), 0.5), 0.0, 1.0), 6),
-                "label": str(sensor.get("label") or f"P{index}"),
+                # 1-based, like the CSV export's P1..Pn columns.
+                "label": str(sensor.get("label") or f"P{sensor_index + 1}"),
                 "enabled": sensor.get("enabled", True) is not False,
             }
         )

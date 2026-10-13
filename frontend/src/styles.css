@@ -2746,6 +2746,18 @@ button:disabled {
   transform: translate(-50%, -50%);
 }
 
+.profile-dot {
+  align-content: center;
+  gap: 0;
+  line-height: 1;
+}
+
+.profile-dot-label {
+  font-size: 8px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
 .add-device-modal {
   width: min(1040px, 100%);
 }
@@ -8183,6 +8195,18 @@ button.sdk-diagnostic:hover {
 .cal-level-row.selectable {
   border-radius: 8px;
   transition: background var(--dur-med) var(--ease-out), box-shadow var(--dur-med) var(--ease-out);
+}
+
+.cal-level-row.selectable {
+  cursor: pointer;
+}
+
+.cal-level-row.selectable.busy {
+  cursor: default;
+}
+
+.cal-level-row.selectable:not(.active):not(.busy):not(.excluded):hover {
+  background: var(--panel-soft);
 }
 
 .cal-level-row.selectable.active {

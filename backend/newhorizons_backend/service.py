@@ -191,7 +191,21 @@ class NewHorizonsService:
     # publish_gateway_command()) rather than a downstream device_uid. Small
     # and flat on purpose -- unlike device commands, Hubs have no "mode"
     # concept to gate against.
-    HUB_COMMANDS = {"set_config", "factory_reset", "clock_sync"}
+    HUB_COMMANDS = {"set_config", "factory_reset", "clock_sync", "check_update", "apply_update"}
+
+    # Failures a relay (Hub or Gateway) reports on a device's behalf when the
+    # device never answered. They arrive as ordinary "result"s, but they are
+    # not evidence the device is alive -- counting them as such kept a
+    # powered-off Hub device "online" for as long as any page kept polling it.
+    RELAY_FAILURE_CODES = {
+        "command_delivery_timeout",
+        "result_page_timeout",
+        "device_not_connected_to_hub",
+        "device_command_already_in_flight",
+        "hub_command_roster_full",
+        "command_too_large",
+        "gateway_send_failed",
+    }
 
     # Device commands the backend issues on its own behalf (hub migration, WiFi
     # provisioning). They are deliberately absent from the terminal allowlist --
@@ -1344,6 +1358,8 @@ class NewHorizonsService:
                 "paired_devices": payload.get("paired_devices", existing.get("paired_devices", [])),
                 # Hub only: its wall clock, which it serves to paired devices.
                 "clock": payload.get("clock", existing.get("clock")),
+                # Hub only: its firmware update state (OtaManager status).
+                "update": payload.get("update", existing.get("update")),
             })
             self._gateways[gateway_id] = existing
             event_item = dict(existing)
@@ -1423,6 +1439,7 @@ class NewHorizonsService:
                 "last_error": payload.get("last_error", ""),
                 "paired_devices": payload.get("paired_devices", []),
                 "clock": payload.get("clock"),
+                "update": payload.get("update"),
             },
         )
         for event_item in device_events:
@@ -2868,6 +2885,19 @@ class NewHorizonsService:
                 + [self._csv_time_ref(payload)]
             )
 
+    @classmethod
+    def _payload_is_live(cls, payload: dict[str, Any], kind: str) -> bool:
+        """Whether this payload proves the device itself just answered."""
+        if "live_seen" in payload:
+            return bool(payload.get("live_seen"))
+        if kind not in ("status", "result", "parsed"):
+            return False
+        if kind == "result":
+            codes = {str(payload.get(key) or "") for key in ("message", "error")}
+            if codes & cls.RELAY_FAILURE_CODES:
+                return False
+        return True
+
     def _normalize_device_entry(self, device_uid: str, payload: dict[str, Any], kind: str) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         received_at = str(payload.get("received_at") or now)
@@ -2911,7 +2941,7 @@ class NewHorizonsService:
             "system_summary": system_summary,
             "scan_stopped": payload.get("scan_stopped"),
             "last_seen_at": received_at,
-            "last_live_seen_at": received_at if payload.get("live_seen", kind in ("status", "result", "parsed")) else None,
+            "last_live_seen_at": received_at if self._payload_is_live(payload, kind) else None,
             "last_kind": kind,
             "last_status": self._latest_status.get(device_uid),
             "last_result": self._latest_result.get(device_uid),

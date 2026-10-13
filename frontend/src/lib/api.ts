@@ -124,6 +124,8 @@ export type GatewayEntry = {
   // Hub only: its wall clock (HubClock.statusJson), which paired ESP-NOW
   // devices take their time from.
   clock?: Record<string, unknown> | null;
+  // Hub only (v0.8.0+): its firmware update state (OtaManager status).
+  update?: Record<string, unknown> | null;
   // "hub" (New Horizons Hub) or "gateway" (New Horizons Gateway software) --
   // absent/unknown gateway_ids default to "gateway" server-side.
   client_type?: "hub" | "gateway" | string;

@@ -7,6 +7,7 @@ import { DeviceSettingsPage } from "./pages/DeviceSettingsPage";
 import { DeviceWikiPage } from "./pages/DeviceWikiPage";
 import { FilesPage } from "./pages/FilesPage";
 import { GatewaysPage } from "./pages/GatewaysPage";
+import { HubSettingsPage } from "./pages/HubSettingsPage";
 import { LaunchpadPage } from "./pages/LaunchpadPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AppStorePage } from "./pages/AppStorePage";
@@ -224,6 +225,14 @@ function AuthenticatedApp() {
             element={
               <RequireRole roles={["admin"]}>
                 <GatewaysPage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/gateways/hub/:gatewayId"
+            element={
+              <RequireRole roles={["admin"]}>
+                <HubSettingsPage />
               </RequireRole>
             }
           />

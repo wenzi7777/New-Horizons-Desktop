@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { useI18n } from "../i18n";
-import { api, type GatewayClaimEntry, type GatewayEntry, type HubEnvironmentEntry, type HubLanDeviceEntry } from "../lib/api";
-import { requestGatewaySnapshot, sendGatewayCommand, useWsState } from "../lib/wsClient";
+import { api, type GatewayClaimEntry, type GatewayEntry, type HubEnvironmentEntry } from "../lib/api";
+import { requestGatewaySnapshot, useWsState } from "../lib/wsClient";
 
 const GATEWAY_REPO_URL = "https://github.com/wenzi7777/New-Horizons-Gateway";
 const GATEWAY_ZIP_URL = "https://github.com/wenzi7777/New-Horizons-Gateway/archive/refs/heads/main.zip";
@@ -140,7 +141,15 @@ function GatewayCard({
   );
 }
 
-function HubCard({ hub, onManage }: { hub: GatewayEntry; onManage: (hub: GatewayEntry) => void }) {
+function HubCard({
+  hub,
+  deleting,
+  onDelete,
+}: {
+  hub: GatewayEntry;
+  deleting: boolean;
+  onDelete: (hub: GatewayEntry) => void;
+}) {
   const { t } = useI18n();
   const status = gatewayStatus(hub);
   const servingDevices = hub.serving_devices ?? [];
@@ -154,8 +163,11 @@ function HubCard({ hub, onManage }: { hub: GatewayEntry; onManage: (hub: Gateway
         </div>
         <div className="gateway-card-actions">
           <span className={`status-pill ${status === "online" ? "live" : "offline"}`}>{status}</span>
-          <button className="button" type="button" onClick={() => onManage(hub)}>
+          <Link className="button" to={`/gateways/hub/${encodeURIComponent(hub.gateway_id)}`}>
             {t("hubManage")}
+          </Link>
+          <button className="button danger" type="button" onClick={() => onDelete(hub)} disabled={deleting}>
+            {t("deleteGateway")}
           </button>
         </div>
       </div>
@@ -201,264 +213,15 @@ function HubCard({ hub, onManage }: { hub: GatewayEntry; onManage: (hub: Gateway
   );
 }
 
-function hubClockAge(ms: unknown): string {
-  if (typeof ms !== "number" || !Number.isFinite(ms)) return "-";
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds} s`;
-  const minutes = Math.floor(seconds / 60);
-  return minutes < 60 ? `${minutes} m` : `${Math.floor(minutes / 60)} h ${minutes % 60} m`;
-}
-
-// Shown only once the Hub reports a clock (Hub firmware v0.7.0+).
-function HubClockSection({
-  clock,
-  busy,
-  onSync,
+function HubsSection({
+  hubs,
+  deletingId,
+  onDelete,
 }: {
-  clock: Record<string, unknown> | null | undefined;
-  busy: boolean;
-  onSync: () => void;
+  hubs: GatewayEntry[];
+  deletingId: string;
+  onDelete: (hub: GatewayEntry) => void;
 }) {
-  const { t } = useI18n();
-  if (!clock || typeof clock !== "object") return null;
-  const synced = clock.synced === true;
-  const source = String(clock.source ?? "none");
-  const uncertainty = typeof clock.uncertainty_ms === "number" ? clock.uncertainty_ms : null;
-  return (
-    <div className="gateway-section">
-      <h4>{t("hubClockTitle")}</h4>
-      <p className="service-muted">{t("hubClockCopy")}</p>
-      <div className="gateway-facts">
-        <div>
-          <span>{t("clockSource")}</span>
-          <strong>{t(`clockSource_${source}`)}</strong>
-        </div>
-        <div>
-          <span>{t("clockSyncAge")}</span>
-          <strong>{synced ? hubClockAge(clock.age_ms) : "-"}</strong>
-        </div>
-        <div>
-          <span>{t("clockUncertainty")}</span>
-          <strong>{synced && uncertainty !== null ? `±${uncertainty.toLocaleString()} ms` : "-"}</strong>
-        </div>
-      </div>
-      <button className="button" type="button" disabled={busy} onClick={onSync}>
-        {busy ? t("clockSyncing") : t("clockSyncNow")}
-      </button>
-    </div>
-  );
-}
-
-function HubManageModal({ hub, onClose, onSaved }: { hub: GatewayEntry; onClose: () => void; onSaved: () => void }) {
-  const { t } = useI18n();
-  const [busyCommand, setBusyCommand] = useState("");
-  const [notice, setNotice] = useState("");
-  const [noticeClass, setNoticeClass] = useState<"" | "success" | "error">("");
-  const [gatewayId, setGatewayId] = useState(hub.gateway_id);
-  const [targetMode, setTargetMode] = useState(hub.target_mode || "production");
-  const [manualUrl, setManualUrl] = useState(hub.server_url || "");
-  const [authToken, setAuthToken] = useState("");
-  const [lanDevices, setLanDevices] = useState<HubLanDeviceEntry[]>([]);
-  const [lanScanned, setLanScanned] = useState(false);
-  const pairedDevices = hub.paired_devices ?? [];
-
-  async function runGatewayCommand(command: string, payload: Record<string, unknown>) {
-    setBusyCommand(command);
-    setNotice("");
-    setNoticeClass("");
-    try {
-      const { result } = await sendGatewayCommand(hub.gateway_id, { command, ...payload });
-      const ok = result === null || result.ok !== false;
-      setNotice(String(result?.message ?? (ok ? t("hubCommandQueued") : t("hubCommandFailed"))));
-      setNoticeClass(ok ? "success" : "error");
-      return { ok, result };
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      setNotice(detail);
-      setNoticeClass("error");
-      return { ok: false, result: null };
-    } finally {
-      setBusyCommand("");
-    }
-  }
-
-  async function handleSaveSettings(event: FormEvent) {
-    event.preventDefault();
-    await runGatewayCommand("set_config", {
-      gateway_id: gatewayId,
-      target_mode: targetMode,
-      manual_url: manualUrl,
-      auth_token: authToken,
-    });
-    onSaved();
-  }
-
-  async function handleFactoryReset() {
-    if (!window.confirm(t("hubFactoryResetConfirm"))) return;
-    await runGatewayCommand("factory_reset", {});
-    onSaved();
-  }
-
-  async function handleLanScan() {
-    setBusyCommand("scan_lan_devices");
-    setNotice("");
-    setNoticeClass("");
-    try {
-      const { items } = await api.listHubLanDevices(hub.gateway_id);
-      setLanDevices(items);
-      setLanScanned(true);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      setNotice(detail);
-      setNoticeClass("error");
-    } finally {
-      setBusyCommand("");
-    }
-  }
-
-  async function handleMigrate(deviceUid: string) {
-    setBusyCommand(`migrate:${deviceUid}`);
-    setNotice("");
-    setNoticeClass("");
-    try {
-      await api.migrateDeviceToHub(hub.gateway_id, deviceUid);
-      setNotice(`${t("hubMigrateQueued")} ${deviceUid}`);
-      setNoticeClass("success");
-      setLanDevices((current) => current.filter((item) => item.device_uid !== deviceUid));
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      setNotice(detail);
-      setNoticeClass("error");
-    } finally {
-      setBusyCommand("");
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="modal-panel hub-manage-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <h3>{hub.gateway_name || hub.gateway_id}</h3>
-            <p>{hub.gateway_id}</p>
-          </div>
-          <button className="button" type="button" onClick={onClose}>
-            {t("cancel")}
-          </button>
-        </div>
-
-        {notice ? <p className={`notice ${noticeClass}`.trim()}>{notice}</p> : null}
-
-        <div className="gateway-facts">
-          <div>
-            <span>{t("gatewaysConnected")}</span>
-            <strong>{gatewayStatus(hub) === "online" ? t("hubOnline") : t("hubOffline")}</strong>
-          </div>
-          <div>
-            <span>{t("gatewayVersion")}</span>
-            <strong>{hub.version || "-"}</strong>
-          </div>
-          <div>
-            <span>{t("hubMac")}</span>
-            <strong className="mono">{hub.mac || "-"}</strong>
-          </div>
-          <div>
-            <span>{t("gatewayChannel")}</span>
-            <strong>{hub.channel || "-"}</strong>
-          </div>
-          <div>
-            <span>IP</span>
-            <strong className="mono">{hub.ip || "-"}</strong>
-          </div>
-        </div>
-
-        <HubClockSection
-          clock={hub.clock}
-          busy={busyCommand === "clock_sync"}
-          onSync={() => void runGatewayCommand("clock_sync", {})}
-        />
-
-        <form className="gateway-section" onSubmit={(event) => void handleSaveSettings(event)}>
-          <h4>{t("hubSettingsTitle")}</h4>
-          <div className="field-grid">
-            <div className="field">
-              <label htmlFor="hub-gateway-id">{t("hubGatewayId")}</label>
-              <input id="hub-gateway-id" value={gatewayId} onChange={(event) => setGatewayId(event.target.value)} required />
-            </div>
-            <div className="field">
-              <label htmlFor="hub-target-mode">{t("gatewayTarget")}</label>
-              <select id="hub-target-mode" value={targetMode} onChange={(event) => setTargetMode(event.target.value)}>
-                <option value="production">Production</option>
-                <option value="local">Local</option>
-                <option value="manual">Manual</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="hub-manual-url">{t("hubManualUrl")}</label>
-              <input id="hub-manual-url" value={manualUrl} onChange={(event) => setManualUrl(event.target.value)} />
-            </div>
-            <div className="field">
-              <label htmlFor="hub-auth-token">{t("hubAuthToken")}</label>
-              <input id="hub-auth-token" value={authToken} onChange={(event) => setAuthToken(event.target.value)} placeholder="········" />
-            </div>
-          </div>
-          <button className="button primary" type="submit" disabled={busyCommand === "set_config"}>
-            {busyCommand === "set_config" ? t("running") : t("hubSaveAndReboot")}
-          </button>
-        </form>
-
-        <div className="gateway-section">
-          <h4>{t("hubPairedDevices")}</h4>
-          {pairedDevices.length ? (
-            <ul className="gateway-claim-list">
-              {pairedDevices.map((device) => (
-                <li key={device.mac}>
-                  <span>{device.device_uid || t("hubDeviceUidUnknown")}</span>
-                  <small>{device.mac} · {device.status}</small>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="empty">{t("hubNoPairedDevices")}</p>
-          )}
-        </div>
-
-        <div className="gateway-section">
-          <h4>{t("hubLanDevices")}</h4>
-          <button className="button" type="button" onClick={() => void handleLanScan()} disabled={busyCommand === "scan_lan_devices"}>
-            {busyCommand === "scan_lan_devices" ? t("running") : t("hubLanScan")}
-          </button>
-          {lanScanned && !lanDevices.length ? <p className="empty">{t("hubLanNoDevices")}</p> : null}
-          {lanDevices.length ? (
-            <ul className="gateway-claim-list">
-              {lanDevices.map((device) => (
-                <li key={device.device_uid}>
-                  <span>{device.device_name || device.device_uid}</span>
-                  <button
-                    className="button tiny"
-                    type="button"
-                    disabled={busyCommand === `migrate:${device.device_uid}`}
-                    onClick={() => void handleMigrate(device.device_uid)}
-                  >
-                    {busyCommand === `migrate:${device.device_uid}` ? t("running") : t("hubMigrateToHub")}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-
-        <div className="gateway-section">
-          <button className="button danger" type="button" onClick={() => void handleFactoryReset()} disabled={busyCommand === "factory_reset"}>
-            {busyCommand === "factory_reset" ? t("running") : t("hubFactoryReset")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function HubsSection({ hubs, onManage }: { hubs: GatewayEntry[]; onManage: (hub: GatewayEntry) => void }) {
   const { t } = useI18n();
   const [environments, setEnvironments] = useState<HubEnvironmentEntry[]>([]);
 
@@ -509,7 +272,7 @@ function HubsSection({ hubs, onManage }: { hubs: GatewayEntry[]; onManage: (hub:
               </div>
               <div className="gateway-grid">
                 {groupHubs.map((hub) => (
-                  <HubCard key={hub.gateway_id} hub={hub} onManage={onManage} />
+                  <HubCard key={hub.gateway_id} hub={hub} deleting={deletingId === hub.gateway_id} onDelete={onDelete} />
                 ))}
               </div>
             </div>
@@ -533,8 +296,6 @@ export function GatewaysPage() {
   const [notice, setNotice] = useState("");
   const [noticeClass, setNoticeClass] = useState<"" | "success" | "error">("");
   const [deletingGatewayId, setDeletingGatewayId] = useState("");
-  const [manageHubId, setManageHubId] = useState("");
-  const managedHub = manageHubId ? hubs.find((hub) => hub.gateway_id === manageHubId) ?? null : null;
 
   useEffect(() => {
     requestGatewaySnapshot();
@@ -640,15 +401,7 @@ export function GatewaysPage() {
         )}
       </section>
 
-      <HubsSection hubs={hubs} onManage={(hub) => setManageHubId(hub.gateway_id)} />
-
-      {managedHub ? (
-        <HubManageModal
-          hub={managedHub}
-          onClose={() => setManageHubId("")}
-          onSaved={requestGatewaySnapshot}
-        />
-      ) : null}
+      <HubsSection hubs={hubs} deletingId={deletingGatewayId} onDelete={handleDelete} />
     </>
   );
 }

@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { api, type DeviceEntry, type ProfileListEntry, type VisualizationEntry } from "../lib/api";
+import { streamSensorLabel } from "../lib/sensorLabel";
 import { DeviceBatteryChip } from "../components/DeviceBatteryChip";
 import { deviceBatteryReadout } from "../lib/batteryProfile";
 import { boardProfileForHardwareModel, displayHardwareModel } from "../lib/boardProfile";
@@ -75,6 +76,9 @@ type MatrixView = {
   cols: number;
   values: number[][];
   rawValues: number[][] | null;
+  // The stream index shown in each grid cell, after any mirroring -- what
+  // its P label (lib/sensorLabel.ts) is made from.
+  indices: number[][];
   points: DisplayPoint[];
   usesProfileSensors: boolean;
 };
@@ -459,7 +463,7 @@ function buildMatrixView(
         value: asFiniteNumber(source[index], 0),
         xRatio: colMirror ? 1 - x : x,
         yRatio: rowMirror ? 1 - y : y,
-        label: String(sensor.label ?? `P${index}`),
+        label: String(sensor.label ?? streamSensorLabel(index)),
       };
     })
     .filter((sensor): sensor is DisplayPoint => Boolean(sensor));
@@ -470,19 +474,20 @@ function buildMatrixView(
       cols,
       values: [],
       rawValues: null,
+      indices: [],
       points: enabledSensors,
       usesProfileSensors: true,
     };
   }
 
-  const values = Array.from({ length: rows }, (_, row) =>
+  const indices = Array.from({ length: rows }, (_, row) =>
     Array.from({ length: cols }, (_, col) => {
       const sourceRow = rowMirror ? rows - 1 - row : row;
       const sourceCol = colMirror ? cols - 1 - col : col;
-      const sourceIndex = sourceRow * cols + sourceCol;
-      return asFiniteNumber(source[sourceIndex], 0);
+      return sourceRow * cols + sourceCol;
     }),
   );
+  const values = indices.map((row) => row.map((sourceIndex) => asFiniteNumber(source[sourceIndex], 0)));
 
   const rawSource = item?.raw_adc;
   const rawValues = Array.isArray(rawSource) && rawSource.length === source.length
@@ -498,15 +503,16 @@ function buildMatrixView(
 
   const points = values.flatMap((row, rowIndex) =>
     row.map((value, colIndex) => ({
-      index: rowIndex * cols + colIndex,
+      index: indices[rowIndex][colIndex],
       value,
       xRatio: cols <= 1 ? 0.5 : colIndex / (cols - 1),
       yRatio: rows <= 1 ? 0.5 : rowIndex / (rows - 1),
-      label: `P${rowIndex * cols + colIndex}`,
+      // The sensor actually drawn here: mirroring moves it, not its number.
+      label: streamSensorLabel(indices[rowIndex][colIndex]),
     })),
   );
 
-  return { rows, cols, values, rawValues, points, usesProfileSensors: false };
+  return { rows, cols, values, rawValues, indices, points, usesProfileSensors: false };
 }
 
 function computeCop(points: DisplayPoint[], rows: number, cols: number) {
@@ -640,6 +646,9 @@ function PressureHeatmap2D({
       const cellWidth = Math.max(1, (cssWidth - gap * (currentMatrix.cols + 1)) / Math.max(currentMatrix.cols, 1));
       const cellHeight = Math.max(1, (cssHeight - gap * (currentMatrix.rows + 1)) / Math.max(currentMatrix.rows, 1));
       const showText = cellWidth >= 34 && cellHeight >= 22;
+      // Too small to read means too small to draw: no labels on dense grids.
+      const showLabels = cellWidth >= 24 && cellHeight >= 16;
+      const labelFont = `600 ${Math.max(8, Math.min(10, cellWidth * 0.2))}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.font = `${Math.max(9, Math.min(12, cellWidth * 0.28))}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
@@ -654,6 +663,19 @@ function PressureHeatmap2D({
           context.beginPath();
           context.roundRect(x, y, cellWidth, cellHeight, Math.min(6, cellWidth * 0.18, cellHeight * 0.18));
           context.fill();
+          if (showLabels) {
+            // The sensor's P number (same as the CSV column), in the corner.
+            const index = currentMatrix.indices[row]?.[col];
+            if (index !== undefined) {
+              context.save();
+              context.textAlign = "left";
+              context.textBaseline = "top";
+              context.font = labelFont;
+              context.fillStyle = "rgba(16, 19, 23, 0.62)";
+              context.fillText(streamSensorLabel(index), x + 3, y + 2);
+              context.restore();
+            }
+          }
           if (showText) {
             context.fillStyle = "#101317";
             if (showRaw) {
@@ -731,6 +753,7 @@ function PressureHeatmap2D({
                 }}
                 title={`${point.label}: ${point.value.toFixed(1)}`}
               >
+                <small className="profile-dot-label">{point.label}</small>
                 <span>{point.value.toFixed(0)}</span>
               </div>
             );

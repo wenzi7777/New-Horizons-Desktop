@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerE
 
 import { useI18n } from "../i18n";
 import { api, type ProfileListEntry, type VisualizationEntry } from "../lib/api";
+import { streamSensorLabel } from "../lib/sensorLabel";
 import { fitProfileRect } from "../lib/profileLayout";
 import { valueToCsv } from "../lib/valueFormat";
 import { useWsState } from "../lib/wsClient";
@@ -113,7 +114,7 @@ function normalizeProfile(data: Record<string, unknown>): ProfileDraft {
       index: Math.max(0, Math.floor(numberOr(sensor.index, index))),
       x: clamp01(numberOr(sensor.x, 0.5)),
       y: clamp01(numberOr(sensor.y, 0.5)),
-      label: String(sensor.label ?? `P${index}`),
+      label: String(sensor.label ?? streamSensorLabel(Math.max(0, Math.floor(numberOr(sensor.index, index))))),
       enabled: sensor.enabled !== false,
     };
   });
@@ -419,7 +420,7 @@ export function ProfilesPage() {
             index: nextIndex,
             x,
             y,
-            label: `P${nextIndex}`,
+            label: streamSensorLabel(nextIndex),
             enabled: true,
           },
         ],

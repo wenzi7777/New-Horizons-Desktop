@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Check, ChevronRight, CircleCheck, Download, Plus } from "lucide-react";
 
 import { ConfirmModal } from "../ConfirmModal";
@@ -23,6 +23,7 @@ import {
   type CalibrationSummary,
   type SensorFitReport,
 } from "../../lib/calibrationFlow";
+import { calibrationSensorLabel } from "../../lib/sensorLabel";
 
 export type CalibrationCommandResult = {
   queued?: unknown;
@@ -171,6 +172,9 @@ export function CalibrationWorkbench({
   const cols = numberValue(matrixShape.cols, 0);
   const totalSensors = rows * cols;
   const deviceConnected = Boolean(deviceUid) && !isDeviceOffline;
+  // Commands address sensors by the firmware's calibration index; labels
+  // use the CSV/visualization numbering (lib/sensorLabel.ts).
+  const labelOf = useCallback((sensorIndex: number) => calibrationSensorLabel(sensorIndex, rows, cols), [rows, cols]);
 
   const [override, setOverride] = useState<CalibrationOverride | null>(null);
   const calibration = chooseCalibrationState(calibrationStatus, override);
@@ -781,17 +785,28 @@ export function CalibrationWorkbench({
                     const pointStatus = selectedSensorStatuses.get(row.level);
                     const excluded = pointStatus === "saturated" || pointStatus === "no_response";
                     return (
-                      <li key={row.key} className={`cal-level-row selectable${active ? " active" : ""}${excluded ? " excluded" : ""}`}>
+                      <li
+                        key={row.key}
+                        className={`cal-level-row selectable${active ? " active" : ""}${excluded ? " excluded" : ""}${busy ? " busy" : ""}`}
+                        // The whole card picks the level; the inner button
+                        // stays the keyboard/screen-reader target.
+                        onClick={() => {
+                          if (!busy) selectLevel(row);
+                        }}
+                      >
                         <button
                           className="cal-level-select"
                           type="button"
                           aria-pressed={active}
                           disabled={busy}
-                          onClick={() => selectLevel(row)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            selectLevel(row);
+                          }}
                         >
                           <strong>{row.summary ? levelLabel(t, row.level, row.summary.reference) : `${formatNumber(row.level)} kPa`}</strong>
                           {excluded ? (
-                            <small className="cal-level-flag">{pointStatusLabel(t, pointStatus, selectedSensor)}</small>
+                            <small className="cal-level-flag">{pointStatusLabel(t, pointStatus, labelOf(selectedSensor))}</small>
                           ) : null}
                         </button>
                         <div className="app-budget-track" aria-hidden="true">
@@ -804,7 +819,15 @@ export function CalibrationWorkbench({
                               ? <Check size={14} strokeWidth={2.4} aria-label={t("profileComplete")} />
                               : `${captured}/${total}`}
                         </span>
-                        <button className="button ghost compact app-destructive" type="button" disabled={busy} onClick={() => void deleteDraftLevel(row)}>
+                        <button
+                          className="button ghost compact app-destructive"
+                          type="button"
+                          disabled={busy}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void deleteDraftLevel(row);
+                          }}
+                        >
                           {t("delete")}
                         </button>
                       </li>
@@ -839,9 +862,9 @@ export function CalibrationWorkbench({
                 </button>
               </div>
               {addLevelError ? <p className="cal-hint cal-add-level-error">{addLevelError}</p> : null}
-              <FitProgress t={t} fit={calibration.draft_fit} settings={calibration.fit_settings} />
+              <FitProgress t={t} fit={calibration.draft_fit} settings={calibration.fit_settings} labelOf={labelOf} />
               {selectedRow && selectedSensorStatuses.size > 0 ? (
-                <p className="cal-hint">{t("calLevelsForSensor").replace("{sensor}", `P${selectedSensor}`)}</p>
+                <p className="cal-hint">{t("calLevelsForSensor").replace("{sensor}", labelOf(selectedSensor))}</p>
               ) : null}
             </div>
 
@@ -892,7 +915,7 @@ export function CalibrationWorkbench({
                     disabled={busy || !deviceConnected || !selectedCellsKnown}
                     onClick={() => void captureSelectedSensor()}
                   >
-                    {pending === "capture_one" ? t("calCapturing") : t("calCaptureOne").replace("{sensor}", `P${selectedSensor}`)}
+                    {pending === "capture_one" ? t("calCapturing") : t("calCaptureOne").replace("{sensor}", labelOf(selectedSensor))}
                   </button>
                   <button
                     className="button"
@@ -1054,7 +1077,7 @@ export function CalibrationWorkbench({
             )}
           </div>
 
-          <FitProgress t={t} fit={calibration.fit} settings={calibration.fit_settings} saved />
+          <FitProgress t={t} fit={calibration.fit} settings={calibration.fit_settings} labelOf={labelOf} saved />
 
           <FitSettingsEditor
             t={t}
@@ -1215,7 +1238,7 @@ function SensorMatrix({
       const className = `cal-matrix-cell${captured ? " captured" : ""}${unfitted?.has(sensorIndex) ? " unfitted" : ""}${selected === sensorIndex ? " selected" : ""}`;
       const content = (
         <>
-          <strong>P{sensorIndex}</strong>
+          <strong>{calibrationSensorLabel(sensorIndex, rows, cols)}</strong>
           {showValues ? <small>{captured ? formatNumber(cell!.value as number) : "–"}</small> : null}
         </>
       );
@@ -1246,9 +1269,9 @@ function levelLabel(t: (key: string) => string, level: number, reference: number
 
 const MAX_LISTED_REPORTS = 12;
 
-function pointStatusLabel(t: (key: string) => string, status: CalibrationPointStatus | undefined, sensorIndex: number) {
+function pointStatusLabel(t: (key: string) => string, status: CalibrationPointStatus | undefined, sensorLabel: string) {
   const key = status === "saturated" ? "calPointSaturated" : "calPointNoResponse";
-  return t(key).replace("{sensor}", `P${sensorIndex}`);
+  return t(key).replace("{sensor}", sensorLabel);
 }
 
 function levelsText(levels: number[]) {
@@ -1256,7 +1279,12 @@ function levelsText(levels: number[]) {
 }
 
 // One line per unfitted sensor: how many levels count, and why the others do not.
-function sensorReportLine(t: (key: string) => string, report: SensorFitReport, minPoints: number) {
+function sensorReportLine(
+  t: (key: string) => string,
+  report: SensorFitReport,
+  minPoints: number,
+  labelOf: (sensorIndex: number) => string,
+) {
   const reasons: string[] = [];
   if (report.saturated.length > 0) reasons.push(t("calReasonSaturated").replace("{levels}", levelsText(report.saturated)));
   if (report.no_response.length > 0) reasons.push(t("calReasonNoResponse").replace("{levels}", levelsText(report.no_response)));
@@ -1269,7 +1297,7 @@ function sensorReportLine(t: (key: string) => string, report: SensorFitReport, m
     advice = t("calAdviceMoreLevels");
   }
   return t("calSensorReport")
-    .replace("{sensor}", `P${report.sensor_index}`)
+    .replace("{sensor}", labelOf(report.sensor_index))
     .replace("{usable}", String(report.usable))
     .replace("{min}", String(minPoints))
     .replace("{reasons}", reasons.length > 0 ? reasons.join(t("calReasonSeparator")) : t("calReasonTooFewLevels"))
@@ -1280,21 +1308,26 @@ function FitProgress({
   t,
   fit,
   settings,
+  labelOf,
   saved = false,
 }: {
   t: (key: string) => string;
   fit: CalibrationFitSummary | null;
   settings: CalibrationFitSettings | null;
+  labelOf: (sensorIndex: number) => string;
   saved?: boolean;
 }) {
   if (!fit || fit.cells_total === 0) return null;
   const minPoints = settings?.min_points ?? 3;
-  const reports = unfittedSensorReports(fit, minPoints);
-  const saturating = saturatingSensorReports(fit, minPoints);
+  // Listed in the displayed (CSV) order, not the firmware's index order.
+  const byLabel = (a: { sensor_index: number }, b: { sensor_index: number }) =>
+    Number(labelOf(a.sensor_index).slice(1)) - Number(labelOf(b.sensor_index).slice(1));
+  const reports = unfittedSensorReports(fit, minPoints).sort(byLabel);
+  const saturating = saturatingSensorReports(fit, minPoints).sort(byLabel);
   // Firmware before v1.12.0 reports counts only, not per-level reasons.
   const detailed = fit.points.length > 0;
   const needPoints = fit.failures.too_few_points + fit.failures.no_tare;
-  const failedList = fit.failed.map((item) => `P${item.sensor_index}`).join(", ");
+  const failedList = [...fit.failed].sort(byLabel).map((item) => labelOf(item.sensor_index)).join(", ");
   const more = fit.cells_total - fit.cells_fitted - fit.failed.length;
   return (
     <div className="cal-fit-progress" aria-live="polite">
@@ -1309,7 +1342,7 @@ function FitProgress({
           <p className="cal-hint">{t("calFitExcludedTitle").replace("{count}", String(reports.length))}</p>
           <ul className="cal-fit-reports">
             {reports.slice(0, MAX_LISTED_REPORTS).map((report) => (
-              <li key={report.sensor_index}>{sensorReportLine(t, report, minPoints)}</li>
+              <li key={report.sensor_index}>{sensorReportLine(t, report, minPoints, labelOf)}</li>
             ))}
           </ul>
           {reports.length > MAX_LISTED_REPORTS ? (
@@ -1337,7 +1370,7 @@ function FitProgress({
         <p className="cal-hint">
           {t("calFitSaturatingNote").replace(
             "{sensors}",
-            saturating.map((item) => `P${item.sensor_index} (${formatNumber(item.saturates_from ?? 0)} kPa)`).join(", "),
+            saturating.map((item) => `${labelOf(item.sensor_index)} (${formatNumber(item.saturates_from ?? 0)} kPa)`).join(", "),
           )}
         </p>
       ) : null}
