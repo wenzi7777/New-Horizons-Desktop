@@ -109,6 +109,7 @@ class GatewaySocketSession:
             {
                 "type": "gateway_hello_ack",
                 "server_time": datetime.now(timezone.utc).isoformat(),
+                "server_time_ms": int(_time.time() * 1000),
                 "transport_mode": "udp_gateway_wss",
                 "latest_gateway_version": latest_gateway_version(),
             }
@@ -152,13 +153,23 @@ class GatewaySocketSession:
                     "type": "gateway_hello_ack",
                     "gateway_id": self.gateway_id,
                     "server_time": datetime.now(timezone.utc).isoformat(),
+                    "server_time_ms": int(_time.time() * 1000),
                     "transport_mode": "udp_gateway_wss",
                     "latest_gateway_version": latest_gateway_version(),
                 }
             )
             return
         if msg_type == "ping":
-            self._send_json({"type": "pong", "server_time": datetime.now(timezone.utc).isoformat()})
+            # server_time_ms is what a Hub times its clock against (HubClock's
+            # backend source): read as late as possible, right before sending.
+            now = _time.time()
+            self._send_json(
+                {
+                    "type": "pong",
+                    "server_time": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+                    "server_time_ms": int(now * 1000),
+                }
+            )
             return
         if msg_type == "gateway_status":
             payload = _payload_from_message(message)

@@ -25,6 +25,9 @@ DEVICE_COMMAND_ALLOWLIST = {
     "service_restart",
     "dmesg",
     "set_time",
+    "clock_sync",
+    "clock_status",
+    "set_clock_config",
     "set_power_profile",
     "config_schema",
     "config_get",
@@ -193,8 +196,18 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "set-time",
-            "description": "Push wall-clock time to a device that cannot reach NTP (Direct mode).",
-            "example": "set-time --epoch-ms 1780000000000",
+            "description": "Set a device's clock to the given time (--force overrides an active NTP/Hub source).",
+            "example": "set-time --epoch-ms 1780000000000 --force true",
+        },
+        {
+            "command": "clock-sync",
+            "description": "Re-sync the device clock now from its own source (the Gateway, else NTP, in WiFi mode; the Hub in ESP-NOW mode).",
+            "example": "clock-sync",
+        },
+        {
+            "command": "clock-status",
+            "description": "Show the device clock: source, sync age, uncertainty and its clock settings.",
+            "example": "clock-status",
         },
         {
             "command": "app-list",
@@ -527,6 +540,8 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "crash-clear": "crash_clear",
         "health": "health",
         "dmesg": "dmesg",
+        "clock-sync": "clock_sync",
+        "clock-status": "clock_status",
         "capabilities": "capabilities",
         "config-schema": "config_schema",
         "app-list": "app_list",
@@ -832,7 +847,11 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         raw = parsed.get("epoch_ms", parsed.get("epoch"))
         if raw is None:
             raise ValueError("epoch_ms_required")
-        payload = {"command": "set_time", "epoch_ms": int(raw)}
+        # A string, not a JSON number: the firmware reads it with its string
+        # extractor because a millisecond epoch overflows its 32-bit ints.
+        payload = {"command": "set_time", "epoch_ms": str(int(raw))}
+        if "force" in parsed:
+            payload["force"] = _as_bool(parsed["force"])
         return {"command": "set_time", "payload": payload, "argv": argv}
 
     if command == "set-power-profile":

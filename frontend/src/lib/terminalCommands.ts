@@ -169,8 +169,22 @@ export const COMMAND_BLOCKS: CommandBlock[] = [
   {
     command: "set-time",
     groupKey: "commandGroupConfig",
-    params: [{ key: "epoch-ms", labelKey: "paramEpochMs", type: "text", required: true, placeholder: "1780000000000" }],
+    params: [
+      { key: "epoch-ms", labelKey: "paramEpochMs", type: "text", required: true, placeholder: "1780000000000" },
+      {
+        key: "force",
+        labelKey: "paramForce",
+        type: "select",
+        defaultValue: "false",
+        options: [
+          { labelKey: "optionTrue", value: "true" },
+          { labelKey: "optionFalse", value: "false" },
+        ],
+      },
+    ],
   },
+  { command: "clock-sync", groupKey: "commandGroupConfig", params: [] },
+  { command: "clock-status", groupKey: "commandGroupConfig", params: [] },
   {
     command: "set-stream-buffer",
     groupKey: "commandGroupConfig",

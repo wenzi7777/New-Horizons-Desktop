@@ -199,3 +199,12 @@ test("every block's keys are kebab-case and its select defaults are real options
     }
   }
 });
+
+test("clock commands have builder blocks", () => {
+  assert.equal(buildCommandLine(findCommandBlock("clock-sync"), {}), "clock-sync");
+  assert.equal(buildCommandLine(findCommandBlock("clock-status"), {}), "clock-status");
+  assert.equal(
+    buildCommandLine(findCommandBlock("set-time"), { "epoch-ms": "1780000000000", force: "true" }),
+    "set-time --epoch-ms 1780000000000 --force true",
+  );
+});

@@ -16,6 +16,7 @@ import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { CalibrationWorkbench, type CalibrationRun } from "../components/calibration/CalibrationWorkbench";
 import { DeviceAppsPanel } from "../components/DeviceAppsPanel";
+import { DeviceClockCard } from "../components/DeviceClockCard";
 import { DeviceHealthCard } from "../components/DeviceHealthCard";
 import { compareVersions } from "../lib/appLibrary";
 import { Battery, CircleOff, Lightbulb, Power, TriangleAlert } from "lucide-react";
@@ -46,6 +47,7 @@ type SettingsSection =
   | "hardware"
   | "action_button"
   | "runtime"
+  | "clock"
   | "maintenance"
   | "diagnostics"
   | "files"
@@ -1193,6 +1195,7 @@ export function DeviceSettingsPage() {
     { id: "overview", label: t("settingsSection_overview") },
     { id: "hardware", label: t("settingsSection_hardware") },
     { id: "runtime", label: t("settingsSection_runtime") },
+    { id: "clock", label: t("settingsSection_clock") },
     { id: "maintenance", label: t("settingsSection_maintenance") },
     { id: "diagnostics", label: t("settingsSection_diagnostics") },
     { id: "files", label: t("settingsSection_files") },
@@ -2426,6 +2429,22 @@ export function DeviceSettingsPage() {
               </button>
             </div>
           </div>
+        </div>
+      );
+    }
+
+    if (activeSection === "clock") {
+      // Not a STATUS_DRIVEN section: the card polls the small clock_status
+      // instead, since a full status is paged (slow) through a Hub.
+      return (
+        <div className="settings-stack">
+          <div className="settings-detail-header">
+            <div>
+              <h3>{t("settingsSection_clock")}</h3>
+              <p>{t("clockSettingsCopy")}</p>
+            </div>
+          </div>
+          <DeviceClockCard deviceUid={deviceUid} disabled={isControlUnavailable} run={run} />
         </div>
       );
     }

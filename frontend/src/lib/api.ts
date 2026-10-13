@@ -121,6 +121,9 @@ export type GatewayEntry = {
   claims?: GatewayClaimEntry[];
   channel?: number;
   channel_environment_id?: string;
+  // Hub only: its wall clock (HubClock.statusJson), which paired ESP-NOW
+  // devices take their time from.
+  clock?: Record<string, unknown> | null;
   // "hub" (New Horizons Hub) or "gateway" (New Horizons Gateway software) --
   // absent/unknown gateway_ids default to "gateway" server-side.
   client_type?: "hub" | "gateway" | string;

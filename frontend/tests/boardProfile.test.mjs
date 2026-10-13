@@ -46,14 +46,15 @@ test("v2.2.C GCU LTS resolves to its own profile instead of falling back to v1.0
   assert.equal(profile.supportsBatteryPercentageIndicator, false);
   assert.equal(profile.powerUx, "remote_only");
 
-  // 11 ADC rows x 13 select columns, matching the firmware BoardPins.cpp block.
-  assert.deepEqual(profile.defaultAnalogPins, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
-  assert.deepEqual(profile.defaultSelectPins, [17, 18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45]);
+  // 10 ADC rows x 12 select columns, matching the firmware BoardPins.cpp
+  // block: IO11 and IO17 must not be used on this revision.
+  assert.deepEqual(profile.defaultAnalogPins, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.deepEqual(profile.defaultSelectPins, [18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45]);
+  assert.ok(![...profile.analogPinSlots, ...profile.digitalPinSlots].some((pin) => pin.gpio === 11 || pin.gpio === 17));
 
-  // No artwork exists for this revision; the IO modal names the board
-  // instead, but its own pins can still be picked.
-  assert.equal(profile.overviewAsset, null);
-  assert.equal(profile.supportsIoVisualizerArtwork, false);
+  // Its own artwork, never a neighbouring board's.
+  assert.match(String(profile.overviewAsset), /VDCTLV22CGCULTSOVERVIEW/);
+  assert.equal(profile.supportsIoVisualizerArtwork, true);
   assert.equal(profile.supportsIoVisualizer, true);
   assert.deepEqual(
     profile.analogPinSlots.filter((pin) => pin.role === "analog").map((pin) => pin.gpio),

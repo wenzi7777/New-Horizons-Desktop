@@ -34,7 +34,92 @@ export type CalibrationFitSummary = {
   failures: { no_tare: number; too_few_points: number; singular: number };
   // The first few sensors that could not be fitted.
   failed: { sensor_index: number; reason: string }[];
+  // Firmware v1.12.0+: a profile can be saved with some sensors unfitted
+  // (they read 0), so Save only needs one fitted sensor.
+  partial_save: boolean;
+  // Draft only, firmware v1.12.0+: why each captured reading was or was not
+  // a fit point -- one character per level (in point_levels order) per
+  // sensor, sensor after sensor. Empty when not reported.
+  point_levels: number[];
+  points: string;
 };
+
+export type CalibrationPointStatus = "used" | "not_captured" | "below_min" | "saturated" | "no_response";
+
+const POINT_STATUS_CODES: Record<string, CalibrationPointStatus> = {
+  u: "used",
+  "-": "not_captured",
+  b: "below_min",
+  s: "saturated",
+  n: "no_response",
+};
+
+// Level -> status for one sensor; empty when the firmware did not report.
+export function sensorPointStatuses(fit: CalibrationFitSummary | null, sensorIndex: number): Map<number, CalibrationPointStatus> {
+  const out = new Map<number, CalibrationPointStatus>();
+  if (!fit || !fit.points || fit.point_levels.length === 0 || sensorIndex < 0) return out;
+  const width = fit.point_levels.length;
+  const row = fit.points.slice(sensorIndex * width, (sensorIndex + 1) * width);
+  if (row.length !== width) return out;
+  fit.point_levels.forEach((level, index) => {
+    out.set(level, POINT_STATUS_CODES[row[index]] ?? "not_captured");
+  });
+  return out;
+}
+
+export type SensorFitReport = {
+  sensor_index: number;
+  usable: number;
+  saturated: number[];
+  no_response: number[];
+  // The lowest level at which it clipped: the top of its usable range.
+  saturates_from: number | null;
+};
+
+function reportFor(fit: CalibrationFitSummary, sensorIndex: number): SensorFitReport {
+  const statuses = sensorPointStatuses(fit, sensorIndex);
+  const saturated: number[] = [];
+  const noResponse: number[] = [];
+  let usable = 0;
+  for (const [level, status] of statuses) {
+    if (status === "used") usable += 1;
+    else if (status === "saturated") saturated.push(level);
+    else if (status === "no_response") noResponse.push(level);
+  }
+  saturated.sort((a, b) => a - b);
+  noResponse.sort((a, b) => a - b);
+  return {
+    sensor_index: sensorIndex,
+    usable,
+    saturated,
+    no_response: noResponse,
+    saturates_from: saturated.length > 0 ? saturated[0] : null,
+  };
+}
+
+// Sensors that cannot be fitted yet, with why: fewer usable levels than the
+// model needs. Empty when the firmware did not report point statuses.
+export function unfittedSensorReports(fit: CalibrationFitSummary | null, minPoints: number): SensorFitReport[] {
+  if (!fit || !fit.points || fit.point_levels.length === 0) return [];
+  const reports: SensorFitReport[] = [];
+  for (let sensor = 0; sensor < fit.cells_total; sensor += 1) {
+    const report = reportFor(fit, sensor);
+    if (report.usable < minPoints) reports.push(report);
+  }
+  return reports;
+}
+
+// Fitted sensors that clipped at some level: their output is held at their
+// highest usable level instead of extrapolating past it.
+export function saturatingSensorReports(fit: CalibrationFitSummary | null, minPoints: number): SensorFitReport[] {
+  if (!fit || !fit.points || fit.point_levels.length === 0) return [];
+  const reports: SensorFitReport[] = [];
+  for (let sensor = 0; sensor < fit.cells_total; sensor += 1) {
+    const report = reportFor(fit, sensor);
+    if (report.usable >= minPoints && report.saturated.length > 0) reports.push(report);
+  }
+  return reports;
+}
 
 export type CalibrationFitSettings = {
   min_level: number;
@@ -167,6 +252,11 @@ function parseFitSummary(value: unknown): CalibrationFitSummary | null {
       .map((item) => recordValue(item))
       .map((item) => ({ sensor_index: numberValue(item.sensor_index, -1), reason: String(item.reason ?? "") }))
       .filter((item) => item.sensor_index >= 0),
+    partial_save: source.partial_save === true,
+    point_levels: (Array.isArray(source.point_levels) ? source.point_levels : [])
+      .map((item) => numberValue(item, Number.NaN))
+      .filter((item) => Number.isFinite(item)),
+    points: typeof source.points === "string" ? source.points : "",
   };
 }
 
@@ -242,9 +332,10 @@ export function getCalibrationStep(snapshot: CalibrationFlowSnapshot): Calibrati
 // auto_enable otherwise. Sensors need not share levels: one pressed alone
 // under a weight is fitted from its own captures.
 export function canSaveCalibration(state: CalibrationState) {
-  return state.session_active
-    && state.draft_tare?.complete === true
-    && state.draft_fit?.complete === true;
+  const fit = state.draft_fit;
+  if (!state.session_active || state.draft_tare?.complete !== true || !fit) return false;
+  // Older firmware refuses a profile that leaves any sensor unfitted.
+  return fit.complete || (fit.partial_save && fit.cells_fitted > 0);
 }
 
 export type ZeroBlockedReason = "device_offline" | "session_active";

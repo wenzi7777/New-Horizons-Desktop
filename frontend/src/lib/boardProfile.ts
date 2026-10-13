@@ -2,6 +2,7 @@ import v1OverviewAsset from "../assets/VDCTLRv10F20264OVERVIEW.png";
 import v15fOverviewAsset from "../assets/VDCTLRv15F20267OVERVIEW.png";
 import gcuOverviewAsset from "../assets/VDCTLV23DGCULTSOVERVIEW.png";
 import gcu21OverviewAsset from "../assets/VDCTLV21GCULTSOVERVIEW.png";
+import gcu22cOverviewAsset from "../assets/VDCTLV22CGCULTSOVERVIEW.png";
 
 export type BoardPinSlot = {
   label: string;
@@ -243,7 +244,8 @@ const V22C_GCU_ANALOG_PIN_SLOTS: BoardPinSlot[] = [
   { label: "A8", gpio: 8, role: "analog" },
   { label: "A9", gpio: 9, role: "analog" },
   { label: "A10", gpio: 10, role: "analog" },
-  { label: "A11", gpio: 11, role: "analog" },
+  // IO11 reaches the connector but must not be used on this revision.
+  { label: "DNU" },
   { label: "NC" },
   { label: "NC" },
   { label: "NC" },
@@ -269,7 +271,8 @@ const V22C_GCU_DIGITAL_PIN_SLOTS: BoardPinSlot[] = [
   { label: "D20", gpio: 20, role: "select" },
   { label: "D19", gpio: 19, role: "select" },
   { label: "D18", gpio: 18, role: "select" },
-  { label: "D17", gpio: 17, role: "select" },
+  // IO17 reaches the connector but must not be used on this revision.
+  { label: "DNU" },
   { label: "NC" },
   { label: "GND" },
   { label: "GND" },
@@ -329,23 +332,20 @@ const V22C_GCU_PROFILE: BoardProfile = {
   hardwareModel: V22C_GCU_HARDWARE_MODEL,
   wikiSlug: "vd-ctl-r-v2-2-c-gcu-lts",
   defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v22c-lts-latest.json",
-  defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-  defaultSelectPins: [17, 18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45],
-  // No board photograph has been shot for this revision yet, so the IO modal
-  // names the board instead of showing a neighbouring board's artwork and
-  // implying a pin layout this one does not have. The pin lists below are
-  // this board's own, so picking IO still works without the picture.
+  // 10 x 12: IO11 and IO17 must not be used (see the board overview).
+  defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  defaultSelectPins: [18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45],
   supportsIoVisualizer: true,
   supportsExternalLed: false,
   supportsOled: false,
-  supportsIoVisualizerArtwork: false,
+  supportsIoVisualizerArtwork: true,
   supportsLocalButtonWake: false,
   supportsChargeControl: false,
   supportsBatteryStatusLed: false,
   supportsBatteryPercentageIndicator: false,
   supportsActionButtonSettings: false,
   powerUx: "remote_only",
-  overviewAsset: null,
+  overviewAsset: gcu22cOverviewAsset,
   analogPinOrder: V22C_GCU_ANALOG_PIN_SLOTS.map((pin) => pin.label),
   digitalPinOrder: V22C_GCU_DIGITAL_PIN_SLOTS.map((pin) => pin.label),
   analogPinSlots: V22C_GCU_ANALOG_PIN_SLOTS,

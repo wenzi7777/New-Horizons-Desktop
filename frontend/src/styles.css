@@ -8261,6 +8261,36 @@ button.sdk-diagnostic:hover {
   background: var(--accent-soft);
 }
 
+/* A level that does not count for the selected sensor (saturated or no
+   response there): flagged so the operator sees which pressure to revisit. */
+.cal-level-row.excluded {
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.cal-level-row.selectable.active.excluded {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.cal-level-flag {
+  display: block;
+  margin-top: 2px;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cal-legend-swatch.unfitted {
+  border-color: var(--danger);
+}
+
+.cal-fit-reports {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .cal-level-row strong {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -8438,6 +8468,11 @@ button.cal-matrix-cell:active {
   border-color: rgba(31, 107, 84, 0.25);
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+.cal-matrix-cell.unfitted {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .cal-matrix-cell.selected {

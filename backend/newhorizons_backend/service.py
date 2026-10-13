@@ -118,6 +118,9 @@ class NewHorizonsService:
         "config_get",
         "config_set",
         "set_time",
+        "clock_sync",
+        "clock_status",
+        "set_clock_config",
         "set_power_profile",
         "app_list",
         "app_enable",
@@ -188,7 +191,7 @@ class NewHorizonsService:
     # publish_gateway_command()) rather than a downstream device_uid. Small
     # and flat on purpose -- unlike device commands, Hubs have no "mode"
     # concept to gate against.
-    HUB_COMMANDS = {"set_config", "factory_reset"}
+    HUB_COMMANDS = {"set_config", "factory_reset", "clock_sync"}
 
     # Device commands the backend issues on its own behalf (hub migration, WiFi
     # provisioning). They are deliberately absent from the terminal allowlist --
@@ -1339,6 +1342,8 @@ class NewHorizonsService:
                 "channel_environment_id": self._hub_channel_watcher.hub_environment(gateway_id) or "",
                 "channel": self._hub_channel_watcher.channel_for(gateway_id),
                 "paired_devices": payload.get("paired_devices", existing.get("paired_devices", [])),
+                # Hub only: its wall clock, which it serves to paired devices.
+                "clock": payload.get("clock", existing.get("clock")),
             })
             self._gateways[gateway_id] = existing
             event_item = dict(existing)
@@ -1417,6 +1422,7 @@ class NewHorizonsService:
                 "udp_dropped": dropped,
                 "last_error": payload.get("last_error", ""),
                 "paired_devices": payload.get("paired_devices", []),
+                "clock": payload.get("clock"),
             },
         )
         for event_item in device_events:
@@ -2809,6 +2815,14 @@ class NewHorizonsService:
                 pass
         return int(fallback.timestamp() * 1000)
 
+    @staticmethod
+    def _csv_time_ref(payload: dict[str, Any]) -> str:
+        """Which clock timestamp_ms came from: the device's own synced clock
+        ("device"), or -- before the device had a wall clock -- when the
+        backend received the frame ("received"), which carries network and
+        relay delay. Mirrors _csv_timestamp_ms()'s choice."""
+        return "device" if isinstance(payload.get("device_epoch_ms"), int) else "received"
+
     def _write_csv_sample(self, device_uid: str, payload: dict[str, Any]) -> None:
         pressures = payload.get("p")
         if not isinstance(pressures, list):
@@ -2840,6 +2854,8 @@ class NewHorizonsService:
                     # own frame.seq, and app events carry the same number, so the
                     # sample file and the .events.csv sidecar join on it.
                     + ["frame_seq"]
+                    # Appended for the same reason: see _csv_time_ref().
+                    + ["time_ref"]
                 )
             writer.writerow(
                 [timestamp]
@@ -2849,6 +2865,7 @@ class NewHorizonsService:
                 + list(gyro[:3])
                 + list(acc[:3])
                 + [int(payload.get("frame_id") or 0)]
+                + [self._csv_time_ref(payload)]
             )
 
     def _normalize_device_entry(self, device_uid: str, payload: dict[str, Any], kind: str) -> dict[str, Any]:

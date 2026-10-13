@@ -9,6 +9,9 @@ import {
   getCalibrationStep,
   isFullCalibrationStatus,
   parseCalibrationState,
+  saturatingSensorReports,
+  sensorPointStatuses,
+  unfittedSensorReports,
   zeroBlockedReason,
 } from "../src/lib/calibrationFlow.ts";
 
@@ -143,4 +146,63 @@ test("relay failures get their own message instead of the raw code", () => {
   assert.equal(calibrationErrorKey("response_too_large"), "calErrorReplyTooLarge");
   assert.equal(calibrationErrorKey("result_page_expired"), "calErrorReplyTooLarge");
   assert.equal(calibrationErrorKey("command_too_large"), "calErrorReplyTooLarge");
+});
+
+test("newer firmware allows saving with some sensors unfitted", () => {
+  const partialFit = (fitted) => ({
+    cells_total: 16, cells_fitted: fitted, complete: fitted === 16, partial_save: true,
+    failures: { no_tare: 0, too_few_points: 16 - fitted, singular: 0 }, failed: [],
+  });
+  assert.equal(canSaveCalibration(parseCalibrationState(status({ session_active: true, draft_tare: completeTare, draft_fit: partialFit(15) }))), true);
+  // Nothing fitted at all is still refused, as the firmware does.
+  assert.equal(canSaveCalibration(parseCalibrationState(status({ session_active: true, draft_tare: completeTare, draft_fit: partialFit(0) }))), false);
+});
+
+test("per-level point statuses explain each unfitted sensor", () => {
+  // 3 sensors x 3 levels (43.3, 86.7, 120): P0 fine, P1 saturates at 120,
+  // P2 no response at 43.3 and saturated at 120; P0 also clipped nowhere.
+  const state = parseCalibrationState(status({
+    session_active: true,
+    draft_fit: {
+      cells_total: 3, cells_fitted: 1, complete: false, partial_save: true,
+      failures: { no_tare: 0, too_few_points: 2, singular: 0 }, failed: [],
+      point_levels: [43.3, 86.7, 120],
+      points: "uuu" + "uus" + "nus",
+    },
+  }));
+  const fit = state.draft_fit;
+  assert.equal(sensorPointStatuses(fit, 1).get(120), "saturated");
+  assert.equal(sensorPointStatuses(fit, 2).get(43.3), "no_response");
+  assert.equal(sensorPointStatuses(fit, 0).get(86.7), "used");
+  assert.equal(sensorPointStatuses(fit, 9).size, 0);
+
+  const reports = unfittedSensorReports(fit, 3);
+  assert.deepEqual(reports.map((item) => item.sensor_index), [1, 2]);
+  assert.deepEqual(reports[0], { sensor_index: 1, usable: 2, saturated: [120], no_response: [], saturates_from: 120 });
+  assert.deepEqual(reports[1].no_response, [43.3]);
+  assert.equal(reports[1].usable, 1);
+});
+
+test("fitted sensors that clip somewhere are reported as saturating", () => {
+  const state = parseCalibrationState(status({
+    session_active: true,
+    draft_fit: {
+      cells_total: 2, cells_fitted: 2, complete: true, partial_save: true,
+      failures: { no_tare: 0, too_few_points: 0, singular: 0 }, failed: [],
+      point_levels: [10, 20, 30, 40],
+      points: "uuuu" + "uuus",
+    },
+  }));
+  const saturating = saturatingSensorReports(state.draft_fit, 3);
+  assert.deepEqual(saturating.map((item) => [item.sensor_index, item.saturates_from]), [[1, 40]]);
+});
+
+test("older firmware reports no point statuses", () => {
+  const state = parseCalibrationState(status({
+    session_active: true,
+    draft_fit: { cells_total: 16, cells_fitted: 15, complete: false, failures: { no_tare: 0, too_few_points: 1, singular: 0 }, failed: [] },
+  }));
+  assert.equal(state.draft_fit.partial_save, false);
+  assert.equal(state.draft_fit.points, "");
+  assert.deepEqual(unfittedSensorReports(state.draft_fit, 3), []);
 });

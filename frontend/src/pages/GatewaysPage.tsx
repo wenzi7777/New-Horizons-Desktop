@@ -201,6 +201,54 @@ function HubCard({ hub, onManage }: { hub: GatewayEntry; onManage: (hub: Gateway
   );
 }
 
+function hubClockAge(ms: unknown): string {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return "-";
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60 ? `${minutes} m` : `${Math.floor(minutes / 60)} h ${minutes % 60} m`;
+}
+
+// Shown only once the Hub reports a clock (Hub firmware v0.7.0+).
+function HubClockSection({
+  clock,
+  busy,
+  onSync,
+}: {
+  clock: Record<string, unknown> | null | undefined;
+  busy: boolean;
+  onSync: () => void;
+}) {
+  const { t } = useI18n();
+  if (!clock || typeof clock !== "object") return null;
+  const synced = clock.synced === true;
+  const source = String(clock.source ?? "none");
+  const uncertainty = typeof clock.uncertainty_ms === "number" ? clock.uncertainty_ms : null;
+  return (
+    <div className="gateway-section">
+      <h4>{t("hubClockTitle")}</h4>
+      <p className="service-muted">{t("hubClockCopy")}</p>
+      <div className="gateway-facts">
+        <div>
+          <span>{t("clockSource")}</span>
+          <strong>{t(`clockSource_${source}`)}</strong>
+        </div>
+        <div>
+          <span>{t("clockSyncAge")}</span>
+          <strong>{synced ? hubClockAge(clock.age_ms) : "-"}</strong>
+        </div>
+        <div>
+          <span>{t("clockUncertainty")}</span>
+          <strong>{synced && uncertainty !== null ? `±${uncertainty.toLocaleString()} ms` : "-"}</strong>
+        </div>
+      </div>
+      <button className="button" type="button" disabled={busy} onClick={onSync}>
+        {busy ? t("clockSyncing") : t("clockSyncNow")}
+      </button>
+    </div>
+  );
+}
+
 function HubManageModal({ hub, onClose, onSaved }: { hub: GatewayEntry; onClose: () => void; onSaved: () => void }) {
   const { t } = useI18n();
   const [busyCommand, setBusyCommand] = useState("");
@@ -323,6 +371,12 @@ function HubManageModal({ hub, onClose, onSaved }: { hub: GatewayEntry; onClose:
             <strong className="mono">{hub.ip || "-"}</strong>
           </div>
         </div>
+
+        <HubClockSection
+          clock={hub.clock}
+          busy={busyCommand === "clock_sync"}
+          onSync={() => void runGatewayCommand("clock_sync", {})}
+        />
 
         <form className="gateway-section" onSubmit={(event) => void handleSaveSettings(event)}>
           <h4>{t("hubSettingsTitle")}</h4>
