@@ -53,6 +53,52 @@ function signedMs(ms: number | null): string {
   return `${ms > 0 ? "+" : ""}${ms.toLocaleString()} ms`;
 }
 
+function pad(value: number, width = 2) {
+  return String(value).padStart(width, "0");
+}
+
+function formatClock(date: Date) {
+  return {
+    date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    time: `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${Math.floor(date.getMilliseconds() / 100)}`,
+  };
+}
+
+// The device's clock, ticking in the browser between readings: the last
+// reported epoch_ms plus however long ago that reply arrived. It inherits
+// the reply's delivery delay, so it is for the eye, not for measurement.
+function DigitalClock({
+  t,
+  epochMs,
+  receivedAtMs,
+}: {
+  t: (key: string) => string;
+  epochMs: number | null;
+  receivedAtMs: number;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 100);
+    return () => window.clearInterval(timer);
+  }, []);
+  const device = epochMs !== null ? formatClock(new Date(epochMs + (now - receivedAtMs))) : null;
+  const computer = formatClock(new Date(now));
+  return (
+    <div className="clock-digital" aria-live="off">
+      <div className="clock-digital-main">
+        <span className="clock-digital-label">{t("clockDeviceTime")}</span>
+        <strong className="clock-digital-time">{device ? device.time : "--:--:--.-"}</strong>
+        <span className="clock-digital-date">{device ? device.date : t("clockSource_none")}</span>
+      </div>
+      <div className="clock-digital-reference">
+        <span className="clock-digital-label">{t("clockComputerTime")}</span>
+        <span className="clock-digital-ref-time">{computer.time}</span>
+        <span className="clock-digital-date">{computer.date}</span>
+      </div>
+    </div>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="metric">
@@ -268,6 +314,7 @@ export function DeviceClockCard({ deviceUid, disabled, run }: Props) {
           <p className="service-muted">{t("clockEmpty")}</p>
         ) : (
           <>
+            <DigitalClock t={t} epochMs={synced ? epochMs : null} receivedAtMs={snapshot.receivedAtMs} />
             <div className="metric-row">
               <Metric label={t("clockSource")} value={t(`clockSource_${source}`)} />
               <Metric label={t("clockSyncAge")} value={synced ? ageLabel(num(clock.age_ms)) : "-"} />

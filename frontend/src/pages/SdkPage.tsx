@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, Cpu, FilePlus2, FolderOpen, Library, Sparkles, Trash2, X } from "lucide-react";
+import { BookOpen, Cpu, FilePlus2, FolderOpen, Library, Sparkles, Trash2, UserRound, X } from "lucide-react";
 
 import { AiPromptDialog } from "../components/sdk/AiPromptDialog";
 import { BuildPanel } from "../components/sdk/BuildPanel";
+import { StudioAuthorDialog } from "../components/sdk/StudioAuthorDialog";
 import { CodeEditor, type CodeEditorHandle } from "../components/sdk/CodeEditor";
 import { EmulatorPanel } from "../components/sdk/EmulatorPanel";
 import { ReferencePanel } from "../components/sdk/ReferencePanel";
@@ -10,7 +11,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 import { useLocalised, type AppCatalogEntry } from "../lib/appLibrary";
-import { useAuth } from "../lib/auth";
+import { AUTO_FILLED_AUTHORS, loadStudioAuthor, saveStudioAuthor } from "../lib/sdkAuthor";
 import { useDevicesPolling } from "../lib/device";
 import {
   appIdOf,
@@ -23,12 +24,14 @@ import {
   loadTargetKey,
   loadVirtualDevice,
   newProject,
+  readManifestFields,
   readoutTemplate,
   saveActiveProjectId,
   saveProjects,
   saveTargetKey,
   saveVirtualDevice,
   virtualTarget,
+  writeManifestField,
   type MatrixTarget,
   type SdkKind,
   type SdkProject,
@@ -119,14 +122,17 @@ function LibraryPicker({ onOpen, onClose }: { onOpen: (entry: AppCatalogEntry) =
 
 export function SdkPage() {
   const { t } = useI18n();
-  const { user } = useAuth();
+  // Who writes apps here: asked once per browser, never the (shared) login.
+  const [studioAuthor, setStudioAuthor] = useState(loadStudioAuthor);
+  const [editingAuthor, setEditingAuthor] = useState(() => loadStudioAuthor() === "");
+  const author = studioAuthor || "author";
   const { normalized } = useDevicesPolling();
   const editorRef = useRef<CodeEditorHandle | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   const [projects, setProjects] = useState<SdkProject[]>(() => {
     const stored = loadProjects();
-    return stored.length ? stored : [newProject("flow", flowTemplate("my_app", user?.username ?? "author"))];
+    return stored.length ? stored : [newProject("flow", flowTemplate("my_app", loadStudioAuthor() || "author"))];
   });
   const [activeId, setActiveId] = useState<string>(() => {
     const remembered = loadActiveProjectId();
@@ -192,6 +198,20 @@ export function SdkPage() {
     )));
   }, [active.id]);
 
+  const saveAuthor = (next: string) => {
+    saveStudioAuthor(next);
+    setStudioAuthor(next);
+    setEditingAuthor(false);
+    // Apps still carrying an author the Studio filled in by itself (the old
+    // login-based default or the placeholder) take the real name.
+    setProjects((current) => current.map((project) => {
+      const { author: current_author } = readManifestFields(project);
+      if (!AUTO_FILLED_AUTHORS.has(current_author)) return project;
+      const source = writeManifestField(project, "author", next);
+      return source === project.source ? project : { ...project, source, updatedAt: Date.now() };
+    }));
+  };
+
   const addProject = useCallback((project: SdkProject) => {
     setProjects((current) => [project, ...current]);
     setActiveId(project.id);
@@ -200,7 +220,6 @@ export function SdkPage() {
 
   const createProject = (kind: SdkKind) => {
     const appId = freshAppId(projects, kind === "flow" ? "my_app" : "my_readout");
-    const author = user?.username ?? "author";
     addProject(newProject(kind, kind === "flow" ? flowTemplate(appId, author) : readoutTemplate(appId, author)));
   };
 
@@ -228,12 +247,11 @@ export function SdkPage() {
   const deleteProject = (project: SdkProject) => {
     setProjects((current) => {
       const remaining = current.filter((item) => item.id !== project.id);
-      return remaining.length ? remaining : [newProject("flow", flowTemplate("my_app", user?.username ?? "author"))];
+      return remaining.length ? remaining : [newProject("flow", flowTemplate("my_app", author))];
     });
     setConfirmDelete(null);
   };
 
-  const author = user?.username ?? "author";
   // The prompt quotes the editor as it is now, not as of the last debounce.
   const promptAnalysis = prompting
     ? (pending.id === active.id && pending.source === active.source ? analysis : analyze(active, cellCount))
@@ -272,6 +290,14 @@ export function SdkPage() {
           </button>
           <button type="button" className="button compact" onClick={() => setPrompting(true)}>
             <Sparkles size={14} strokeWidth={2} />{t("sdkAiPrompt")}
+          </button>
+          <button
+            type="button"
+            className="button compact"
+            title={t("sdkAuthorTitle")}
+            onClick={() => setEditingAuthor(true)}
+          >
+            <UserRound size={14} strokeWidth={2} />{studioAuthor || t("sdkAuthorUnset")}
           </button>
           <input
             ref={fileInput}
@@ -346,7 +372,15 @@ export function SdkPage() {
               </button>
             ))}
           </div>
-          {tab === "build" ? <BuildPanel project={active} analysis={analysis} target={target} onRevealLine={revealLine} /> : null}
+          {tab === "build" ? (
+            <BuildPanel
+              project={active}
+              analysis={analysis}
+              target={target}
+              onRevealLine={revealLine}
+              onSourceChange={updateSource}
+            />
+          ) : null}
           {tab === "emulator" ? (
             <EmulatorPanel
               key={active.id}
@@ -365,6 +399,13 @@ export function SdkPage() {
       </div>
 
       {picking ? <LibraryPicker onOpen={openFromLibrary} onClose={() => setPicking(false)} /> : null}
+      {editingAuthor ? (
+        <StudioAuthorDialog
+          current={studioAuthor}
+          onSave={saveAuthor}
+          onClose={studioAuthor ? () => setEditingAuthor(false) : null}
+        />
+      ) : null}
       {prompting && promptAnalysis ? (
         <AiPromptDialog
           kind={active.kind}

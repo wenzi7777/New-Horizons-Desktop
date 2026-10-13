@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 
+import { HubManageModal } from "../components/HubManageModal";
 import { useI18n } from "../i18n";
 import { api, type GatewayClaimEntry, type GatewayEntry, type HubEnvironmentEntry } from "../lib/api";
 import { requestGatewaySnapshot, useWsState } from "../lib/wsClient";
@@ -144,10 +144,12 @@ function GatewayCard({
 function HubCard({
   hub,
   deleting,
+  onManage,
   onDelete,
 }: {
   hub: GatewayEntry;
   deleting: boolean;
+  onManage: (hub: GatewayEntry) => void;
   onDelete: (hub: GatewayEntry) => void;
 }) {
   const { t } = useI18n();
@@ -163,9 +165,9 @@ function HubCard({
         </div>
         <div className="gateway-card-actions">
           <span className={`status-pill ${status === "online" ? "live" : "offline"}`}>{status}</span>
-          <Link className="button" to={`/gateways/hub/${encodeURIComponent(hub.gateway_id)}`}>
+          <button className="button" type="button" onClick={() => onManage(hub)}>
             {t("hubManage")}
-          </Link>
+          </button>
           <button className="button danger" type="button" onClick={() => onDelete(hub)} disabled={deleting}>
             {t("deleteGateway")}
           </button>
@@ -216,10 +218,12 @@ function HubCard({
 function HubsSection({
   hubs,
   deletingId,
+  onManage,
   onDelete,
 }: {
   hubs: GatewayEntry[];
   deletingId: string;
+  onManage: (hub: GatewayEntry) => void;
   onDelete: (hub: GatewayEntry) => void;
 }) {
   const { t } = useI18n();
@@ -272,7 +276,13 @@ function HubsSection({
               </div>
               <div className="gateway-grid">
                 {groupHubs.map((hub) => (
-                  <HubCard key={hub.gateway_id} hub={hub} deleting={deletingId === hub.gateway_id} onDelete={onDelete} />
+                  <HubCard
+                    key={hub.gateway_id}
+                    hub={hub}
+                    deleting={deletingId === hub.gateway_id}
+                    onManage={onManage}
+                    onDelete={onDelete}
+                  />
                 ))}
               </div>
             </div>
@@ -296,6 +306,7 @@ export function GatewaysPage() {
   const [notice, setNotice] = useState("");
   const [noticeClass, setNoticeClass] = useState<"" | "success" | "error">("");
   const [deletingGatewayId, setDeletingGatewayId] = useState("");
+  const [manageHubId, setManageHubId] = useState("");
 
   useEffect(() => {
     requestGatewaySnapshot();
@@ -401,7 +412,14 @@ export function GatewaysPage() {
         )}
       </section>
 
-      <HubsSection hubs={hubs} deletingId={deletingGatewayId} onDelete={handleDelete} />
+      <HubsSection
+        hubs={hubs}
+        deletingId={deletingGatewayId}
+        onManage={(hub) => setManageHubId(hub.gateway_id)}
+        onDelete={handleDelete}
+      />
+
+      {manageHubId ? <HubManageModal gatewayId={manageHubId} onClose={() => setManageHubId("")} /> : null}
     </>
   );
 }

@@ -108,7 +108,7 @@ class PanelWiringTests(unittest.TestCase):
         self.assertIn('t("appKilledHint")', panel)
 
     def test_installing_an_installed_app_updates_it(self):
-        page = read("pages/DeviceAppsPage.tsx")
+        page = read("components/AppInstallDialog.tsx")
         call = page[page.index("await installAppPackage(queue, {"):]
         call = call[:call.index("});")]
         # Without it, updating features 1.0.0 -> 1.1.0 failed with
@@ -156,9 +156,17 @@ class CapabilityGateTests(unittest.TestCase):
 
     def test_maintenance_is_never_entered_silently(self):
         page = read("pages/DeviceAppsPage.tsx")
+        dialog = read("components/AppInstallDialog.tsx")
         # Entering maintenance stops the scan, which on a recording device is
-        # not something to do behind the operator's back.
+        # not something to do behind the operator's back: the page has an
+        # explicit toggle, and the install dialog says so on its confirm step
+        # before it enters (and leaves only what it entered itself).
         self.assertIn('t("appInstallEnterMaintenance")', page)
+        self.assertIn('t("appInstallMaintenanceNote")', dialog)
+        confirm = dialog[dialog.index('stage === "confirm" && selected && !selected.blocker'):]
+        self.assertEqual(dialog.count("void install()"), 1)
+        self.assertIn("void install()", confirm[:1500])
+        self.assertIn("if (entered)", dialog)
         self.assertIn('reason: "app_install"', page)
 
 
@@ -171,7 +179,12 @@ class RoutingTests(unittest.TestCase):
 
     def test_the_store_can_send_you_to_a_device(self):
         store = read("pages/AppStorePage.tsx")
-        self.assertIn("/apps?install=", store)
+        page = read("pages/DeviceAppsPage.tsx")
+        # The store installs in place; old /apps?install= links still open
+        # the same dialog on the device's page.
+        self.assertIn("<AppInstallDialog", store)
+        self.assertIn('params.get("install")', page)
+        self.assertIn("<AppInstallDialog", page)
 
 
 class TranslationParityTests(unittest.TestCase):
@@ -191,7 +204,7 @@ class TranslationParityTests(unittest.TestCase):
 
     def test_every_key_the_apps_ui_uses_exists_in_all_three_languages(self):
         used: set[str] = set()
-        for name in ("components/DeviceAppsPanel.tsx", "pages/DeviceAppsPage.tsx"):
+        for name in ("components/DeviceAppsPanel.tsx", "pages/DeviceAppsPage.tsx", "components/AppInstallDialog.tsx"):
             source = read(name)
             used |= set(re.findall(r't\("([A-Za-z0-9_]+)"\)', source))
             # Template keys like t(`appState_${...}`) are expanded explicitly.
@@ -199,6 +212,9 @@ class TranslationParityTests(unittest.TestCase):
                 if prefix == "appState_":
                     used |= {f"appState_{s}" for s in
                              ("running", "installed", "killed", "suspended", "faulted", "unknown")}
+                elif prefix == "appInstallStep_":
+                    used |= {f"appInstallStep_{s}" for s in
+                             ("maintenance", "upload", "install", "restore")}
                 elif prefix == "appInstallPhase_":
                     used |= {f"appInstallPhase_{s}" for s in
                              ("upload", "install", "activate", "done")}

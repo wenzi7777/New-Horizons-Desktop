@@ -17,6 +17,8 @@ type Props = {
   deviceUid: string;
   disabled: boolean;
   run: HealthRun;
+  // Relayed by a Hub (ESP-NOW): its link-quality counters are always shown.
+  espNow?: boolean;
 };
 
 type Snapshot = Record<string, unknown>;
@@ -65,7 +67,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 const VERDICT_PILL: Record<string, string> = { ok: "live", warn: "waiting", fail: "danger" };
 
-export function DeviceHealthCard({ deviceUid, disabled, run }: Props) {
+export function DeviceHealthCard({ deviceUid, disabled, run, espNow = false }: Props) {
   const { t } = useI18n();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [unsupported, setUnsupported] = useState(false);
@@ -205,6 +207,19 @@ export function DeviceHealthCard({ deviceUid, disabled, run }: Props) {
             <Metric label={t("healthChipTempMin")} value={tempLabel(environment.chip_temp_min_c)} />
             <Metric label={t("healthMinFreeHeap")} value={bytesLabel(environment.min_free_heap)} />
             <Metric label={t("healthWifiDisconnects")} value={countLabel(connectivity.wifi_disconnects)} />
+            {/* Firmware v1.13.0+. Shown for Hub-relayed devices, or anywhere
+                the counters have ever moved. */}
+            {"espnow_hub_losses" in connectivity &&
+            (espNow ||
+              Number(connectivity.espnow_hub_losses) > 0 ||
+              Number(connectivity.espnow_reply_failures) > 0 ||
+              Number(connectivity.espnow_send_failures) > 0) ? (
+              <>
+                <Metric label={t("healthEspNowHubLosses")} value={countLabel(connectivity.espnow_hub_losses)} />
+                <Metric label={t("healthEspNowReplyFailures")} value={countLabel(connectivity.espnow_reply_failures)} />
+                <Metric label={t("healthEspNowSendFailures")} value={countLabel(connectivity.espnow_send_failures)} />
+              </>
+            ) : null}
             {input ? <Metric label={t("healthButtonPresses")} value={countLabel(input.button_presses)} /> : null}
           </div>
           <p className="service-muted">

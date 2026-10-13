@@ -1,14 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 
-import { ConfirmModal } from "../components/ConfirmModal";
+import { ConfirmModal } from "./ConfirmModal";
 import { useI18n } from "../i18n";
 import { api, type GatewayEntry, type HubLanDeviceEntry } from "../lib/api";
 import { requestGatewaySnapshot, sendGatewayCommand, useWsState } from "../lib/wsClient";
 
-// A Hub's own management page, laid out like a device's settings page
-// (overview cards, section sidebar). Everything here talks to the Hub
-// itself through gateway_command (backend HUB_COMMANDS), not to a device.
+// A Hub's management dialog, laid out like a device's settings page
+// (overview cards, section sidebar) but kept as an overlay on the Relays
+// page. Everything here talks to the Hub itself through gateway_command
+// (backend HUB_COMMANDS), not to a device.
 
 type HubSection = "overview" | "connection" | "clock" | "update" | "devices" | "maintenance";
 
@@ -40,10 +41,8 @@ function ageLabel(ms: unknown): string {
   return minutes < 60 ? `${minutes} m` : `${Math.floor(minutes / 60)} h ${minutes % 60} m`;
 }
 
-export function HubSettingsPage() {
+export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gatewayId: string; onClose: () => void }) {
   const { t } = useI18n();
-  const navigate = useNavigate();
-  const { gatewayId: routeGatewayId = "" } = useParams();
   const { gateways } = useWsState();
   const hub: GatewayEntry | null = gateways.find((item) => item.gateway_id === routeGatewayId) ?? null;
 
@@ -189,7 +188,7 @@ export function HubSettingsPage() {
     try {
       await api.deleteGateway(hub.gateway_id);
       requestGatewaySnapshot();
-      navigate("/gateways", { replace: true });
+      onClose();
     } catch (error) {
       showNotice(`${t("gatewayDeleteFailed")} ${error instanceof Error ? error.message : String(error)}`, "error");
     } finally {
@@ -229,18 +228,18 @@ export function HubSettingsPage() {
 
   if (!hub) {
     return (
-      <>
-        <section className="page-header">
-          <div>
-            <h2>{t("sectionHubs")}</h2>
-            <p className="page-copy">{routeGatewayId}</p>
+      <div className="modal-backdrop" role="presentation" onClick={onClose}>
+        <div className="modal-panel hub-manage-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-header">
+            <div>
+              <h3>{t("sectionHubs")}</h3>
+              <p>{routeGatewayId}</p>
+            </div>
+            <button className="button" type="button" onClick={onClose}>{t("cancel")}</button>
           </div>
-          <Link className="button" to="/gateways">{t("hubBackToRelays")}</Link>
-        </section>
-        <section className="panel empty-gateway-state">
-          <p>{t("hubNotFound")}</p>
-        </section>
-      </>
+          <p className="empty">{t("hubNotFound")}</p>
+        </div>
+      </div>
     );
   }
 
@@ -509,51 +508,63 @@ export function HubSettingsPage() {
 
   return (
     <>
-      <section className="page-header">
-        <div>
-          <h2>{hub.gateway_name || hub.gateway_id}</h2>
-          <p className="page-copy">{hub.gateway_id}</p>
+      <div className="modal-backdrop" role="presentation" onClick={onClose}>
+        <div
+          className="modal-panel hub-manage-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={hub.gateway_name || hub.gateway_id}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="modal-header">
+            <div>
+              <h3>{hub.gateway_name || hub.gateway_id}</h3>
+              <p>{hub.gateway_id}</p>
+            </div>
+            <button className="button" type="button" onClick={onClose}>{t("cancel")}</button>
+          </div>
+          {notice ? <p className={`notice ${noticeClass}`.trim()}>{notice}</p> : null}
+          <section className="settings-overview">
+            <div className="settings-overview-card">
+              <span>{t("hubStatus")}</span>
+              <strong>{online ? t("hubOnline") : t("hubOffline")}</strong>
+              <small>{t("lastSeen")}: {formatLastSeen(hub.last_seen)}</small>
+            </div>
+            <div className="settings-overview-card">
+              <span>{t("firmwareVersion")}</span>
+              <strong>{hub.version || "-"}</strong>
+              <small>{updateAvailable && latestVersion ? t("hubUpdateAvailable").replace("{version}", latestVersion) : " "}</small>
+            </div>
+            <div className="settings-overview-card">
+              <span>{t("hubNetwork")}</span>
+              <strong className="mono">{hub.ip || "-"}</strong>
+              <small>{t("gatewayChannel")}: {hub.channel || "-"}</small>
+            </div>
+            <div className="settings-overview-card">
+              <span>{t("hubPairedDevices")}</span>
+              <strong>{pairedDevices.length}</strong>
+              <small>{t("gatewayServingDevices")}: {hub.serving_device_count ?? servingDevices.length}</small>
+            </div>
+          </section>
+          <section className="settings-shell">
+            <aside className="settings-sidebar" aria-label={t("sectionHubs")}>
+              {sections.map((item) => (
+                <button
+                  key={item.id}
+                  className={section === item.id ? "active" : ""}
+                  type="button"
+                  onClick={() => setSection(item.id)}
+                >
+                  <strong>{item.label}</strong>
+                </button>
+              ))}
+            </aside>
+            <article className="panel settings-detail">{renderSection()}</article>
+          </section>
         </div>
-        <Link className="button" to="/gateways">{t("hubBackToRelays")}</Link>
-      </section>
-      {notice ? <p className={`notice ${noticeClass}`.trim()}>{notice}</p> : null}
-      <section className="settings-overview">
-        <div className="settings-overview-card">
-          <span>{t("hubStatus")}</span>
-          <strong>{online ? t("hubOnline") : t("hubOffline")}</strong>
-          <small>{t("lastSeen")}: {formatLastSeen(hub.last_seen)}</small>
-        </div>
-        <div className="settings-overview-card">
-          <span>{t("firmwareVersion")}</span>
-          <strong>{hub.version || "-"}</strong>
-          <small>{updateAvailable && latestVersion ? t("hubUpdateAvailable").replace("{version}", latestVersion) : " "}</small>
-        </div>
-        <div className="settings-overview-card">
-          <span>{t("hubNetwork")}</span>
-          <strong className="mono">{hub.ip || "-"}</strong>
-          <small>{t("gatewayChannel")}: {hub.channel || "-"}</small>
-        </div>
-        <div className="settings-overview-card">
-          <span>{t("hubPairedDevices")}</span>
-          <strong>{pairedDevices.length}</strong>
-          <small>{t("gatewayServingDevices")}: {hub.serving_device_count ?? servingDevices.length}</small>
-        </div>
-      </section>
-      <section className="settings-shell">
-        <aside className="settings-sidebar" aria-label={t("sectionHubs")}>
-          {sections.map((item) => (
-            <button
-              key={item.id}
-              className={section === item.id ? "active" : ""}
-              type="button"
-              onClick={() => setSection(item.id)}
-            >
-              <strong>{item.label}</strong>
-            </button>
-          ))}
-        </aside>
-        <article className="panel settings-detail">{renderSection()}</article>
-      </section>
+      </div>
+      {/* Outside the Hub dialog's backdrop, so clicking this one's backdrop
+          does not also close the dialog underneath. */}
       {confirm ? (
         <ConfirmModal
           title={

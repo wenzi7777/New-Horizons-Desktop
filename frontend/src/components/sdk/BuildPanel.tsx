@@ -5,8 +5,11 @@ import { useI18n } from "../../i18n";
 import {
   downloadFile,
   exportFiles,
+  readManifestFields,
   runtimeShares,
   sha256Hex,
+  writeManifestField,
+  type EditableManifestField,
   type MatrixTarget,
   type SdkProject,
 } from "../../lib/sdkProject";
@@ -27,7 +30,63 @@ type Props = {
   analysis: Analysis;
   target: MatrixTarget;
   onRevealLine: (line: number) => void;
+  /** Writes an edited manifest field back into the project's source. */
+  onSourceChange: (source: string) => void;
 };
+
+// Name, author and summary, edited here instead of in the code. The source
+// stays the only place they live: each change is written into it.
+function ManifestDetails({
+  project,
+  onSourceChange,
+}: {
+  project: SdkProject;
+  onSourceChange: (source: string) => void;
+}) {
+  const { t } = useI18n();
+  const stated = readManifestFields(project);
+  const [drafts, setDrafts] = useState(stated);
+  const statedKey = `${project.id}|${stated.name}|${stated.author}|${stated.summary}`;
+  useEffect(() => {
+    setDrafts(readManifestFields(project));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statedKey]);
+
+  const commit = (field: EditableManifestField) => {
+    if (drafts[field] === stated[field]) return;
+    const next = writeManifestField(project, field, drafts[field]);
+    if (next !== project.source) onSourceChange(next);
+    else setDrafts(stated);
+  };
+
+  const field = (key: EditableManifestField, label: string, wide = false) => (
+    <div className={`field${wide ? " sdk-details-wide" : ""}`} key={key}>
+      <label htmlFor={`sdk-manifest-${key}`}>{label}</label>
+      <input
+        id={`sdk-manifest-${key}`}
+        value={drafts[key]}
+        maxLength={key === "summary" ? 160 : 60}
+        onChange={(event) => setDrafts((current) => ({ ...current, [key]: event.target.value }))}
+        onBlur={() => commit(key)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+        }}
+      />
+    </div>
+  );
+
+  return (
+    <section className="sdk-details" aria-label={t("sdkDetailsTitle")}>
+      <h3>{t("sdkDetailsTitle")}</h3>
+      <div className="sdk-details-grid">
+        {field("name", t("sdkDetailsName"))}
+        {field("author", t("sdkDetailsAuthor"))}
+        {field("summary", t("sdkDetailsSummary"), true)}
+      </div>
+      <p className="field-hint">{t("sdkDetailsHint")}</p>
+    </section>
+  );
+}
 
 /** Everything on a node except its op and wiring, as `key=value`. */
 function nodeParams(node: FlowNode): string {
@@ -85,7 +144,7 @@ function DiagnosticRow({ diagnostic, onRevealLine }: { diagnostic: Diagnostic; o
   );
 }
 
-export function BuildPanel({ project, analysis, target, onRevealLine }: Props) {
+export function BuildPanel({ project, analysis, target, onRevealLine, onSourceChange }: Props) {
   const { t } = useI18n();
   const [digest, setDigest] = useState<string | null>(null);
 
@@ -131,6 +190,7 @@ export function BuildPanel({ project, analysis, target, onRevealLine }: Props) {
 
   return (
     <div className="sdk-panel-body">
+      <ManifestDetails project={project} onSourceChange={onSourceChange} />
       <div className={`sdk-verdict ${analysis.ok ? (firmwareTooOld ? "warn" : "ok") : "fail"}`}>
         {analysis.ok ? (firmwareTooOld ? <AlertTriangle size={18} strokeWidth={2} /> : <CheckCircle2 size={18} strokeWidth={2} />) : <XCircle size={18} strokeWidth={2} />}
         <div>

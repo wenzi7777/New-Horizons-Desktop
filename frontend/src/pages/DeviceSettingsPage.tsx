@@ -1079,6 +1079,13 @@ export function DeviceSettingsPage() {
   const updateChangelogUrl = stringValue(updateState.changelog_url ?? (lastResultCommand === "check_update" ? lastResult.changelog_url : undefined), "");
 
   const [activeSection, setActiveSection] = useState<SettingsSection>("overview");
+  // The Mode overview card's dropdown: a pending choice, applied explicitly.
+  // Follows the device's reported mode whenever that changes.
+  const currentMode = normalized?.mode ?? "";
+  const [modeDraft, setModeDraft] = useState(currentMode);
+  useEffect(() => {
+    setModeDraft(currentMode);
+  }, [currentMode, deviceUid]);
   const boardProfile = useMemo(() => boardProfileForHardwareModel(normalized?.hardwareModel), [normalized?.hardwareModel]);
   const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : boardProfile.hardwareModel === V15F_HARDWARE_MODEL ? t("powerStatusCopyV15") : t("powerStatusCopy");
   const pinLayoutCopy = boardProfile.powerUx === "remote_only" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1");
@@ -2455,7 +2462,7 @@ export function DeviceSettingsPage() {
             isDeviceOffline={isControlUnavailable}
             matrixShape={recordValue(status.matrix_shape)}
             calibrationStatus={calibrationStatus}
-            maintenanceMode={normalized?.mode === "maintenance" || normalized?.mode === "safe_maintenance"}
+            maintenanceMode={inMaintenanceMode}
             run={run}
             airPressurePanel={<PressureCalibrationPanel t={t} deviceUid={deviceUid} run={run} />}
           />
@@ -2472,7 +2479,7 @@ export function DeviceSettingsPage() {
               <p>{t("diagnosticsNotesCopy")}</p>
             </div>
           </div>
-          <DeviceHealthCard deviceUid={deviceUid} disabled={isControlUnavailable} run={run} />
+          <DeviceHealthCard deviceUid={deviceUid} disabled={isControlUnavailable} run={run} espNow={isHubRelayed(device)} />
           <div className="settings-card">
             <div className="settings-detail-header">
               <div>
@@ -2567,7 +2574,7 @@ export function DeviceSettingsPage() {
               run(String(payload.command ?? "app"), payload, timeoutMs, { waitForLock: true })}
             poll={(payload, timeoutMs) =>
               run(String(payload.command ?? "app_view"), payload, timeoutMs, { background: true })}
-            maintenanceMode={normalized?.mode === "maintenance" || normalized?.mode === "safe_maintenance"}
+            maintenanceMode={inMaintenanceMode}
             supportsRegistry={supportsAppRegistry}
             busy={Boolean(busyCommand)}
             compact
@@ -2775,11 +2782,43 @@ export function DeviceSettingsPage() {
       <section className="settings-overview">
         <div className="settings-overview-card">
           <span>{t("mode")}</span>
-          <strong>{connectionLabel}</strong>
+          {isControlUnavailable || !currentMode ? (
+            <strong>{connectionLabel}</strong>
+          ) : (
+            <select
+              className="settings-overview-select"
+              aria-label={t("mode")}
+              value={modeDraft}
+              disabled={busyCommand !== ""}
+              onChange={(event) => setModeDraft(event.target.value)}
+            >
+              <option value="normal">{t("modeOption_normal")}</option>
+              <option value="maintenance">{t("modeOption_maintenance")}</option>
+              {/* Entered by the firmware itself after repeated crashes, never chosen. */}
+              {currentMode === "safe_maintenance" ? (
+                <option value="safe_maintenance" disabled>{t("modeOption_safe_maintenance")}</option>
+              ) : null}
+              {!["normal", "maintenance", "safe_maintenance"].includes(currentMode) ? (
+                <option value={currentMode} disabled>{currentMode}</option>
+              ) : null}
+            </select>
+          )}
           <small>{t("protocol")}: {normalized?.protocol ?? "-"}</small>
-          {inMaintenanceMode && !isControlUnavailable ? (
-            <button className="button tiny settings-overview-action" type="button" disabled={isCommandBusy("exit_maintenance") || !deviceUid} onClick={() => void run(t("exitMaintenance"), { command: "exit_maintenance" })}>
-              {isCommandBusy("exit_maintenance") ? t("running") : t("exitMaintenance")}
+          {!isControlUnavailable && currentMode && modeDraft !== currentMode ? (
+            <button
+              className="button tiny primary settings-overview-action"
+              type="button"
+              disabled={busyCommand !== "" || !deviceUid}
+              onClick={() =>
+                void run(
+                  modeDraft === "maintenance" ? t("enterMaintenance") : t("exitMaintenance"),
+                  modeDraft === "maintenance"
+                    ? { command: "enter_maintenance", reason: "manual" }
+                    : { command: "exit_maintenance" },
+                ).catch(() => setModeDraft(currentMode))
+              }
+            >
+              {busyCommand === "enter_maintenance" || busyCommand === "exit_maintenance" ? t("running") : t("modeApply")}
             </button>
           ) : null}
         </div>

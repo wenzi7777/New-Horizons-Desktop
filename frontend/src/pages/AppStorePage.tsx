@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
+import { ChevronLeft, Download, RefreshCw, Search } from "lucide-react";
 import { api, type DeviceEntry } from "../lib/api";
 import { useDevicesPolling } from "../lib/device";
 import {
@@ -8,6 +8,7 @@ import {
   categoriesOf,
   useLocalised,
 } from "../lib/appLibrary";
+import { AppInstallDialog } from "../components/AppInstallDialog";
 import { Markdown } from "../components/Markdown";
 import { useI18n } from "../i18n";
 
@@ -57,6 +58,7 @@ function AppDetail({ entry, onBack, devices }: {
   const { t, locale } = useI18n();
   const localised = useLocalised();
   const [readme, setReadme] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
 
   useEffect(() => {
     const url = entry.readme_url?.[locale] || entry.readme_url?.en;
@@ -116,29 +118,13 @@ function AppDetail({ entry, onBack, devices }: {
       ) : null}
 
       <section className="app-detail-install">
-        <h3>{t("appInstallPickDevice")}</h3>
-        <ul className="app-group-list">
-          {devices.map((device) => (
-            <li key={device.device_uid}>
-              <Link
-                className="app-device-row"
-                to={`/device/${encodeURIComponent(device.device_uid)}/apps?install=${encodeURIComponent(entry.id)}`}
-              >
-                <span className="app-device-name">
-                  {device.display_name || device.device_name || device.device_uid}
-                </span>
-                <span className="app-mono">
-                  {(device.display_name || device.device_name) &&
-                   (device.display_name || device.device_name) !== device.device_uid
-                    ? device.device_uid : ""}
-                </span>
-                <ChevronRight size={16} strokeWidth={2} aria-hidden="true" />
-              </Link>
-            </li>
-          ))}
-          {!devices.length ? <li className="app-empty">{t("appInstallNoDevices")}</li> : null}
-        </ul>
+        <button type="button" className="button primary" onClick={() => setInstalling(true)}>
+          <Download size={15} strokeWidth={2} />
+          {t("appInstallButton")}
+        </button>
+        <p className="service-muted">{t("appInstallButtonCopy")}</p>
       </section>
+      {installing ? <AppInstallDialog app={entry} devices={devices} onClose={() => setInstalling(false)} /> : null}
 
       {readme ? (
         <section className="app-detail-readme">

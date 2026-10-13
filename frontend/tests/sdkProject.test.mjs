@@ -167,3 +167,33 @@ test("every function the language has is documented in the editor", async () => 
   const missing = sdk.LANGUAGE.functions.filter((name) => !language.functionDoc(name)?.info);
   assert.deepEqual(missing, []);
 });
+
+test("manifest fields read and write back in a flow app", async () => {
+  const { project, sdk } = await modules;
+  const flow = { kind: "flow", source: project.flowTemplate("my_app", "jane") };
+  assert.deepEqual(project.readManifestFields(flow), {
+    name: "My App",
+    author: "jane",
+    summary: "What this app does, in one line.",
+  });
+  let source = project.writeManifestField(flow, "author", "Nick Xu");
+  source = project.writeManifestField({ kind: "flow", source }, "name", "Grip \"Meter\"");
+  source = project.writeManifestField({ kind: "flow", source }, "summary", "Counts grips.");
+  const fields = project.readManifestFields({ kind: "flow", source });
+  assert.deepEqual(fields, { name: "Grip Meter", author: "Nick_Xu", summary: "Counts grips." });
+  // Still a valid app, and nothing outside the header moved.
+  const analysis = sdk.analyzeFlow(source);
+  assert.equal(analysis.ok, true, JSON.stringify(analysis.diagnostics));
+  assert.equal(analysis.package.manifest.author, "Nick_Xu");
+  assert.ok(source.includes("led green when pressed"));
+});
+
+test("manifest fields read and write back in a readout", async () => {
+  const { project, sdk } = await modules;
+  const readout = { kind: "readout", source: project.readoutTemplate("my_readout", "jane") };
+  const source = project.writeManifestField(readout, "author", "nick");
+  assert.equal(project.readManifestFields({ kind: "readout", source }).author, "nick");
+  assert.equal(sdk.analyzeReadout(source).ok, true);
+  // Mid-edit JSON is left alone rather than clobbered.
+  assert.equal(project.writeManifestField({ kind: "readout", source: "{ broken" }, "author", "x"), "{ broken");
+});

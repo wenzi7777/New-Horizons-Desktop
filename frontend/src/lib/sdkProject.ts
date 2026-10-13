@@ -256,6 +256,89 @@ export function appIdOf(project: Pick<SdkProject, "kind" | "source">): string {
   }
 }
 
+/** The manifest fields the Studio lets an author edit outside the code. */
+export type EditableManifestField = "name" | "author" | "summary";
+export type EditableManifest = Record<EditableManifestField, string>;
+
+const EDITABLE_FIELDS: EditableManifestField[] = ["name", "author", "summary"];
+
+/** The `app <id> { ... }` header block of a flow app, as [start, end) offsets. */
+function flowHeaderRange(source: string): [number, number] | null {
+  const open = /(?:^|\n)\s*app\s+[A-Za-z_][A-Za-z0-9_.-]*\s*\{/.exec(source);
+  if (!open) return null;
+  const start = open.index + open[0].length;
+  const close = source.indexOf("}", start);
+  return close < 0 ? null : [start, close];
+}
+
+const FLOW_FIELD_LINE = (field: string) => new RegExp(`(^|\\n)([ \\t]*)${field}([ \\t]+)([^\\n]*)`);
+
+/**
+ * name / author / summary as the source currently states them. The source is
+ * the only place an app's metadata lives, so this is read from it.
+ */
+export function readManifestFields(project: Pick<SdkProject, "kind" | "source">): EditableManifest {
+  const out: EditableManifest = { name: "", author: "", summary: "" };
+  if (project.kind === "flow") {
+    const range = flowHeaderRange(project.source);
+    if (!range) return out;
+    const header = project.source.slice(range[0], range[1]);
+    for (const field of EDITABLE_FIELDS) {
+      const match = FLOW_FIELD_LINE(field).exec(header);
+      if (!match) continue;
+      const raw = match[4].trim();
+      out[field] = raw.startsWith('"') ? raw.replace(/^"|"$/g, "") : raw;
+    }
+    return out;
+  }
+  try {
+    const manifest = JSON.parse(project.source)?.manifest ?? {};
+    for (const field of EDITABLE_FIELDS) {
+      if (typeof manifest[field] === "string") out[field] = manifest[field];
+    }
+  } catch {
+    // Unparseable while being typed: nothing to show.
+  }
+  return out;
+}
+
+/**
+ * The source with one manifest field set. The author is one word (the .nhs
+ * lexer splits on spaces), so it goes through the same safeWord() as the
+ * templates. Returns the source unchanged when the field cannot be located
+ * (e.g. a flow header without that line, or JSON mid-edit).
+ */
+export function writeManifestField(
+  project: Pick<SdkProject, "kind" | "source">,
+  field: EditableManifestField,
+  value: string,
+): string {
+  const clean = field === "author" ? safeWord(value) : value.replace(/["\\\n]/g, "").trim();
+  if (project.kind === "flow") {
+    const range = flowHeaderRange(project.source);
+    if (!range) return project.source;
+    const header = project.source.slice(range[0], range[1]);
+    const pattern = FLOW_FIELD_LINE(field);
+    if (!pattern.test(header)) return project.source;
+    const literal = field === "author" ? clean : `"${clean}"`;
+    const next = header.replace(pattern, (_all, lead, indent, gap) => `${lead}${indent}${field}${gap}${literal}`);
+    return project.source.slice(0, range[0]) + next + project.source.slice(range[1]);
+  }
+  try {
+    const doc = JSON.parse(project.source);
+    if (!doc || typeof doc !== "object" || typeof doc.manifest !== "object" || doc.manifest === null) return project.source;
+    doc.manifest[field] = clean;
+    return `${JSON.stringify(doc, null, 2)}\n`;
+  } catch {
+    return project.source;
+  }
+}
+
+/** One-word author name as the .nhs lexer reads it (spaces become `_`). */
+export function normalizeAuthor(value: string): string {
+  return value.trim() ? safeWord(value) : "";
+}
+
 export function newProject(kind: SdkKind, source: string, origin?: SdkProject["origin"]): SdkProject {
   return {
     id: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
