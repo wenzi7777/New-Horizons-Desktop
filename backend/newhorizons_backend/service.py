@@ -1534,7 +1534,13 @@ class NewHorizonsService:
             "gateway_connected": bool(connected),
             "last_gateway_seen_at": seen_at,
             "gateway_state": gateway_state,
-            "findme": findme_state,
+            # A Hub is not a FindMe gateway: its snapshot would say "attached"
+            # while the device's own status says "idle", and the two writers
+            # took turns (the FindMe card flickered every few seconds). The
+            # Hub's view of the device lives in gateway_state instead.
+            "findme": None
+            if self._gateways.get(gateway_id, {}).get("client_type") == "hub"
+            else {k: v for k, v in findme_state.items() if v not in (None, "")},
             "protocol": device.get("protocol"),
             "firmware_version": device.get("firmware_version"),
             "hardware_model": device.get("hardware_model"),
@@ -2589,6 +2595,7 @@ class NewHorizonsService:
             self._forget_pending_command(device_uid, {"request_id": request_id})
         if str(payload.get("command") or "") == "app_events":
             self._capture_app_events(device_uid, payload)
+        self._mark_relayed_update_started(payload)
         is_status_snapshot = self._is_status_snapshot_result(payload)
         calibration_status = self._calibration_status_from_result(payload)
         inner = payload.get("data") if isinstance(payload.get("data"), dict) else {}
@@ -2691,6 +2698,28 @@ class NewHorizonsService:
         if not all(key in source for key in ("enabled", "session_active", "tare_complete", "levels")):
             return None
         return {key: source[key] for key in cls.CALIBRATION_STATUS_KEYS if key in source}
+
+    # The reply a Direct-mode (ESP-NOW) device sends to check_update /
+    # apply_update only *starts* the Hub-relayed operation; the state it
+    # carries is still "idle" with no version (firmware v1.13.0 and earlier).
+    # Taken literally it overwrote the last known update info with blanks.
+    RELAYED_UPDATE_START = {"update_check_started": "checking", "update_started": "starting"}
+
+    @classmethod
+    def _mark_relayed_update_started(cls, payload: dict[str, Any]) -> None:
+        phase = cls.RELAYED_UPDATE_START.get(str(payload.get("message") or ""))
+        if phase is None:
+            return
+        for container in (payload, payload.get("data")):
+            if not isinstance(container, dict):
+                continue
+            state = container.get("update_state")
+            if isinstance(state, dict) and str(state.get("phase") or "idle") == "idle":
+                state = dict(state)
+                state["phase"] = phase
+                state.setdefault("operation", "check_update" if phase == "checking" else "apply_update")
+                # Blank fields would erase what the last status knew.
+                container["update_state"] = {k: v for k, v in state.items() if v not in ("", None)}
 
     @staticmethod
     def _is_status_snapshot_result(payload: dict[str, Any]) -> bool:
@@ -3392,6 +3421,15 @@ class NewHorizonsService:
                 return existing
         return incoming
 
+    # Blocks written by more than one source -- a relay's presence snapshot
+    # and the device's own status -- each carrying a different subset of
+    # keys (only the device knows its UDP port and heartbeat interval, only
+    # the Gateway its claim). Replacing the whole block made those fields
+    # appear and vanish on alternate updates, so they are merged key by key.
+    # (The relay's snapshot drops its blank values before it gets here; the
+    # device's own blanks are authoritative and do clear a field.)
+    MERGED_DEVICE_BLOCKS = ("findme", "gateway_state")
+
     @classmethod
     def _merge_device_entry(cls, existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
         merged = dict(existing)
@@ -3401,6 +3439,8 @@ class NewHorizonsService:
             if value is not None:
                 if key == "update_state":
                     value = cls._merge_update_state(merged.get("update_state"), value, existing_mode, incoming_mode)
+                elif key in cls.MERGED_DEVICE_BLOCKS and isinstance(value, dict) and isinstance(merged.get(key), dict):
+                    value = {**merged[key], **value}
                 merged[key] = value
         return cls._finalize_apply_update_for_firmware_version(merged)
 

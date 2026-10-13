@@ -1548,6 +1548,23 @@ export function DeviceSettingsPage() {
     };
   }, [batteryGaugeSyncing, deviceUid, isControlUnavailable, t]);
 
+  // A Hub-relayed (ESP-NOW) check_update/apply_update only starts the
+  // operation; its outcome reaches update_state over the next seconds or
+  // minutes. Re-read status while it runs, or the card never shows it.
+  const hubRelayed = isHubRelayed(device);
+  const updatePhase = String(updateState.phase ?? "");
+  const relayedUpdateRunning = hubRelayed && ["checking", "starting", "downloading"].includes(updatePhase);
+  useEffect(() => {
+    if (!relayedUpdateRunning || !deviceUid || isControlUnavailable) return undefined;
+    const intervalId = window.setInterval(() => {
+      if (!commandInFlightRef.current) {
+        void run(t("refreshStatus"), quietCommand({ command: "status" }), 18000, { background: true }).catch(() => undefined);
+      }
+    }, 4000);
+    return () => window.clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relayedUpdateRunning, deviceUid, isControlUnavailable]);
+
   useEffect(() => () => {
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current);
@@ -1826,6 +1843,28 @@ export function DeviceSettingsPage() {
               </button>
             </div>
           </div>
+          {hubRelayed ? (
+          // ESP-NOW devices do not use FindMe; show the Hub link instead of
+          // FindMe fields that are always empty (or stale) in this mode.
+          <div className="settings-card">
+            <div className="settings-detail-header">
+              <div>
+                <h3>{t("hubLinkTitle")}</h3>
+                <p>{t("hubLinkCopy")}</p>
+              </div>
+            </div>
+            <div className="settings-detail-grid">
+              <DetailBox label={t("hubLinkHub")} value={device?.gateway_id || "-"} />
+              <DetailBox
+                label={t("hubLinkState")}
+                value={isControlUnavailable ? t("offline") : t("hubOnline")}
+              />
+              <DetailBox label={t("transport")} value="ESP-NOW" />
+              <DetailBox label={t("connectedVia")} value={t("deviceViaHubLong")} />
+              <DetailBox label={t("lastSeen")} value={normalized?.lastSeen ?? "-"} />
+            </div>
+          </div>
+          ) : (
           <div className="settings-card">
             <div className="settings-detail-header">
               <div>
@@ -1858,6 +1897,7 @@ export function DeviceSettingsPage() {
               <DetailBox label={t("gatewayLastError")} value={findme.last_error ?? "-"} />
             </div>
           </div>
+          )}
         </div>
       );
     }
@@ -2828,9 +2868,18 @@ export function DeviceSettingsPage() {
           <small>{t("hardwareModel")}: {normalized?.hardwareModel ? displayHardwareModel(normalized.hardwareModel) : "-"}</small>
         </div>
         <div className="settings-overview-card">
-          <span>{t("gatewayTitle")}</span>
-          <strong>{stringValue(findme.state)}</strong>
-          <small>{stringValue(findme.gateway_id)} {stringValue(findme.host)}</small>
+          <span>{hubRelayed ? t("hubLinkTitle") : t("gatewayTitle")}</span>
+          {hubRelayed ? (
+            <>
+              <strong>{isControlUnavailable ? t("offline") : t("hubOnline")}</strong>
+              <small>{t("hubLinkHub")}: {device?.gateway_id || "-"}</small>
+            </>
+          ) : (
+            <>
+              <strong>{stringValue(findme.state)}</strong>
+              <small>{stringValue(findme.gateway_id)} {stringValue(findme.host)}</small>
+            </>
+          )}
         </div>
         <div className="settings-overview-card">
           <span>{t("matrixShape")}</span>

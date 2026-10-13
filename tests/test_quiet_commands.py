@@ -45,7 +45,8 @@ class QuietFlagTests(unittest.TestCase):
         # RAM monitor, battery-sync status, and the three one-shot status reads
         # a section fires by itself when it opens.
         self.assertIn('quietCommand({ command: "memory_status" })', page)
-        self.assertEqual(page.count('quietCommand({ command: "status" })'), 4)
+        # +1 (v0.21.1): polling while a Hub-relayed update check runs.
+        self.assertEqual(page.count('quietCommand({ command: "status" })'), 5)
 
     def test_readouts_poll_quietly(self):
         view = read(SRC / "components" / "ReadoutView.tsx")
