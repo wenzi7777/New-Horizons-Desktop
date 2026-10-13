@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Check, ChevronRight, CircleCheck, Download, Plus } from "lucide-react";
 
 import { ConfirmModal } from "../ConfirmModal";
@@ -44,6 +44,9 @@ type CalibrationWorkbenchProps = {
   calibrationStatus: Record<string, unknown>;
   maintenanceMode: boolean;
   run: CalibrationRun;
+  // The pressure-chamber flow, shown as its own collapsible section beside
+  // the point-by-point one (both end up in the same profile).
+  airPressurePanel?: ReactNode;
 };
 
 type Outcome = { ok: boolean; code: string; result: Record<string, unknown> | null };
@@ -158,7 +161,12 @@ export function CalibrationWorkbench({
   calibrationStatus,
   maintenanceMode,
   run,
+  airPressurePanel,
 }: CalibrationWorkbenchProps) {
+  // Point-by-point is the everyday flow, so it starts open; the chamber
+  // flow needs the lab rig and starts collapsed.
+  const [pointOpen, setPointOpen] = useState(true);
+  const [airOpen, setAirOpen] = useState(false);
   const rows = numberValue(matrixShape.rows, 0);
   const cols = numberValue(matrixShape.cols, 0);
   const totalSensors = rows * cols;
@@ -698,11 +706,19 @@ export function CalibrationWorkbench({
         {zeroError ? <p className="notice error">{zeroError}</p> : null}
       </section>
 
-      <section className="settings-card cal-card">
-        <div className="cal-card-text">
-          <h4>{t("calPressureTitle")}</h4>
-          <p>{t("calPressureCopy")}</p>
-        </div>
+      <details
+        className="settings-card cal-card cal-section"
+        open={pointOpen}
+        onToggle={(event) => setPointOpen(event.currentTarget.open)}
+      >
+        <summary>
+          <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
+          <span>
+            <strong>{t("calPointTitle")}</strong>
+            <small>{t("calPressureCopy")}</small>
+          </span>
+        </summary>
+        <div className="cal-section-body">
 
         <CalibrationSteps t={t} step={step} saveReady={saveReady} />
 
@@ -921,7 +937,25 @@ export function CalibrationWorkbench({
           </div>
         ) : null}
         {flowError ? <p className="notice error">{flowError}</p> : null}
-      </section>
+        </div>
+      </details>
+
+      {airPressurePanel ? (
+        <details
+          className="settings-card cal-card cal-section"
+          open={airOpen}
+          onToggle={(event) => setAirOpen(event.currentTarget.open)}
+        >
+          <summary>
+            <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
+            <span>
+              <strong>{t("calAirTitle")}</strong>
+              <small>{t("calAirCopy")}</small>
+            </span>
+          </summary>
+          <div className="cal-section-body">{airPressurePanel}</div>
+        </details>
+      ) : null}
 
       <details className="settings-card cal-card cal-advanced">
         <summary>
@@ -1314,17 +1348,12 @@ function FitProgress({
   );
 }
 
-// The paper's readout curves (AC14, Rfb 8.2 kOhm): ADC1 and ADC2 measured
-// separately, analysis/r01b_adc{1,2}_fit.json.
-const PAPER_READOUT = { adc1_c1: 2.6656779, adc1_c2: -9.4473953e-05, adc2_c1: 2.6606, adc2_c2: -8.871e-05 };
-const IDENTITY_READOUT = { adc1_c1: 1, adc1_c2: 0, adc2_c1: 1, adc2_c2: 0 };
-
+// The readout curve (ΔmV = c1·x + c2·x², per ADC) is deliberately not
+// editable here: the only known curve belongs to one specific board, so it
+// waits for boards that can measure their own. The firmware keeps whatever
+// is set (calibration_set_fit), and this editor only ever sends min_level.
 type FitSettingsValues = {
   min_level: number;
-  adc1_c1: number;
-  adc1_c2: number;
-  adc2_c1: number;
-  adc2_c2: number;
 };
 
 function FitSettingsEditor({
@@ -1338,13 +1367,7 @@ function FitSettingsEditor({
   disabled: boolean;
   onApply: (values: FitSettingsValues) => void;
 }) {
-  const fromDevice = (): FitSettingsValues => ({
-    min_level: settings?.min_level ?? 3,
-    adc1_c1: settings?.readout[0]?.c1 ?? 1,
-    adc1_c2: settings?.readout[0]?.c2 ?? 0,
-    adc2_c1: settings?.readout[1]?.c1 ?? 1,
-    adc2_c2: settings?.readout[1]?.c2 ?? 0,
-  });
+  const fromDevice = (): FitSettingsValues => ({ min_level: settings?.min_level ?? 3 });
   const [values, setValues] = useState<FitSettingsValues>(fromDevice);
   const deviceKey = JSON.stringify(settings);
   useEffect(() => {
@@ -1352,18 +1375,6 @@ function FitSettingsEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceKey]);
   if (!settings) return null;
-  const field = (key: keyof FitSettingsValues, label: string) => (
-    <label className="field cal-field cal-field-narrow" key={key}>
-      <span>{label}</span>
-      <input
-        type="number"
-        step="any"
-        value={values[key]}
-        disabled={disabled}
-        onChange={(event) => setValues((current) => ({ ...current, [key]: Number(event.target.value) }))}
-      />
-    </label>
-  );
   return (
     <div className="app-group cal-fit-settings">
       <div className="app-group-header">
@@ -1371,19 +1382,16 @@ function FitSettingsEditor({
       </div>
       <p className="cal-hint">{t("calFitSettingsCopy")}</p>
       <div className="cal-capture-row">
-        {field("min_level", t("paramFitMinLevel"))}
-        {field("adc1_c1", t("paramAdc1C1"))}
-        {field("adc1_c2", t("paramAdc1C2"))}
-        {field("adc2_c1", t("paramAdc2C1"))}
-        {field("adc2_c2", t("paramAdc2C2"))}
-      </div>
-      <div className="actions compact">
-        <button className="button ghost compact" type="button" disabled={disabled} onClick={() => setValues((current) => ({ ...current, ...PAPER_READOUT }))}>
-          {t("calFitPresetPaper")}
-        </button>
-        <button className="button ghost compact" type="button" disabled={disabled} onClick={() => setValues((current) => ({ ...current, ...IDENTITY_READOUT }))}>
-          {t("calFitPresetIdentity")}
-        </button>
+        <label className="field cal-field cal-field-narrow">
+          <span>{t("paramFitMinLevel")}</span>
+          <input
+            type="number"
+            step="any"
+            value={values.min_level}
+            disabled={disabled}
+            onChange={(event) => setValues({ min_level: Number(event.target.value) })}
+          />
+        </label>
         <button className="button compact" type="button" disabled={disabled} onClick={() => onApply(values)}>
           {t("calFitApply")}
         </button>

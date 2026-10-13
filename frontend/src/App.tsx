@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useRef } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import packageJson from "../package.json";
 
@@ -61,15 +61,37 @@ function LoadingScreen() {
   );
 }
 
+// Publishes the sticky topbar's live height as --topbar-height, so content
+// that sticks below it (the settings sidebar) clears it even when its nav
+// wraps onto a second row.
+function useTopbarHeightVar() {
+  const ref = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || typeof ResizeObserver === "undefined") return undefined;
+    const root = document.documentElement;
+    const update = () => root.style.setProperty("--topbar-height", `${element.offsetHeight}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--topbar-height");
+    };
+  }, []);
+  return ref;
+}
+
 function AuthenticatedApp() {
   const { locale, setLocale, t } = useI18n();
   const { user, logout } = useAuth();
   const role = (user?.role ?? "user") as Role;
   const navItems = NAV_ITEMS.filter((item) => allowedRoles(item.roles, role));
 
+  const topbarRef = useTopbarHeightVar();
   return (
     <div className="app-shell">
-      <header className="topbar">
+      <header className="topbar" ref={topbarRef}>
         <div className="topbar-brand">
           <h1>{t("appTitle")}</h1>
           <small className="app-version">{APP_VERSION}</small>

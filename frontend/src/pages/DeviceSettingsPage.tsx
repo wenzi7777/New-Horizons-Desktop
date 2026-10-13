@@ -745,10 +745,7 @@ function PressureCalibrationPanel({ t, deviceUid, run }: { t: (key: string) => s
 
   return (
     <div className="settings-stack">
-      <div className="settings-detail-header">
-        <h3>{t("pressureCalibration")}</h3>
-      </div>
-
+      {/* Titled by the collapsible section CalibrationWorkbench puts it in. */}
       {showCompressorOffBanner && (
         <div className="compressor-safety-banner">
           <span className="banner-icon"><TriangleAlert size={22} strokeWidth={1.8} /></span>
@@ -2460,8 +2457,8 @@ export function DeviceSettingsPage() {
             calibrationStatus={calibrationStatus}
             maintenanceMode={normalized?.mode === "maintenance" || normalized?.mode === "safe_maintenance"}
             run={run}
+            airPressurePanel={<PressureCalibrationPanel t={t} deviceUid={deviceUid} run={run} />}
           />
-          <PressureCalibrationPanel t={t} deviceUid={deviceUid} run={run} />
         </div>
       );
     }

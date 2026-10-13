@@ -1190,6 +1190,12 @@ button:disabled {
   background: var(--panel-solid);
   padding: 8px;
   box-shadow: var(--shadow-sm);
+  /* Stays in view while the section beside it scrolls, just under the
+     sticky topbar (its height is published by App.tsx). */
+  position: sticky;
+  top: calc(var(--topbar-height, 64px) + 14px);
+  max-height: calc(100vh - var(--topbar-height, 64px) - 28px);
+  overflow-y: auto;
 }
 
 .settings-sidebar button,
@@ -4952,6 +4958,13 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  /* Stacked above the content on narrow screens: no longer a side rail. */
+  .settings-sidebar {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+
   .gateway-summary,
   .gateway-grid,
   .gateway-facts {
@@ -8374,6 +8387,61 @@ button.sdk-diagnostic:hover {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 400;
+}
+
+/* The two calibration methods (point-by-point, air-pressure): collapsible
+   cards titled like the Advanced section. */
+.cal-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-dim);
+}
+
+.cal-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cal-section > summary svg {
+  flex-shrink: 0;
+  transition: transform var(--dur-med) var(--ease-out);
+}
+
+.cal-section[open] > summary svg {
+  transform: rotate(90deg);
+}
+
+.cal-section > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.cal-section > summary span {
+  display: grid;
+  gap: 2px;
+}
+
+.cal-section > summary strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.cal-section > summary small {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.cal-section-body {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
 }
 
 .cal-disclosure-body,
