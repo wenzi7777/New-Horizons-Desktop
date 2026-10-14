@@ -607,7 +607,7 @@ def create_blueprint(
         if not device_uid:
             return json_response({"error": "device_uid_required"}), 400
         try:
-            compiled = compile_terminal_command(command_line)
+            compiled = compile_terminal_command(command_line, svc.device_command_names(device_uid))
         except ValueError as exc:
             return json_response({"error": str(exc)}), 400
         request_id = str(data.get("request_id") or uuid.uuid4().hex)
@@ -634,10 +634,18 @@ def create_blueprint(
         if not isinstance(raw_payload, dict):
             return json_response({"error": "payload_required"}), 400
         try:
-            payload = validate_device_command_payload(raw_payload)
+            payload = validate_device_command_payload(raw_payload, svc.device_command_names(device_uid))
         except ValueError as exc:
             return json_response({"error": str(exc)}), 400
         return _queue_device_command(device_uid, payload)
+
+    @bp.get("/api/devices/<device_uid>/commands")
+    @auth
+    @_require_roles("admin")
+    def device_commands(device_uid: str) -> Response:
+        # The device's own command table (firmware v1.15.0+); null until it
+        # has been fetched, or for older firmware.
+        return json_response({"catalog": svc.device_command_catalog(device_uid)})
 
     def _library_error(exc: Exception) -> tuple[Response, int]:
         # A stale catalog is still useful, so only a hard failure lands here.

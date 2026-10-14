@@ -338,7 +338,7 @@ class WebSocketHub:
             client.enqueue({"type": "error", "code": "payload_required", "message": "payload is required"})
             return
         try:
-            payload = validate_device_command_payload(raw_payload)
+            payload = validate_device_command_payload(raw_payload, self.service.device_command_names(device_uid))
         except ValueError as exc:
             client.enqueue({"type": "error", "code": "invalid_command", "message": str(exc)})
             return

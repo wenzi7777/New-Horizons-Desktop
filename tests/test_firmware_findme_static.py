@@ -21,6 +21,14 @@ PACKET_BUILDER_H = ARDUINO_ROOT / "PacketBuilder.h"
 SKETCH = ARDUINO_ROOT / "newhorizons_os.ino"
 
 
+def control_source() -> str:
+    # Since firmware v1.15.0 the command handlers live in ControlCommands*.cpp
+    # (dispatched from ControlCommandTable.cpp); ControlServer.cpp keeps the
+    # transports and the shared status builders.
+    files = [CONTROL_CPP] + sorted(ARDUINO_ROOT.glob("ControlCommand*.cpp"))
+    return "\n".join(path.read_text() for path in files)
+
+
 class FirmwareFindMeStaticTest(unittest.TestCase):
     def test_findme_does_not_periodically_rediscover_after_same_gateway_accept(self):
         source = FINDME_CPP.read_text()
@@ -68,7 +76,7 @@ class FirmwareFindMeStaticTest(unittest.TestCase):
         self.assertIn("sendHeartbeatIfDue();", sketch)
 
     def test_control_server_logs_incoming_commands_for_serial_diagnostics(self):
-        source = CONTROL_CPP.read_text()
+        source = control_source()
 
         self.assertIn("control_command_received", source)
         self.assertIn("control_command_executing", source)
@@ -77,7 +85,7 @@ class FirmwareFindMeStaticTest(unittest.TestCase):
         self.assertIn("request_id=", source)
 
     def test_control_status_payload_exposes_arduino_identity_and_runtime(self):
-        source = CONTROL_CPP.read_text()
+        source = control_source()
 
         for token in (
             'jsonStringField(data, "device_name"',
@@ -93,7 +101,7 @@ class FirmwareFindMeStaticTest(unittest.TestCase):
             self.assertIn(token, source)
 
     def test_control_layout_and_scan_responses_return_status_fields(self):
-        source = CONTROL_CPP.read_text()
+        source = control_source()
 
         self.assertIn("matrixLayoutJson", source)
         self.assertIn("layoutStatusJson", source)

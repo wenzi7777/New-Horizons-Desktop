@@ -10,9 +10,13 @@ import {
   COMMAND_GROUP_ORDER,
   LOCAL_ONLY_COMMANDS,
   buildCommandLine,
+  deviceCommandBlocks,
   findCommandBlock,
+  maintenanceOnlyCommands,
   missingRequiredParams,
   parsePastedCommand,
+  type CommandBlock,
+  type DeviceCommandSpec,
   type PasteErrorCode,
   type PasteWarning,
 } from "../lib/terminalCommands";
@@ -295,8 +299,8 @@ function pinCommand(analogPins: number[], selectPins: number[]) {
   return `set-matrix-layout --analog-pins ${analogPins.join(",")} --select-pins ${selectPins.join(",")}`;
 }
 
-function commandBlock(command: string) {
-  return findCommandBlock(command) ?? COMMAND_BLOCKS[0];
+function commandBlock(command: string, extraBlocks: CommandBlock[] = []) {
+  return findCommandBlock(command, extraBlocks) ?? COMMAND_BLOCKS[0];
 }
 
 function commandParamDefaultValue(command: string, key: string, profile = DEFAULT_BOARD_PROFILE) {
@@ -311,8 +315,8 @@ function commandParamDefaultValue(command: string, key: string, profile = DEFAUL
   return "";
 }
 
-function commandParamDefaults(command: string, profile = DEFAULT_BOARD_PROFILE) {
-  const block = commandBlock(command);
+function commandParamDefaults(command: string, profile = DEFAULT_BOARD_PROFILE, extraBlocks: CommandBlock[] = []) {
+  const block = commandBlock(command, extraBlocks);
   return block.params.reduce<Record<string, string>>((values, param) => {
     values[param.key] = param.defaultValue ?? commandParamDefaultValue(command, param.key, profile);
     return values;
@@ -355,6 +359,13 @@ function boardAwareCommandDescription(command: string, profile: BoardProfile, t:
     return t("terminalHelpIoConfigBoardAware");
   }
   return t(commandDescriptionKey(command));
+}
+
+// A device-catalog block has no translated help: the firmware's own summary.
+// Either kind is marked when the device says it needs maintenance mode.
+function commandBlockDescription(block: CommandBlock, profile: BoardProfile, maintenanceOnly: Set<string>, t: (key: string) => string) {
+  const text = block.device ? block.device.summary : boardAwareCommandDescription(block.command, profile, t);
+  return maintenanceOnly.has(block.command) ? `${text} · ${t("terminalMaintenanceOnly")}` : text;
 }
 
 type BoardIoModalProps = {
@@ -575,7 +586,41 @@ export function TerminalPage() {
   const [showIoModal, setShowIoModal] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [pasteResult, setPasteResult] = useState<PasteResult | null>(null);
+  const [deviceCatalog, setDeviceCatalog] = useState<DeviceCommandSpec[] | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
+
+  // The device's own command table (firmware v1.15.0+). The backend fetches it
+  // after the device's first status, so a fresh device may not have one yet:
+  // ask again a few times. Older firmware never has one; the static blocks
+  // below are then all there is.
+  useEffect(() => {
+    setDeviceCatalog(null);
+    if (!selectedDevice) return;
+    let cancelled = false;
+    let attempts = 0;
+    let timer: number | undefined;
+    const load = () => {
+      attempts += 1;
+      void api
+        .deviceCommands(selectedDevice)
+        .then((response) => {
+          if (cancelled) return;
+          if (response.catalog) setDeviceCatalog(response.catalog.commands);
+          else if (attempts < 4) timer = window.setTimeout(load, 5000);
+        })
+        .catch(() => undefined);
+    };
+    load();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [selectedDevice]);
+
+  const extraBlocks = useMemo(() => deviceCommandBlocks(deviceCatalog), [deviceCatalog]);
+  const maintenanceOnly = useMemo(() => maintenanceOnlyCommands(deviceCatalog), [deviceCatalog]);
+  const extraBlocksRef = useRef(extraBlocks);
+  extraBlocksRef.current = extraBlocks;
 
   useEffect(() => {
     void Promise.all([api.devices(), api.terminalHelp()])
@@ -606,7 +651,7 @@ export function TerminalPage() {
     [helpItems],
   );
 
-  const selectedBlock = commandBlock(selectedCommand);
+  const selectedBlock = commandBlock(selectedCommand, extraBlocks);
   const generatedCommand = useMemo(
     () => buildCommandLine(selectedBlock, paramValues),
     [paramValues, selectedBlock],
@@ -619,9 +664,9 @@ export function TerminalPage() {
     () =>
       COMMAND_GROUP_ORDER.map((groupKey) => ({
         groupKey,
-        items: COMMAND_BLOCKS.filter((block) => block.groupKey === groupKey),
+        items: [...COMMAND_BLOCKS, ...extraBlocks].filter((block) => block.groupKey === groupKey),
       })).filter((group) => group.items.length > 0),
-    [],
+    [extraBlocks],
   );
   const selectedDeviceProfile = useMemo(
     () => boardProfileForHardwareModel(selectedDeviceEntry()?.hardware_model),
@@ -642,17 +687,17 @@ export function TerminalPage() {
   const selectedCommandRef = useRef(selectedCommand);
   selectedCommandRef.current = selectedCommand;
   useEffect(() => {
-    setParamValues(commandParamDefaults(selectedCommandRef.current, selectedDeviceProfile));
+    setParamValues(commandParamDefaults(selectedCommandRef.current, selectedDeviceProfile, extraBlocksRef.current));
   }, [selectedDeviceProfile]);
 
   function selectCommand(command: string) {
     setSelectedCommand(command);
-    setParamValues(commandParamDefaults(command, selectedDeviceProfile));
+    setParamValues(commandParamDefaults(command, selectedDeviceProfile, extraBlocks));
     setErrorMessage("");
   }
 
   function applyPastedCommand(text: string) {
-    const parsed = parsePastedCommand(text);
+    const parsed = parsePastedCommand(text, extraBlocks);
     if (!parsed.ok) {
       setPasteResult({ ok: false, error: parsed.error, detail: parsed.detail });
       return;
@@ -865,7 +910,7 @@ export function TerminalPage() {
                 <div className="command-root-card">
                   <span>{t("selectedCommand")}</span>
                   <strong>{selectedBlock.command}</strong>
-                  <p>{boardAwareCommandDescription(selectedBlock.command, selectedDeviceProfile, t)}</p>
+                  <p>{commandBlockDescription(selectedBlock, selectedDeviceProfile, maintenanceOnly, t)}</p>
                 </div>
                 {selectedCommandUnavailableReason ? <p className="notice">{selectedCommandUnavailableReason}</p> : null}
                 {selectedBlock.params.length ? (
@@ -955,7 +1000,7 @@ export function TerminalPage() {
                         title={unavailableReason || undefined}
                       >
                         <span>{block.command}</span>
-                        <small>{boardAwareCommandDescription(block.command, selectedDeviceProfile, t)}</small>
+                        <small>{commandBlockDescription(block, selectedDeviceProfile, maintenanceOnly, t)}</small>
                         <code>{help?.example ?? block.command}</code>
                       </button>
                     );

@@ -5,7 +5,9 @@ import test from "node:test";
 import {
   COMMAND_BLOCKS,
   buildCommandLine,
+  deviceCommandBlocks,
   findCommandBlock,
+  maintenanceOnlyCommands,
   parsePastedCommand,
   tokenizeCommandLine,
 } from "../src/lib/terminalCommands.ts";
@@ -207,4 +209,46 @@ test("clock commands have builder blocks", () => {
     buildCommandLine(findCommandBlock("set-time"), { "epoch-ms": "1780000000000", force: "true" }),
     "set-time --epoch-ms 1780000000000 --force true",
   );
+});
+
+// --- device command catalog (firmware v1.15.0+ `commands`) ---------------
+
+function spec(name, flags = {}) {
+  return { name, maintenance: false, heavy: false, quiet: false, internal: false, status_snapshot: false, summary: `${name} summary`, ...flags };
+}
+
+const CATALOG = [
+  spec("status", { heavy: true, status_snapshot: true }),
+  spec("file_delete", { maintenance: true }),
+  spec("set_transport", { internal: true }),
+  spec("blink_twice", { maintenance: true }),
+];
+
+test("catalog adds blocks only for commands the Desktop has none for", () => {
+  const blocks = deviceCommandBlocks(CATALOG);
+  assert.deepEqual(blocks.map((block) => block.command), ["blink-twice"]);
+  assert.equal(blocks[0].device.summary, "blink_twice summary");
+  assert.deepEqual(deviceCommandBlocks(null), []);
+});
+
+test("maintenance flags come from the device, in builder spelling", () => {
+  assert.deepEqual([...maintenanceOnlyCommands(CATALOG)].sort(), ["blink-twice", "file-delete"]);
+});
+
+test("catalog blocks pass their free arguments through", () => {
+  const [block] = deviceCommandBlocks(CATALOG);
+  assert.equal(buildCommandLine(block, {}), "blink-twice");
+  assert.equal(buildCommandLine(block, { args: " --count 3 " }), "blink-twice --count 3");
+});
+
+test("pasting a catalog command fills its argument field", () => {
+  const blocks = deviceCommandBlocks(CATALOG);
+  assert.equal(parsePastedCommand("blink-twice --count 3").ok, false);
+  const cli = parsePastedCommand('blink_twice --count 3 --name "two words"', blocks);
+  assert.equal(cli.ok, true);
+  assert.equal(cli.command, "blink-twice");
+  assert.equal(cli.values.args, '--count 3 --name "two words"');
+  const json = parsePastedCommand('{"command":"blink_twice","count":3,"request_id":"x"}', blocks);
+  assert.equal(json.ok, true);
+  assert.equal(json.values.args, "--count 3");
 });

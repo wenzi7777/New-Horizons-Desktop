@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 from typing import Any
 
@@ -34,6 +35,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "config_get",
     "config_set",
     "capabilities",
+    "commands",
     "app_list",
     "app_enable",
     "app_disable",
@@ -102,9 +104,12 @@ WRITABLE_SCOPES = {"user", "logs", "calibration"}
 WRITE_COMMANDS = {"file_write_begin", "file_write_chunk", "file_write_finish", "file_delete"}
 
 
-def validate_device_command_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def validate_device_command_payload(payload: dict[str, Any], device_commands: set[str] | None = None) -> dict[str, Any]:
+    """`device_commands`: the target device's own public commands (its
+    `commands` catalog, firmware v1.15.0+), accepted on top of the static
+    allowlist so a command added to the firmware needs no backend change."""
     command = str(payload.get("command") or "").strip()
-    if not command or command not in DEVICE_COMMAND_ALLOWLIST:
+    if not command or (command not in DEVICE_COMMAND_ALLOWLIST and command not in (device_commands or ())):
         raise ValueError("unknown_command")
     result = dict(payload)
     result["command"] = command
@@ -508,7 +513,7 @@ def terminal_help_items() -> list[dict[str, str]]:
     ]
 
 
-def compile_terminal_command(command_line: str) -> dict[str, Any]:
+def compile_terminal_command(command_line: str, device_commands: set[str] | None = None) -> dict[str, Any]:
     argv = shlex.split(command_line or "")
     if not argv:
         raise ValueError("empty_command")
@@ -545,6 +550,7 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "clock-sync": "clock_sync",
         "clock-status": "clock_status",
         "capabilities": "capabilities",
+        "commands": "commands",
         "config-schema": "config_schema",
         "app-list": "app_list",
         "app-list-packages": "app_list_packages",
@@ -937,7 +943,34 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         payload = {"command": "log_tail", "max_lines": int(parsed.get("lines", parsed.get("max_lines", 50)))}
         return {"command": "log_tail", "payload": payload, "argv": argv}
 
+    # A command the device lists but this file has no parser for (added to
+    # the firmware after this Desktop): `--key value` pairs become payload
+    # fields, with numbers and true/false converted.
+    generic = command.replace("-", "_")
+    if device_commands and generic in device_commands:
+        payload: dict[str, Any] = {"command": generic}
+        for key, value in _parse_options(args).items():
+            payload[key] = _coerce_scalar(value)
+        return {"command": generic, "payload": payload, "argv": argv}
+
     raise ValueError("unknown_command")
+
+
+def _coerce_scalar(value: str) -> Any:
+    # Strict on purpose: "0123", "1e3", "nan" stay strings, so ids and
+    # paths that merely look numeric are not mangled.
+    lowered = value.strip().lower()
+    if lowered in ("true", "false"):
+        return lowered == "true"
+    if _INT_RE.fullmatch(value):
+        return int(value)
+    if _FLOAT_RE.fullmatch(value):
+        return float(value)
+    return value
+
+
+_INT_RE = re.compile(r"-?(0|[1-9][0-9]*)")
+_FLOAT_RE = re.compile(r"-?(0|[1-9][0-9]*)\.[0-9]+")
 
 
 def _parse_options(args: list[str]) -> dict[str, str]:

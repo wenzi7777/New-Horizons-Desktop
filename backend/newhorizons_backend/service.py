@@ -18,6 +18,7 @@ from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_
 from .packet_parser import PacketParseError, parse_binary_packet
 from .result_chunks import RESULT_CHUNK_TYPE, ResultChunkReassembler, normalize_device_result
 from .terminal import DEVICE_COMMAND_ALLOWLIST
+from .device_commands import CommandCatalogStore
 from .discovery import DiscoveryResponder
 from .hub_channel_watch import HubChannelWatcher
 from .udp_ingest import UDPIngestServer
@@ -136,6 +137,8 @@ class NewHorizonsService:
         "app_verify",
         # v1.7.0: what the apps' OLED rows, status LED and strip show now.
         "app_view",
+        # v1.15.0: the device's own command table (device_commands.py).
+        "commands",
     }
     NORMAL_COMMANDS = SHARED_COMMANDS | {
         "enter_maintenance",
@@ -253,6 +256,9 @@ class NewHorizonsService:
         self._app_event_seq: dict[str, int] = {}
         self._app_event_thread: threading.Thread | None = None
         self._app_event_stop = threading.Event()
+        # What each device (firmware v1.15.0+) says it accepts; see
+        # device_commands.py. Absent -> the static tables above apply.
+        self._command_catalogs = CommandCatalogStore()
         self._pending_commands: dict[str, dict[str, dict[str, Any]]] = {}
         self._event_listeners: list[Callable[[dict[str, Any]], None]] = []
         self._ws_stats_provider: Callable[[], dict[str, Any]] | None = None
@@ -2617,6 +2623,8 @@ class NewHorizonsService:
             self._forget_pending_command(device_uid, {"request_id": request_id})
         if str(payload.get("command") or "") == "app_events":
             self._capture_app_events(device_uid, payload)
+        if str(payload.get("command") or "") == "commands":
+            self._record_command_catalog(device_uid, payload)
         self._mark_relayed_update_started(payload)
         is_status_snapshot = self._is_status_snapshot_result(payload)
         calibration_status = self._calibration_status_from_result(payload)
@@ -2696,6 +2704,75 @@ class NewHorizonsService:
         self._emit_event({"type": "device_update", "item": event_item})
         if purged_aliases:
             self._emit_event({"type": "device_snapshot", "items": self.list_devices()})
+        if is_status_snapshot or str(payload.get("command") or "") == "capabilities":
+            self._maybe_fetch_command_catalog(device_uid, payload)
+
+    # -- device command catalogs (firmware v1.15.0+) -------------------------
+    #
+    # The second place the backend sends a command on its own: one `commands`
+    # per device and firmware version, the first time a status shows it.
+
+    @staticmethod
+    def _result_data(payload: dict[str, Any]) -> dict[str, Any]:
+        # Relayed results keep the firmware's data under "data"; the direct
+        # TCP path (_record_arduino_response) flattens it into the envelope.
+        data = payload.get("data")
+        return data if isinstance(data, dict) else payload
+
+    def _device_firmware_version(self, device_uid: str, payload: dict[str, Any]) -> str:
+        data = self._result_data(payload)
+        for source in (data, payload):
+            version = str(source.get("firmware_version") or "")
+            if version:
+                return version
+        with self._lock:
+            status = self._latest_status.get(device_uid) or {}
+            device = self._devices.get(device_uid) or {}
+        return str(status.get("firmware_version") or device.get("firmware_version") or "")
+
+    def _maybe_fetch_command_catalog(self, device_uid: str, payload: dict[str, Any]) -> None:
+        if self._mock_mode:
+            return
+        data = self._result_data(payload)
+        if "command_schema_hash" in data:
+            self._command_catalogs.invalidate_if_hash_differs(device_uid, data.get("command_schema_hash"))
+        firmware = self._device_firmware_version(device_uid, payload)
+        if not self._command_catalogs.needs_fetch(device_uid, firmware):
+            return
+        self._command_catalogs.mark_requested(device_uid, firmware)
+        # Not inline: on the direct TCP path this runs inside publish_command.
+        threading.Thread(
+            target=self._fetch_command_catalog,
+            args=(device_uid,),
+            name="newhorizons-command-catalog",
+            daemon=True,
+        ).start()
+
+    def _fetch_command_catalog(self, device_uid: str) -> None:
+        try:
+            # quiet: the user did not ask for this, so no LED ack.
+            self.publish_command(device_uid, {"command": "commands", "quiet": True})
+        except RuntimeError:
+            # Offline or booting; the next status after CATALOG_RETRY_SEC asks again.
+            pass
+
+    def _record_command_catalog(self, device_uid: str, payload: dict[str, Any]) -> None:
+        if payload.get("ok") is False or str(payload.get("status") or "ok").lower() == "error":
+            return
+        firmware = self._device_firmware_version(device_uid, {})
+        self._command_catalogs.record(device_uid, firmware, self._result_data(payload))
+
+    def device_command_names(self, device_uid: str) -> set[str] | None:
+        """Commands a user may send this device, per its catalog; None without one."""
+        return self._command_catalogs.public_names(self._resolve_known_device_uid(device_uid))
+
+    def device_command_catalog(self, device_uid: str) -> dict[str, Any] | None:
+        catalog = self._command_catalogs.get(self._resolve_known_device_uid(device_uid))
+        if catalog is None:
+            return None
+        result = catalog.as_json()
+        result["commands"] = [item for item in result["commands"] if not item.get("internal")]
+        return result
 
     CALIBRATION_STATUS_KEYS = (
         "enabled", "mode_active", "session_active", "complete", "tare_complete",
@@ -3068,7 +3145,32 @@ class NewHorizonsService:
 
     def _boot_command_mode_error_locked(self, device_uid: str, payload: dict[str, Any]) -> str:
         status = self._latest_status.get(device_uid) or {}
+        catalog_error = self._catalog_command_mode_error(device_uid, status, payload)
+        if catalog_error is not None:
+            return catalog_error
         return self._boot_command_mode_error_for_status(status, payload)
+
+    def _catalog_command_mode_error(self, device_uid: str, status: dict[str, Any], payload: dict[str, Any]) -> str | None:
+        """Mode gating from the device's own flags; None means "no catalog".
+
+        The firmware only distinguishes "needs maintenance" from "runs
+        anywhere", so that is all this checks; an unknown mode stays
+        wrong_mode as in the static path.
+        """
+        command = str(payload.get("command") or payload.get("cmd") or "").strip()
+        if not command:
+            return None
+        current_mode = self._mode_from_payload(status)
+        if current_mode in ("safe", "safe-maintenance"):
+            current_mode = "safe_maintenance"
+        # No known mode: only existence is checked, as the static path does.
+        maintenance = current_mode != "normal"
+        error = self._command_catalogs.mode_error(device_uid, command, maintenance)
+        if error is None:
+            return None
+        if not error and current_mode and current_mode not in self.MODE_COMMANDS:
+            return "wrong_mode"
+        return error
 
     @classmethod
     def _boot_command_mode_error_for_status(cls, status: dict[str, Any], payload: dict[str, Any]) -> str:

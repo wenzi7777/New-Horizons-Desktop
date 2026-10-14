@@ -15,13 +15,33 @@ export type CommandBlock = {
   command: string;
   groupKey: string;
   params: CommandParam[];
+  // A command known only from the device's own catalog: no form, just the
+  // firmware's summary and a free `--key value` field passed through as is
+  // (the backend's generic compile turns it into the payload).
+  device?: { summary: string; maintenance: boolean };
 };
+
+// One row of the device's `commands` table (firmware v1.15.0+), as
+// GET /api/devices/<uid>/commands returns it.
+export type DeviceCommandSpec = {
+  name: string;
+  maintenance: boolean;
+  heavy: boolean;
+  quiet: boolean;
+  internal: boolean;
+  status_snapshot: boolean;
+  summary: string;
+};
+
+export const DEVICE_COMMAND_GROUP = "commandGroupDevice";
+export const RAW_ARGS_KEY = "args";
 
 export const COMMAND_GROUP_ORDER = [
   "commandGroupCore",
   "commandGroupMaintenance",
   "commandGroupConfig",
   "commandGroupFiles",
+  DEVICE_COMMAND_GROUP,
   "commandGroupDanger",
 ];
 
@@ -684,8 +704,35 @@ const JSON_ENVELOPE_KEYS = new Set(["command", "protocol", "request_id", "quiet"
 const TRUE_WORDS = new Set(["1", "true", "yes", "on", "enabled"]);
 const FALSE_WORDS = new Set(["0", "false", "no", "off", "disabled"]);
 
-export function findCommandBlock(command: string) {
-  return COMMAND_BLOCKS.find((block) => block.command === command);
+export function findCommandBlock(command: string, extraBlocks: CommandBlock[] = []) {
+  return COMMAND_BLOCKS.find((block) => block.command === command) ?? extraBlocks.find((block) => block.command === command);
+}
+
+/**
+ * Blocks for what the device lists but this Desktop has no block for -- a
+ * command added to the firmware later. Internal commands (set_transport,
+ * set_wifi) are not offered; the backend sends those itself.
+ */
+export function deviceCommandBlocks(catalog: DeviceCommandSpec[] | null | undefined): CommandBlock[] {
+  if (!catalog) return [];
+  const blocks: CommandBlock[] = [];
+  for (const spec of catalog) {
+    if (spec.internal) continue;
+    const command = normalizeName(spec.name);
+    if (findCommandBlock(command) || COMMAND_ALIASES[command] || LOCAL_ONLY_COMMANDS.includes(command)) continue;
+    blocks.push({
+      command,
+      groupKey: DEVICE_COMMAND_GROUP,
+      params: [{ key: RAW_ARGS_KEY, labelKey: "paramRawArgs", type: "text", placeholder: "--key value" }],
+      device: { summary: spec.summary, maintenance: spec.maintenance },
+    });
+  }
+  return blocks;
+}
+
+/** Commands the device itself flags as maintenance-only, in builder spelling. */
+export function maintenanceOnlyCommands(catalog: DeviceCommandSpec[] | null | undefined): Set<string> {
+  return new Set((catalog ?? []).filter((spec) => spec.maintenance).map((spec) => normalizeName(spec.name)));
 }
 
 export function quoteCommandValue(value: string) {
@@ -697,6 +744,11 @@ export function quoteCommandValue(value: string) {
 
 export function buildCommandLine(block: CommandBlock, values: Record<string, string>) {
   const parts = [block.command];
+  if (block.device) {
+    const raw = values[RAW_ARGS_KEY]?.trim() ?? "";
+    if (raw) parts.push(raw);
+    return parts.join(" ");
+  }
   for (const param of block.params) {
     const value = values[param.key]?.trim() ?? "";
     if (!value) continue;
@@ -872,12 +924,19 @@ function assignParam(state: ParseState, block: CommandBlock, rawKey: string, val
   state.values[param.key] = value;
 }
 
-function lookupBlock(rawCommand: string) {
+function lookupBlock(rawCommand: string, extraBlocks: CommandBlock[]) {
   const name = normalizeName(rawCommand);
-  return findCommandBlock(COMMAND_ALIASES[name] ?? name);
+  return findCommandBlock(COMMAND_ALIASES[name] ?? name, extraBlocks);
 }
 
-function parseJsonCommand(text: string): ParsedPastedCommand {
+// A device-catalog block has no form to fill: its arguments go into the one
+// free field, re-quoted as the CLI would take them.
+function rawArgsResult(block: CommandBlock, pairs: [string, string][]): ParsedPastedCommand {
+  const raw = pairs.map(([key, value]) => `--${key} ${quoteCommandValue(value) || '""'}`).join(" ");
+  return { ok: true, command: block.command, values: raw ? { [RAW_ARGS_KEY]: raw } : {}, unknownKeys: [], warnings: [] };
+}
+
+function parseJsonCommand(text: string, extraBlocks: CommandBlock[]): ParsedPastedCommand {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -887,8 +946,17 @@ function parseJsonCommand(text: string): ParsedPastedCommand {
   if (!isPlainObject(data)) return { ok: false, error: "invalid_json" };
   const rawCommand = typeof data.command === "string" ? data.command.trim() : "";
   if (!rawCommand) return { ok: false, error: "missing_command" };
-  const block = lookupBlock(rawCommand);
+  const block = lookupBlock(rawCommand, extraBlocks);
   if (!block) return { ok: false, error: "unknown_command", detail: rawCommand };
+  if (block.device) {
+    const pairs: [string, string][] = [];
+    for (const [key, value] of Object.entries(data)) {
+      if (JSON_ENVELOPE_KEYS.has(key) || value === null || value === undefined) continue;
+      const text = jsonValueToText(value);
+      if (text !== undefined) pairs.push([normalizeName(key), text]);
+    }
+    return rawArgsResult(block, pairs);
+  }
 
   const state: ParseState = { values: {}, unknownKeys: [], warnings: [] };
   for (const [key, value] of Object.entries(data)) {
@@ -916,7 +984,7 @@ function parseJsonCommand(text: string): ParsedPastedCommand {
   return { ok: true, command: block.command, ...state };
 }
 
-function parseCliCommand(text: string): ParsedPastedCommand {
+function parseCliCommand(text: string, extraBlocks: CommandBlock[]): ParsedPastedCommand {
   let tokens: string[];
   try {
     tokens = tokenizeCommandLine(text);
@@ -924,8 +992,12 @@ function parseCliCommand(text: string): ParsedPastedCommand {
     return { ok: false, error: "unterminated_quote" };
   }
   if (!tokens.length) return { ok: false, error: "empty" };
-  const block = lookupBlock(tokens[0]);
+  const block = lookupBlock(tokens[0], extraBlocks);
   if (!block) return { ok: false, error: "unknown_command", detail: tokens[0] };
+  if (block.device) {
+    const rest = tokens.slice(1).map((token) => quoteCommandValue(token) || '""').join(" ");
+    return { ok: true, command: block.command, values: rest ? { [RAW_ARGS_KEY]: rest } : {}, unknownKeys: [], warnings: [] };
+  }
 
   const state: ParseState = { values: {}, unknownKeys: [], warnings: [] };
   const args = tokens.slice(1);
@@ -962,9 +1034,9 @@ function parseCliCommand(text: string): ParsedPastedCommand {
  * the builder's command and form values. Only what was pasted is filled: the
  * builder's defaults are not mixed in, so the result means exactly the input.
  */
-export function parsePastedCommand(text: string): ParsedPastedCommand {
+export function parsePastedCommand(text: string, extraBlocks: CommandBlock[] = []): ParsedPastedCommand {
   const trimmed = text.trim().replace(/^\$\s+/, "");
   if (!trimmed) return { ok: false, error: "empty" };
-  if (trimmed.startsWith("{")) return parseJsonCommand(trimmed);
-  return parseCliCommand(trimmed);
+  if (trimmed.startsWith("{")) return parseJsonCommand(trimmed, extraBlocks);
+  return parseCliCommand(trimmed, extraBlocks);
 }

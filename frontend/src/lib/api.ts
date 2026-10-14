@@ -1,5 +1,6 @@
 import { appHref } from "./runtime";
 import type { AppCatalog, AppCatalogEntry, AppPackage, AppSource } from "./appLibrary";
+import type { DeviceCommandSpec } from "./terminalCommands";
 
 export type DeviceEntry = {
   device_uid: string;
@@ -431,6 +432,11 @@ export const api = {
     }),
   visualization: () => request<{ items: VisualizationEntry[] }>("/visualization/latest"),
   terminalHelp: () => request<{ items: TerminalHelpEntry[] }>("/terminal/help"),
+  // The device's own command table (firmware v1.15.0+); null until fetched.
+  deviceCommands: (deviceUid: string) =>
+    request<{ catalog: { firmware: string; hash: number; commands: DeviceCommandSpec[] } | null }>(
+      `/devices/${encodeURIComponent(deviceUid)}/commands`,
+    ),
   appLibraryIndex: (refresh = false) =>
     request<AppCatalog>(`/app-library/index${refresh ? "?refresh=1" : ""}`),
   appLibraryApp: (appId: string) =>
