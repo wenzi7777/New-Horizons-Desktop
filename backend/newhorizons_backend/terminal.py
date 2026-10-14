@@ -15,6 +15,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "exit_maintenance",
     "memory_status",
     "sensor_sample",
+    "battery_status",
     "scan_health",
     "storage_status",
     "task_list",
@@ -431,8 +432,8 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "set-ota-config",
-            "description": "Configure boot-time Arduino firmware auto update checks.",
-            "example": "set-ota-config --auto-apply-on-boot true --manifest-url https://example.com/arduino-latest.json",
+            "description": "Configure firmware updates: boot-time auto update, update channel (stable / beta), optional custom manifest URL.",
+            "example": "set-ota-config --auto-apply-on-boot true --channel beta",
         },
         {
             "command": "set-indicators",
@@ -521,6 +522,7 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         "exit-maintenance": "exit_maintenance",
         "scan-health": "scan_health",
         "sensor-sample": "sensor_sample",
+        "battery-status": "battery_status",
         "storage-status": "storage_status",
         "calibration-status": "calibration_status",
         "calibration-enable": "calibration_enable",
@@ -706,8 +708,17 @@ def compile_terminal_command(command_line: str) -> dict[str, Any]:
         payload = {
             "command": "set_ota_config",
             "auto_apply_on_boot": _as_bool(parsed.get("auto_apply_on_boot", "false")),
-            "manifest_url": parsed.get("manifest_url", ""),
         }
+        # Only what was given: on firmware with update channels a present
+        # manifest_url (even empty) replaces the custom URL, so leaving it
+        # out is what keeps the current one.
+        if parsed.get("manifest_url"):
+            payload["manifest_url"] = parsed["manifest_url"]
+        if "channel" in parsed:
+            channel = str(parsed["channel"]).strip().lower()
+            if channel not in ("stable", "beta"):
+                raise ValueError("invalid_update_channel")
+            payload["channel"] = channel
         return {"command": "set_ota_config", "payload": payload, "argv": argv}
 
     if command == "findme-switch-gateway":

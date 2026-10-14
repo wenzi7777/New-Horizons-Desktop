@@ -151,7 +151,8 @@ class CapabilityGateTests(unittest.TestCase):
         page = read("pages/DeviceAppsPage.tsx")
         settings = read("pages/DeviceSettingsPage.tsx")
         for source in (page, settings):
-            self.assertIn('compareVersions(', source)
+            # Cores only: a beta of v1.1.0 has what v1.1.0 has.
+            self.assertIn('compareVersionCores(', source)
             self.assertIn('"v1.1.0"', source)
 
     def test_maintenance_is_never_entered_silently(self):

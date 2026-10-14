@@ -215,7 +215,7 @@ class DeviceCommandValidationTest(unittest.TestCase):
 
         self.assertIn('const V21_GCU_HARDWARE_MODEL = "TIA-CTL v2.1 GCU LTS";', source)
         self.assertIn('wikiSlug: "vd-ctl-r-v2-1-gcu-lts"', source)
-        self.assertIn('defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v21-lts-latest.json"', source)
+        self.assertIn('manifestBaseUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v21-lts"', source)
 
     def test_backend_board_profile_recognizes_v15f_local_hardware_capabilities(self):
         from newhorizons_backend.board_profile import board_profile_for_hardware_model
@@ -251,7 +251,7 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertIn('const V22C_GCU_HARDWARE_MODEL = "TIA-CTL v2.2.C GCU LTS";', source)
         self.assertIn('wikiSlug: "vd-ctl-r-v2-2-c-gcu-lts"', source)
         self.assertIn(
-            'defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v22c-lts-latest.json"',
+            'manifestBaseUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v22c-lts"',
             source,
         )
 

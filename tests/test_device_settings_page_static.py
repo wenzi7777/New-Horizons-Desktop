@@ -207,7 +207,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
         self.assertIn('const V21_GCU_HARDWARE_MODEL = "TIA-CTL v2.1 GCU LTS";', helper)
         self.assertIn("wikiSlug: \"vd-ctl-r-v2-1-gcu-lts\"", helper)
-        self.assertIn("arduino-gcu-v21-lts-latest.json", helper)
+        self.assertIn('releases/arduino-gcu-v21-lts"', helper)
         self.assertIn("defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]", helper)
         self.assertIn("defaultSelectPins: [18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45]", helper)
         self.assertIn('boardProfile.powerUx === "remote_only" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1")', source)
@@ -682,9 +682,9 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         helper = (ROOT / "frontend" / "src" / "lib" / "boardProfile.ts").read_text(encoding="utf-8")
         terminal = (ROOT / "frontend" / "src" / "pages" / "TerminalPage.tsx").read_text(encoding="utf-8")
 
-        self.assertIn("defaultManifestUrlForHardwareModel", source)
-        self.assertIn("defaultManifestUrl", helper)
-        self.assertIn("arduino-gcu-v23d-lts-latest.json", helper)
+        self.assertIn("manifestUrlForHardwareModel", source)
+        self.assertIn("manifestBaseUrl", helper)
+        self.assertIn('releases/arduino-gcu-v23d-lts"', helper)
         self.assertIn("overviewAsset", helper)
         self.assertIn("digitalPinOrder", helper)
         self.assertIn("analogPinOrder", helper)

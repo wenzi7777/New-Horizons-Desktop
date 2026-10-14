@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n";
 import type { Locale } from "../i18n";
+import { compareVersionCores } from "./versioning";
 
 /** A per-locale string from the catalog. Only `en` is guaranteed. */
 export type Localised = Partial<Record<Locale, string>> & { en: string };
@@ -80,22 +81,14 @@ export function useLocalised() {
 }
 
 /** Compare `v1.2.3`-style versions, tolerating the `v` prefix the firmware uses. */
-export function compareVersions(a: string, b: string): number {
-  const parse = (value: string) =>
-    String(value || "").replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
-  const left = parse(a);
-  const right = parse(b);
-  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
-    const diff = (left[i] || 0) - (right[i] || 0);
-    if (diff !== 0) return diff < 0 ? -1 : 1;
-  }
-  return 0;
-}
+// Re-exported so existing imports keep working; see versioning.ts.
+export { compareVersions, compareVersionCores } from "./versioning";
 
 /** True when a device running `firmwareVersion` can run this app. */
 export function satisfiesMinOs(entry: AppCatalogEntry, firmwareVersion: string | undefined): boolean {
   if (!firmwareVersion) return true; // unknown firmware: let the device decide
-  return compareVersions(firmwareVersion, entry.min_os) >= 0;
+  // Cores only, like the firmware's own check: a beta of min_os qualifies.
+  return compareVersionCores(firmwareVersion, entry.min_os) >= 0;
 }
 
 export function categoriesOf(items: AppCatalogEntry[]): string[] {

@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: New-Horizons-Desktop
+      # Contract tests read the device firmware (commands, packet fixtures,
+      # version vectors) and the app library (vendored SDK sync) checked out
+      # beside this repo; without them they skip.
+      - uses: actions/checkout@v4
+        with:
+          repository: wenzi7777/New-Horizons-OS
+          path: NewHorizonsOS-OTA
+      - uses: actions/checkout@v4
+        with:
+          repository: wenzi7777/NHOS-App-Library
+          path: NHOS-App-Library
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Backend tests
+        working-directory: New-Horizons-Desktop
+        run: |
+          pip install -r requirements.txt
+          python -m unittest discover -s tests
+      - name: Frontend build and tests
+        working-directory: New-Horizons-Desktop/frontend
+        run: |
+          npm ci
+          npm run build
+          npm test

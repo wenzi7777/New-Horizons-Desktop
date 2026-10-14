@@ -306,9 +306,8 @@ function commandParamDefaultValue(command: string, key: string, profile = DEFAUL
   if (command === "set-matrix-layout" && key === "select-pins") {
     return profile.defaultSelectPins.join(",");
   }
-  if ((command === "check-update" || command === "apply-update") && key === "manifest-url") {
-    return profile.defaultManifestUrl;
-  }
+  // No manifest-url default: left empty, the device checks its own update
+  // channel's manifest (or its custom URL).
   return "";
 }
 

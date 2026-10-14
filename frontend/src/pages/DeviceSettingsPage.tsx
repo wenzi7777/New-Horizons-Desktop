@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type PressureCalReadings, type PressureCalServerPreset } from "../lib/api";
 
 import { useI18n } from "../i18n";
-import { V15F_HARDWARE_MODEL, boardProfileForHardwareModel, defaultManifestUrlForHardwareModel, displayHardwareModel } from "../lib/boardProfile";
+import { V15F_HARDWARE_MODEL, boardProfileForHardwareModel, displayHardwareModel, manifestUrlForHardwareModel } from "../lib/boardProfile";
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
 import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
 import { isHubRelayed, normalizeDevice, useDevicesPolling } from "../lib/device";
@@ -18,7 +18,7 @@ import { CalibrationWorkbench, type CalibrationRun } from "../components/calibra
 import { DeviceAppsPanel } from "../components/DeviceAppsPanel";
 import { DeviceClockCard } from "../components/DeviceClockCard";
 import { DeviceHealthCard } from "../components/DeviceHealthCard";
-import { compareVersions } from "../lib/appLibrary";
+import { compareVersionCores, normalizeUpdateChannel, waitingForStableToCatchUp, type UpdateChannel } from "../lib/versioning";
 import { Battery, CircleOff, Lightbulb, Power, TriangleAlert } from "lucide-react";
 
 // Spike-validated (firmware/spikes/README.md's "PHY rate config" section,
@@ -1023,6 +1023,17 @@ export function DeviceSettingsPage() {
   const rawFindme = recordValue(normalized?.findme ?? status.findme ?? runtime.findme);
   const scanHealthSource = recordValue(status.scan_health ?? lastResult.scan_health ?? (lastResultCommand === "scan_health" ? lastResult : undefined));
   const scanHealth = scanHealthSource;
+  // Firmware v1.14.0+: how late scans START against their due time, which
+  // overrun_frames cannot see (ScanLateness.h).
+  const startLateness = recordValue(scanHealth.start_lateness);
+  const hasStartLateness = typeof startLateness.samples === "number";
+  const lateStartsLabel = (() => {
+    const samples = numberValue(startLateness.samples, 0);
+    const late = numberValue(startLateness.late, 0);
+    if (!samples) return "-";
+    return `${late} / ${samples} (${((late / samples) * 100).toFixed(2)}%)`;
+  })();
+  const latenessHistLabel = Array.isArray(startLateness.hist) ? (startLateness.hist as unknown[]).map(String).join(" / ") : "-";
   const scanTiming = recordValue(runtime.scan_timing);
   const streamBuffer = recordValue(status.stream_buffer ?? runtime.stream_buffer ?? (lastResultCommand === "set_stream_buffer" ? lastResult.stream_buffer : undefined));
   const confirmedScanTiming = recordValue(lastAppliedScanTiming ?? scanTiming);
@@ -1030,9 +1041,9 @@ export function DeviceSettingsPage() {
   const analogPinsFromStatus = arrayCsv(matrixLayout.analog_pins ?? matrixLayout.active_rows);
   const selectPinsFromStatus = arrayCsv(matrixLayout.select_pins ?? matrixLayout.active_cols);
   const wifi = recordValue(status.wifi);
-  const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "resync_battery_gauge"].includes(lastResultCommand) ? lastResult.battery : undefined));
+  const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "resync_battery_gauge", "battery_status"].includes(lastResultCommand) ? lastResult.battery : undefined));
   const battery = normalizeBatteryStatus(batteryStatus);
-  const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" ? lastResult.power : undefined));
+  const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" || lastResultCommand === "battery_status" ? lastResult.power : undefined));
   const actionButton = normalizeActionButtonStatus(
     status.action_button ?? (lastResultCommand === "set_action_button" ? lastResult.action_button : undefined),
   );
@@ -1089,7 +1100,14 @@ export function DeviceSettingsPage() {
   const boardProfile = useMemo(() => boardProfileForHardwareModel(normalized?.hardwareModel), [normalized?.hardwareModel]);
   const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : boardProfile.hardwareModel === V15F_HARDWARE_MODEL ? t("powerStatusCopyV15") : t("powerStatusCopy");
   const pinLayoutCopy = boardProfile.powerUx === "remote_only" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1");
-  const [manifestUrl, setManifestUrl] = useState(() => defaultManifestUrlForHardwareModel(normalized?.hardwareModel));
+  // Firmware with update channels reports ota.channel. There, manifestUrl is
+  // only an optional custom override (empty = follow the channel); on older
+  // firmware it is the manifest itself, as before.
+  const otaChannelSupported = typeof otaConfig.channel === "string";
+  const deviceUpdateChannel = normalizeUpdateChannel(otaConfig.channel);
+  const [manifestUrl, setManifestUrl] = useState(() => (otaChannelSupported ? "" : manifestUrlForHardwareModel(normalized?.hardwareModel)));
+  const [showCustomManifest, setShowCustomManifest] = useState(false);
+  const [confirmBetaChannel, setConfirmBetaChannel] = useState(false);
   const [autoOtaOnBoot, setAutoOtaOnBoot] = useState(otaConfig.auto_apply_on_boot === true);
   const [updateChangelogVisible, setUpdateChangelogVisible] = useState(false);
   const [updateChangelogBody, setUpdateChangelogBody] = useState("");
@@ -1180,7 +1198,7 @@ export function DeviceSettingsPage() {
   // The package registry arrived in firmware v1.1.0; on anything older the
   // install and package controls are hidden rather than shown and then failing.
   const supportsAppRegistry =
-    !normalized?.firmwareVersion || compareVersions(normalized.firmwareVersion, "v1.1.0") >= 0;
+    !normalized?.firmwareVersion || compareVersionCores(normalized.firmwareVersion, "v1.1.0") >= 0;
   const commandInFlightRef = useRef(false);
   const toastTimerRef = useRef(0);
   const operationLogIdRef = useRef(1);
@@ -1297,12 +1315,17 @@ export function DeviceSettingsPage() {
       setAutoOtaOnBoot(otaConfig.auto_apply_on_boot === true);
     }
     const nextManifestUrl = stringValue(otaConfig.manifest_url, "");
+    if (otaChannelSupported) {
+      setManifestUrl(nextManifestUrl);
+      if (nextManifestUrl) setShowCustomManifest(true);
+      return;
+    }
     if (nextManifestUrl) {
       setManifestUrl(nextManifestUrl);
       return;
     }
-    setManifestUrl(defaultManifestUrlForHardwareModel(normalized?.hardwareModel));
-  }, [normalized?.hardwareModel, otaConfig.auto_apply_on_boot, otaConfig.manifest_url]);
+    setManifestUrl(manifestUrlForHardwareModel(normalized?.hardwareModel));
+  }, [normalized?.hardwareModel, otaChannelSupported, otaConfig.auto_apply_on_boot, otaConfig.manifest_url]);
 
   useEffect(() => {
     setUpdateChangelogVisible(false);
@@ -1534,13 +1557,28 @@ export function DeviceSettingsPage() {
     };
   }, [deviceUid, isControlUnavailable, ramMonitorEnabled]);
 
+  // While the gauge resyncs, poll once a second -- but only the battery card's
+  // slice (battery_status, ~1 KB), not the full ~18 KB status: building that
+  // costs the device ~14 ms of main-loop time, a late scan every second.
+  // Firmware before v1.14.0 has no battery_status; fall back to status there.
+  const batteryStatusUnsupportedRef = useRef<Record<string, boolean>>({});
   useEffect(() => {
     if (!batteryGaugeSyncing || !deviceUid || isControlUnavailable) return undefined;
     let cancelled = false;
     const intervalId = window.setInterval(() => {
-      if (!cancelled && !commandInFlightRef.current) {
+      if (cancelled || commandInFlightRef.current) return;
+      if (batteryStatusUnsupportedRef.current[deviceUid]) {
         void run(t("refreshStatus"), quietCommand({ command: "status" }), 18000).catch(() => undefined);
+        return;
       }
+      void run(t("refreshStatus"), quietCommand({ command: "battery_status" }), 18000, { background: true })
+        .then((response) => {
+          const result = response?.result as Record<string, unknown> | null | undefined;
+          if (result && result.ok === false && String(result.error ?? result.message ?? "") === "unknown_command") {
+            batteryStatusUnsupportedRef.current[deviceUid] = true;
+          }
+        })
+        .catch(() => undefined);
     }, 1000);
     return () => {
       cancelled = true;
@@ -1747,7 +1785,26 @@ export function DeviceSettingsPage() {
   }
 
   async function saveOtaConfig() {
-    await run(t("saveUpdateSettings"), { command: "set_ota_config", auto_apply_on_boot: autoOtaOnBoot, manifest_url: manifestUrl });
+    // With channels, an empty manifest_url is sent on purpose: it clears a
+    // custom URL so the device follows its channel again.
+    await run(t("saveUpdateSettings"), {
+      command: "set_ota_config",
+      auto_apply_on_boot: autoOtaOnBoot,
+      manifest_url: otaChannelSupported ? manifestUrl.trim() : manifestUrl,
+    });
+  }
+
+  // Switching channel saves straight away (beta only after confirming), so
+  // the next Check always asks about the channel the selector shows.
+  async function setUpdateChannel(channel: UpdateChannel) {
+    await run(t("updateChannel"), { command: "set_ota_config", channel });
+  }
+
+  // check_update / apply_update: only name a manifest when there is one to
+  // name. Without it the device checks its own channel (or custom URL).
+  function updateCommand(command: "check_update" | "apply_update") {
+    const url = manifestUrl.trim();
+    return url ? { command, manifest_url: url } : { command };
   }
 
   async function saveLogSettings() {
@@ -2313,21 +2370,63 @@ export function DeviceSettingsPage() {
             <div className="settings-detail-header">
               <div>
                 <h4>{t("settingsSection_update")}</h4>
-                <p>Arduino whole-firmware OTA manifest.</p>
+                <p>{otaChannelSupported ? t("updateChannelCopy") : "Arduino whole-firmware OTA manifest."}</p>
               </div>
               <div className="actions compact">
-                <button className="button" type="button" disabled={isCommandBusy("check_update") || !deviceUid} onClick={() => void run("Check update", { command: "check_update", manifest_url: manifestUrl }, 30000)}>
+                <button className="button" type="button" disabled={isCommandBusy("check_update") || !deviceUid} onClick={() => void run("Check update", updateCommand("check_update"), 30000)}>
                   {isCommandBusy("check_update") ? t("running") : "Check"}
                 </button>
-                <button className="button primary" type="button" disabled={isCommandBusy("apply_update") || !deviceUid} onClick={() => void run("Apply update", { command: "apply_update", manifest_url: manifestUrl }, 90000)}>
+                <button className="button primary" type="button" disabled={isCommandBusy("apply_update") || !deviceUid} onClick={() => void run("Apply update", updateCommand("apply_update"), 90000)}>
                   {isCommandBusy("apply_update") ? t("running") : "Apply"}
                 </button>
               </div>
             </div>
-            <div className="field">
-              <label>Manifest URL</label>
-              <input value={manifestUrl} onChange={(event) => setManifestUrl(event.target.value)} />
-            </div>
+            {otaChannelSupported ? (
+              <>
+                <div className="field">
+                  <label>{t("updateChannel")}</label>
+                  <select
+                    value={deviceUpdateChannel}
+                    disabled={isCommandBusy("set_ota_config") || !deviceUid}
+                    onChange={(event) => {
+                      const next = normalizeUpdateChannel(event.target.value);
+                      if (next === "beta") setConfirmBetaChannel(true);
+                      else void setUpdateChannel("stable");
+                    }}
+                  >
+                    <option value="stable">{t("updateChannelStable")}</option>
+                    <option value="beta">{t("updateChannelBeta")}</option>
+                  </select>
+                </div>
+                {waitingForStableToCatchUp(deviceUpdateChannel, normalized?.firmwareVersion) ? (
+                  <p className="cal-hint">{t("updateChannelWaitingStable").replace("{version}", normalized?.firmwareVersion ?? "")}</p>
+                ) : null}
+                {deviceUpdateChannel === "beta" ? <p className="cal-hint">{t("updateChannelBetaActive")}</p> : null}
+                <label className="switch-row">
+                  <input type="checkbox" checked={showCustomManifest} onChange={(event) => setShowCustomManifest(event.target.checked)} />
+                  <span>{t("updateCustomManifest")}</span>
+                </label>
+                {showCustomManifest ? (
+                  <div className="field">
+                    <label>Manifest URL</label>
+                    <input
+                      value={manifestUrl}
+                      placeholder={stringValue(otaConfig.resolved_manifest_url, manifestUrlForHardwareModel(normalized?.hardwareModel, deviceUpdateChannel))}
+                      onChange={(event) => setManifestUrl(event.target.value)}
+                    />
+                    <p className="service-muted">{t("updateCustomManifestHint")}</p>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <div className="field">
+                  <label>Manifest URL</label>
+                  <input value={manifestUrl} onChange={(event) => setManifestUrl(event.target.value)} />
+                </div>
+                <p className="service-muted">{t("updateChannelNeedsFirmware")}</p>
+              </>
+            )}
             <div className="control-row">
               <label className="switch-row">
                 <input type="checkbox" checked={autoOtaOnBoot} onChange={(event) => setAutoOtaOnBoot(event.target.checked)} />
@@ -2534,6 +2633,15 @@ export function DeviceSettingsPage() {
               <Metric label={t("actualScanFps")} value={scanHealth.actual_scan_fps ?? "-"} />
               <Metric label={t("scanBudgetUs")} value={scanHealth.budget_us ?? "-"} />
               <Metric label={t("overrunFrames")} value={scanHealth.overrun_frames ?? "-"} />
+              {hasStartLateness ? (
+                <>
+                  <Metric label={t("scanLateStarts")} value={lateStartsLabel} small />
+                  <Metric label={t("scanLatenessMaxUs")} value={startLateness.max_us ?? "-"} />
+                  <Metric label={t("scanLatenessRecentMaxUs")} value={startLateness.recent_max_us ?? "-"} />
+                  <Metric label={t("scanLatenessHist")} value={latenessHistLabel} small />
+                  <Metric label={t("scanLatenessGaps")} value={startLateness.gaps ?? "-"} />
+                </>
+              ) : null}
               <Metric label={t("udpSentFrames")} value={scanHealth.udp_sent_frames ?? "-"} />
               <Metric label={t("udpSendFailures")} value={scanHealth.udp_send_failures ?? "-"} />
               <Metric label={t("lastUdpSendUs")} value={scanHealth.last_udp_send_us ?? "-"} />
@@ -2803,6 +2911,20 @@ export function DeviceSettingsPage() {
       </section>
 
       {errorMessage ? <p className="notice error">{errorMessage}</p> : null}
+
+      {confirmBetaChannel ? (
+        <ConfirmModal
+          title={t("updateChannelBetaConfirmTitle")}
+          message={t("updateChannelBetaConfirmMessage")}
+          confirmLabel={t("updateChannelSwitchToBeta")}
+          cancelLabel={t("cancel")}
+          onConfirm={() => {
+            setConfirmBetaChannel(false);
+            void setUpdateChannel("beta").catch(() => undefined);
+          }}
+          onCancel={() => setConfirmBetaChannel(false)}
+        />
+      ) : null}
 
       {showWifiSetupRebootModal ? (
         <ConfirmModal

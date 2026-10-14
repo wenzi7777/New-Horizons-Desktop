@@ -87,6 +87,9 @@ class NewHorizonsService:
         "query",
         "memory_status",
         "sensor_sample",
+        # The battery card's slice of status (firmware v1.14.0+), polled
+        # instead of the ~18 KB status while a gauge resync runs.
+        "battery_status",
         "scan_health",
         "storage_status",
         "findme_discover",
@@ -191,7 +194,7 @@ class NewHorizonsService:
     # publish_gateway_command()) rather than a downstream device_uid. Small
     # and flat on purpose -- unlike device commands, Hubs have no "mode"
     # concept to gate against.
-    HUB_COMMANDS = {"set_config", "factory_reset", "clock_sync", "check_update", "apply_update"}
+    HUB_COMMANDS = {"set_config", "factory_reset", "clock_sync", "check_update", "apply_update", "set_update_channel"}
 
     # Failures a relay (Hub or Gateway) reports on a device's behalf when the
     # device never answered. They arrive as ordinary "result"s, but they are
@@ -1147,11 +1150,15 @@ class NewHorizonsService:
                 "short_press": request.get("short_press", "none"),
                 "long_press": request.get("long_press", "soft_off"),
             }
-        elif command in {"set_charge_profile", "set_battery_profile", "resync_battery_gauge"} and ok:
+        elif command in {"set_charge_profile", "set_battery_profile", "resync_battery_gauge", "battery_status"} and ok:
             battery_data = data.get("battery") if isinstance(data.get("battery"), dict) else {}
             if battery_data:
                 payload["battery"] = battery_data
-            elif command != "resync_battery_gauge":
+            if command == "battery_status":
+                for key in ("battery_gauge", "power"):
+                    if isinstance(data.get(key), dict):
+                        payload[key] = data[key]
+            elif not battery_data and command != "resync_battery_gauge":
                 payload["battery"] = {
                     "charger": "integrated",
                     "configured": True,
@@ -1184,6 +1191,7 @@ class NewHorizonsService:
             "set_charge_profile",
             "set_battery_profile",
             "resync_battery_gauge",
+            "battery_status",
             "power_set_state",
             "set_imu",
             "set_filter",
@@ -1850,9 +1858,15 @@ class NewHorizonsService:
             elif command == "set_ota_config":
                 ota_cfg = dict(status.get("ota") or {})
                 ota_cfg.update({
-                    "auto_apply_on_boot": bool(payload.get("auto_apply_on_boot", False)),
-                    "manifest_url": str(payload.get("manifest_url") or ota_cfg.get("manifest_url") or ""),
+                    "auto_apply_on_boot": bool(payload.get("auto_apply_on_boot", ota_cfg.get("auto_apply_on_boot", False))),
+                    "manifest_url": str(payload["manifest_url"]) if "manifest_url" in payload else str(ota_cfg.get("manifest_url") or ""),
                 })
+                if str(payload.get("channel") or "") in ("stable", "beta"):
+                    ota_cfg["channel"] = str(payload["channel"])
+                if "channel" in ota_cfg:
+                    base = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f"
+                    suffix = "-beta.json" if ota_cfg["channel"] == "beta" else "-latest.json"
+                    ota_cfg["resolved_manifest_url"] = ota_cfg["manifest_url"] or base + suffix
                 status["ota"] = ota_cfg
             elif command == "apply_update":
                 status.setdefault("system", {})["firmware_version"] = "v0.5.1"
@@ -2241,6 +2255,14 @@ class NewHorizonsService:
                     "message": "battery_profile_updated",
                     "battery": status.get("battery", {}),
                     "applied": True,
+                })
+            elif command == "battery_status":
+                result_payload.update({
+                    "status": "ok",
+                    "message": "battery_status",
+                    "battery": status.get("battery", {}),
+                    "battery_gauge": status.get("battery_gauge", {}),
+                    "power": status.get("power", {}),
                 })
             else:
                 result_payload["payload"] = payload
@@ -3821,6 +3843,13 @@ class NewHorizonsService:
             "update": {
                 "source": "github",
                 "manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f-latest.json",
+            },
+            # Shaped like firmware v1.14.0+, which follows an update channel.
+            "ota": {
+                "auto_apply_on_boot": True,
+                "channel": "stable",
+                "manifest_url": "",
+                "resolved_manifest_url": "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f-latest.json",
             },
             "update_state": {
                 "phase": "idle",

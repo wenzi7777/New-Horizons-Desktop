@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { ConfirmModal } from "./ConfirmModal";
 import { useI18n } from "../i18n";
 import { api, type GatewayEntry, type HubLanDeviceEntry } from "../lib/api";
+import { normalizeUpdateChannel, waitingForStableToCatchUp, type UpdateChannel } from "../lib/versioning";
 import { requestGatewaySnapshot, sendGatewayCommand, useWsState } from "../lib/wsClient";
 
 // A Hub's management dialog, laid out like a device's settings page
@@ -13,7 +14,7 @@ import { requestGatewaySnapshot, sendGatewayCommand, useWsState } from "../lib/w
 
 type HubSection = "overview" | "connection" | "clock" | "update" | "devices" | "maintenance";
 
-type Confirm = { kind: "apply_update" } | { kind: "factory_reset" } | { kind: "delete" };
+type Confirm = { kind: "apply_update" } | { kind: "beta_channel" } | { kind: "factory_reset" } | { kind: "delete" };
 
 // How long a requested update may take before the page stops waiting for
 // the Hub to come back with a new version.
@@ -176,6 +177,17 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
     showNotice(t("hubUpdateInProgress"), "");
   }
 
+  async function setUpdateChannel(channel: UpdateChannel) {
+    const { ok, result } = await hubCommand("set_update_channel", { channel });
+    if (!ok) {
+      if (result && String(result.message ?? "") === "unknown_command") showNotice(t("hubUpdateChannelNeedsFirmware"), "error");
+      return;
+    }
+    setCheckResult(null);
+    showNotice(t("updateChannelSaved").replace("{channel}", t(channel === "beta" ? "updateChannelBeta" : "updateChannelStable")), "success");
+    requestGatewaySnapshot();
+  }
+
   async function factoryReset() {
     const { ok } = await hubCommand("factory_reset");
     if (ok) showNotice(t("hubFactoryResetDone"), "success");
@@ -256,6 +268,9 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
   const updateAvailable = checked.available === true || (checkResult === null && updateState.available === true);
   const changelogUrl = String(checked.changelog_url || updateState.changelog_url || "");
   const disabled = busy !== "" || !online || applying !== null;
+  // Hub v0.9.0+ reports its update channel in the update block.
+  const supportsChannel = typeof updateState.channel === "string";
+  const hubChannel = normalizeUpdateChannel(updateState.channel);
 
   const sections: { id: HubSection; label: string }[] = [
     { id: "overview", label: t("hubSection_overview") },
@@ -405,6 +420,31 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
                 </button>
               </div>
             </div>
+            {supportsChannel ? (
+              <>
+                <div className="field">
+                  <label>{t("updateChannel")}</label>
+                  <select
+                    value={hubChannel}
+                    disabled={disabled}
+                    onChange={(event) => {
+                      const next = normalizeUpdateChannel(event.target.value);
+                      if (next === "beta") setConfirm({ kind: "beta_channel" });
+                      else void setUpdateChannel("stable");
+                    }}
+                  >
+                    <option value="stable">{t("updateChannelStable")}</option>
+                    <option value="beta">{t("updateChannelBeta")}</option>
+                  </select>
+                </div>
+                {waitingForStableToCatchUp(hubChannel, hubVersion) ? (
+                  <p className="cal-hint">{t("updateChannelWaitingStable").replace("{version}", hubVersion)}</p>
+                ) : null}
+                {hubChannel === "beta" ? <p className="cal-hint">{t("updateChannelBetaActive")}</p> : null}
+              </>
+            ) : supportsUpdate ? (
+              <p className="service-muted">{t("hubUpdateChannelNeedsFirmware")}</p>
+            ) : null}
             {applying ? <p className="cal-hint">{t("hubUpdateInProgress")}</p> : null}
             {changelogUrl ? (
               <p className="cal-hint">
@@ -570,26 +610,37 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
           title={
             confirm.kind === "apply_update"
               ? t("hubUpdateApplyConfirmTitle")
-              : confirm.kind === "factory_reset"
+              : confirm.kind === "beta_channel"
+                ? t("updateChannelBetaConfirmTitle")
+                : confirm.kind === "factory_reset"
                 ? t("hubFactoryReset")
                 : t("deleteHub")
           }
           message={
             confirm.kind === "apply_update"
               ? t("hubUpdateApplyConfirmMessage")
-              : confirm.kind === "factory_reset"
+              : confirm.kind === "beta_channel"
+                ? t("updateChannelBetaConfirmMessage")
+                : confirm.kind === "factory_reset"
                 ? t("hubFactoryResetConfirm")
                 : t("deleteHubConfirm")
           }
           confirmLabel={
-            confirm.kind === "apply_update" ? t("hubUpdateApply") : confirm.kind === "factory_reset" ? t("hubFactoryReset") : t("deleteHub")
+            confirm.kind === "apply_update"
+              ? t("hubUpdateApply")
+              : confirm.kind === "beta_channel"
+                ? t("updateChannelSwitchToBeta")
+                : confirm.kind === "factory_reset"
+                  ? t("hubFactoryReset")
+                  : t("deleteHub")
           }
           cancelLabel={t("cancel")}
-          destructive={confirm.kind !== "apply_update"}
+          destructive={confirm.kind === "factory_reset" || confirm.kind === "delete"}
           onConfirm={() => {
             const kind = confirm.kind;
             setConfirm(null);
             if (kind === "apply_update") void applyUpdate();
+            else if (kind === "beta_channel") void setUpdateChannel("beta");
             else if (kind === "factory_reset") void factoryReset();
             else void deleteHub();
           }}

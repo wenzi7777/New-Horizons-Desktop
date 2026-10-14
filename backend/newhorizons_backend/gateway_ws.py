@@ -22,13 +22,31 @@ from .service import NewHorizonsService
 
 
 PACKET_TEXT_PREFIX = "NHPKT1:"
-DEFAULT_GATEWAY_MANIFEST_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-Gateway/main/releases/gateway-latest.json"
+# Gateway self-update channels: stable reads gateway-latest.json (the only
+# manifest Gateways older than the channels know), beta reads
+# gateway-beta.json. A Gateway names its channel in hello; one that does not
+# is on stable.
+GATEWAY_MANIFEST_BASE_URL = "https://raw.githubusercontent.com/wenzi7777/New-Horizons-Gateway/main/releases/gateway"
+DEFAULT_GATEWAY_MANIFEST_URL = GATEWAY_MANIFEST_BASE_URL + "-latest.json"
+GATEWAY_UPDATE_CHANNELS = ("stable", "beta")
 _LATEST_GATEWAY_VERSION_CACHE = {"value": "", "expires_at": 0.0}
+_LATEST_GATEWAY_VERSION_BY_CHANNEL: dict[str, dict[str, Any]] = {}
 _LATEST_GATEWAY_VERSION_LOCK = threading.RLock()
 
 
-def _latest_gateway_version_from_remote() -> str:
-    manifest_url = str(os.getenv("NEWHORIZONS_GATEWAY_LATEST_MANIFEST_URL") or DEFAULT_GATEWAY_MANIFEST_URL).strip()
+def normalize_gateway_channel(value: Any) -> str:
+    channel = str(value or "").strip().lower()
+    return channel if channel in GATEWAY_UPDATE_CHANNELS else "stable"
+
+
+def _gateway_manifest_url(channel: str) -> str:
+    if channel == "beta":
+        return str(os.getenv("NEWHORIZONS_GATEWAY_BETA_MANIFEST_URL") or GATEWAY_MANIFEST_BASE_URL + "-beta.json").strip()
+    return str(os.getenv("NEWHORIZONS_GATEWAY_LATEST_MANIFEST_URL") or DEFAULT_GATEWAY_MANIFEST_URL).strip()
+
+
+def _latest_gateway_version_from_remote(channel: str = "stable") -> str:
+    manifest_url = _gateway_manifest_url(channel)
     if not manifest_url:
         return ""
     with urllib.request.urlopen(manifest_url, timeout=5) as response:
@@ -36,21 +54,29 @@ def _latest_gateway_version_from_remote() -> str:
     version = str(payload.get("version") or "").strip() if isinstance(payload, dict) else ""
     return version
 
-def latest_gateway_version() -> str:
+def latest_gateway_version(channel: Any = "stable") -> str:
+    channel = normalize_gateway_channel(channel)
     now = time.time()
     with _LATEST_GATEWAY_VERSION_LOCK:
-        cached = str(_LATEST_GATEWAY_VERSION_CACHE.get("value") or "").strip()
-        expires_at = float(_LATEST_GATEWAY_VERSION_CACHE.get("expires_at") or 0.0)
+        # stable keeps its original cache object (tests and older callers
+        # patch it); other channels get their own entry.
+        cache = (
+            _LATEST_GATEWAY_VERSION_CACHE
+            if channel == "stable"
+            else _LATEST_GATEWAY_VERSION_BY_CHANNEL.setdefault(channel, {"value": "", "expires_at": 0.0})
+        )
+        cached = str(cache.get("value") or "").strip()
+        expires_at = float(cache.get("expires_at") or 0.0)
         if cached and now < expires_at:
             return cached
         version = ""
         try:
-            version = _latest_gateway_version_from_remote()
+            version = _latest_gateway_version_from_remote(channel)
         except Exception:
             version = ""
         if version:
-            _LATEST_GATEWAY_VERSION_CACHE["value"] = version
-            _LATEST_GATEWAY_VERSION_CACHE["expires_at"] = now + max(
+            cache["value"] = version
+            cache["expires_at"] = now + max(
                 60,
                 int(os.getenv("NEWHORIZONS_GATEWAY_LATEST_VERSION_CACHE_SEC", "300")),
             )
@@ -155,7 +181,9 @@ class GatewaySocketSession:
                     "server_time": datetime.now(timezone.utc).isoformat(),
                     "server_time_ms": int(_time.time() * 1000),
                     "transport_mode": "udp_gateway_wss",
-                    "latest_gateway_version": latest_gateway_version(),
+                    # The newest version on this Gateway's own channel, so a
+                    # beta is only ever pushed to Gateways that chose beta.
+                    "latest_gateway_version": latest_gateway_version(message.get("update_channel")),
                 }
             )
             return

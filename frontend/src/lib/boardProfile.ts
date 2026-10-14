@@ -3,6 +3,7 @@ import v15fOverviewAsset from "../assets/VDCTLRv15F20267OVERVIEW.png";
 import gcuOverviewAsset from "../assets/VDCTLV23DGCULTSOVERVIEW.png";
 import gcu21OverviewAsset from "../assets/VDCTLV21GCULTSOVERVIEW.png";
 import gcu22cOverviewAsset from "../assets/VDCTLV22CGCULTSOVERVIEW.png";
+import { manifestUrlForChannel, type UpdateChannel } from "./versioning";
 
 export type BoardPinSlot = {
   label: string;
@@ -13,7 +14,8 @@ export type BoardPinSlot = {
 export type BoardProfile = {
   hardwareModel: string;
   wikiSlug: string;
-  defaultManifestUrl: string;
+  /** OTA manifest without its suffix: the update channel adds -latest.json / -beta.json. */
+  manifestBaseUrl: string;
   defaultAnalogPins: number[];
   defaultSelectPins: number[];
   /** The IO modal's pin picker; needs pin slots, not artwork. */
@@ -281,7 +283,7 @@ const V22C_GCU_DIGITAL_PIN_SLOTS: BoardPinSlot[] = [
 const V1_PROFILE: BoardProfile = {
   hardwareModel: V1_HARDWARE_MODEL,
   wikiSlug: "vd-ctl-r-v1.0f",
-  defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f-latest.json",
+  manifestBaseUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v10f",
   defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   defaultSelectPins: [13, 14, 15, 16, 17, 18, 19, 20, 21, 26, 47, 33, 34, 48, 40, 41, 35, 36, 37, 38, 39],
   supportsIoVisualizer: true,
@@ -306,7 +308,7 @@ const V1_PROFILE: BoardProfile = {
 const V21_GCU_PROFILE: BoardProfile = {
   hardwareModel: V21_GCU_HARDWARE_MODEL,
   wikiSlug: "vd-ctl-r-v2-1-gcu-lts",
-  defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v21-lts-latest.json",
+  manifestBaseUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v21-lts",
   defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   defaultSelectPins: [18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45],
   supportsIoVisualizer: true,
@@ -331,7 +333,7 @@ const V21_GCU_PROFILE: BoardProfile = {
 const V22C_GCU_PROFILE: BoardProfile = {
   hardwareModel: V22C_GCU_HARDWARE_MODEL,
   wikiSlug: "vd-ctl-r-v2-2-c-gcu-lts",
-  defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v22c-lts-latest.json",
+  manifestBaseUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v22c-lts",
   // 10 x 12: IO11 and IO17 must not be used (see the board overview).
   defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   defaultSelectPins: [18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45],
@@ -357,7 +359,7 @@ const V22C_GCU_PROFILE: BoardProfile = {
 const V15F_PROFILE: BoardProfile = {
   hardwareModel: V15F_HARDWARE_MODEL,
   wikiSlug: "vd-ctl-r-v1-5f",
-  defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v15f-latest.json",
+  manifestBaseUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-v15f",
   defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
   defaultSelectPins: [17, 18, 21, 26, 47, 33, 34, 48, 35, 36, 37, 38, 39, 45],
   supportsIoVisualizer: true,
@@ -382,7 +384,7 @@ const V15F_PROFILE: BoardProfile = {
 const GCU_PROFILE: BoardProfile = {
   hardwareModel: GCU_HARDWARE_MODEL,
   wikiSlug: "vd-ctl-r-v2-3-d-gcu-lts",
-  defaultManifestUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v23d-lts-latest.json",
+  manifestBaseUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v23d-lts",
   defaultAnalogPins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
   defaultSelectPins: [16, 17, 18, 19, 20, 21, 35, 36, 37, 39, 40, 41, 42, 45, 46],
   supportsIoVisualizer: true,
@@ -429,8 +431,9 @@ export function boardProfileForHardwareModel(value: string | null | undefined): 
   return matched ?? DEFAULT_BOARD_PROFILE;
 }
 
-export function defaultManifestUrlForHardwareModel(value: string | null | undefined): string {
-  return boardProfileForHardwareModel(value).defaultManifestUrl;
+/** The manifest a board follows on `channel` (stable by default). */
+export function manifestUrlForHardwareModel(value: string | null | undefined, channel: UpdateChannel = "stable"): string {
+  return manifestUrlForChannel(boardProfileForHardwareModel(value).manifestBaseUrl, channel);
 }
 
 /** Name shown in the UI for a board: older firmware still reports "VD-CTL/R ..." or "TIA-CTL/R ...". */

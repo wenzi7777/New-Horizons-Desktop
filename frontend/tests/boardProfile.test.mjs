@@ -31,7 +31,7 @@ test("only v1.5.F exposes Action Button settings", async () => {
 });
 
 test("v2.2.C GCU LTS resolves to its own profile instead of falling back to v1.0.F", async () => {
-  const { boardProfileForHardwareModel, wikiSlugFromHardwareModel, defaultManifestUrlForHardwareModel } =
+  const { boardProfileForHardwareModel, wikiSlugFromHardwareModel, manifestUrlForHardwareModel } =
     await loadBoardProfile();
   const profile = boardProfileForHardwareModel("VD-CTL/R v2.2.C GCU LTS");
 
@@ -66,7 +66,8 @@ test("v2.2.C GCU LTS resolves to its own profile instead of falling back to v1.0
   );
 
   assert.equal(wikiSlugFromHardwareModel("VD-CTL/R v2.2.C GCU LTS"), "vd-ctl-r-v2-2-c-gcu-lts");
-  assert.match(defaultManifestUrlForHardwareModel("VD-CTL/R v2.2.C GCU LTS"), /arduino-gcu-v22c-lts-latest\.json$/);
+  assert.match(manifestUrlForHardwareModel("VD-CTL/R v2.2.C GCU LTS"), /arduino-gcu-v22c-lts-latest\.json$/);
+  assert.match(manifestUrlForHardwareModel("VD-CTL/R v2.2.C GCU LTS", "beta"), /arduino-gcu-v22c-lts-beta\.json$/);
 });
 
 test("artwork is claimed exactly when it exists, and every board has a pin picker", async () => {

@@ -4,7 +4,7 @@ import { Check, Circle, Loader2, X } from "lucide-react";
 
 import { useI18n } from "../i18n";
 import { api, type DeviceEntry } from "../lib/api";
-import { compareVersions, useLocalised, type AppCatalogEntry, type AppPackage } from "../lib/appLibrary";
+import { compareVersionCores, useLocalised, type AppCatalogEntry, type AppPackage } from "../lib/appLibrary";
 import { displayHardwareModel } from "../lib/boardProfile";
 import { normalizeDevice, type NormalizedDevice } from "../lib/device";
 import { appErrorKey } from "../lib/deviceApps";
@@ -65,13 +65,13 @@ export function AppInstallDialog({
   const abortRef = useRef({ current: false });
   const { queue } = useDeviceCommand(selectedUid);
 
-  const minFirmware = compareVersions(app.min_os || "v0.0.0", REGISTRY_MIN_FIRMWARE) > 0 ? app.min_os : REGISTRY_MIN_FIRMWARE;
+  const minFirmware = compareVersionCores(app.min_os || "v0.0.0", REGISTRY_MIN_FIRMWARE) > 0 ? app.min_os : REGISTRY_MIN_FIRMWARE;
   const candidates = useMemo<Candidate[]>(() => {
     const list = devices.map((entry) => {
       const device = normalizeDevice(entry);
       let blocker = "";
       if (device.isControlUnavailable) blocker = "appInstallBlockedOffline";
-      else if (!device.firmwareVersion || compareVersions(device.firmwareVersion, minFirmware) < 0) blocker = "appInstallBlockedFirmware";
+      else if (!device.firmwareVersion || compareVersionCores(device.firmwareVersion, minFirmware) < 0) blocker = "appInstallBlockedFirmware";
       return { entry, device, blocker };
     });
     return list.sort((a, b) => Number(Boolean(a.blocker)) - Number(Boolean(b.blocker)) || a.device.displayName.localeCompare(b.device.displayName));

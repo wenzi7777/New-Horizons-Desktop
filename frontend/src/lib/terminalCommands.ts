@@ -415,6 +415,7 @@ export const COMMAND_BLOCKS: CommandBlock[] = [
           { labelKey: "optionFalse", value: "false" },
         ],
       },
+      { key: "channel", labelKey: "updateChannel", type: "text", placeholder: "stable / beta" },
       { key: "manifest-url", labelKey: "paramManifestUrl", type: "text", placeholder: "https://..." },
     ],
   },

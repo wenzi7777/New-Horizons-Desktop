@@ -6,7 +6,7 @@ import { DeviceAppsPanel } from "../components/DeviceAppsPanel";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 import type { AppCatalogEntry } from "../lib/appLibrary";
-import { compareVersions } from "../lib/appLibrary";
+import { compareVersionCores } from "../lib/versioning";
 import { normalizeDevice, useDevicesPolling } from "../lib/device";
 import { pollDeviceCommand, useDeviceCommand } from "../lib/deviceCommand";
 import { type CommandRunner } from "../lib/deviceFileTransfer";
@@ -60,7 +60,7 @@ export function DeviceAppsPage() {
   const firmwareVersion = device?.firmware_version;
   // The registry only exists from v1.1.0; on an older device the install and
   // package controls are hidden rather than shown and then failing.
-  const supportsRegistry = !firmwareVersion || compareVersions(firmwareVersion, "v1.1.0") >= 0;
+  const supportsRegistry = !firmwareVersion || compareVersionCores(firmwareVersion, "v1.1.0") >= 0;
 
   const installId = params.get("install") || "";
   const [catalogEntry, setCatalogEntry] = useState<AppCatalogEntry | null>(null);
