@@ -202,6 +202,8 @@ class CommandCatalogStore:
         # device, so a stream of status replies does not trigger a stream of
         # requests.
         self._requested: dict[str, tuple[str, float]] = {}
+        # When each device was last asked for its firmware version (needs_probe).
+        self._probed: dict[str, float] = {}
 
     def get(self, device_uid: str) -> CommandCatalog | None:
         with self._lock:
@@ -220,6 +222,17 @@ class CommandCatalogStore:
             if requested is None or requested[0] != firmware:
                 return True
             return now - requested[1] >= CATALOG_RETRY_SEC
+
+    def needs_probe(self, device_uid: str, now: float | None = None) -> bool:
+        """Whether to ask a device whose firmware is unknown for it (a small
+        `capabilities`), at most once per CATALOG_RETRY_SEC. Marks the probe."""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            last = self._probed.get(device_uid)
+            if last is not None and now - last < CATALOG_RETRY_SEC:
+                return False
+            self._probed[device_uid] = now
+            return True
 
     def mark_requested(self, device_uid: str, firmware_version: Any, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now

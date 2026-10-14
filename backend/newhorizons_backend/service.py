@@ -873,6 +873,12 @@ class NewHorizonsService(
             # Offline or booting; the next status after CATALOG_RETRY_SEC asks again.
             pass
 
+    def _probe_firmware_version(self, device_uid: str) -> None:
+        try:
+            self.publish_command(device_uid, {"command": "capabilities", "quiet": True})
+        except RuntimeError:
+            pass
+
     def _record_command_catalog(self, device_uid: str, payload: dict[str, Any]) -> None:
         if payload.get("ok") is False or str(payload.get("status") or "ok").lower() == "error":
             return
@@ -889,8 +895,19 @@ class NewHorizonsService(
         if catalog is None:
             # Asked for before any status triggered a fetch (the Terminal page
             # polls no status): fetch now, from the firmware last seen, so the
-            # page's next ask finds it.
-            self._maybe_fetch_command_catalog(device_uid, {})
+            # page's next ask finds it. Right after a backend restart a device
+            # behind a Hub has no known firmware yet (the Hub's heartbeats do
+            # not carry it): ask with a small `capabilities`, whose reply
+            # carries the version and goes on to fetch the catalog.
+            if self._device_firmware_version(device_uid, {}):
+                self._maybe_fetch_command_catalog(device_uid, {})
+            elif not self._mock_mode and self._command_catalogs.needs_probe(device_uid):
+                threading.Thread(
+                    target=self._probe_firmware_version,
+                    args=(device_uid,),
+                    name="newhorizons-command-catalog",
+                    daemon=True,
+                ).start()
             return None
         result = catalog.as_json()
         result["commands"] = [item for item in result["commands"] if not item.get("internal")]

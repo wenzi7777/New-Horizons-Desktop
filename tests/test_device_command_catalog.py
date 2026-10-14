@@ -194,6 +194,36 @@ class HubRelayedFetchTests(unittest.TestCase):
             self.assertIsNone(service.device_command_catalog(UID))  # already requested
         self.assertEqual(published, ["commands"])
 
+    def test_unknown_firmware_is_asked_for_first(self):
+        # After a backend restart a device behind a Hub has no known firmware
+        # until a status arrives; the Terminal page triggers no status.
+        service = NewHorizonsService(mock_mode=False)
+        published = []
+        service.publish_command = lambda uid, payload: published.append(payload["command"])
+        service._devices[UID] = {"device_uid": UID}
+        with mock.patch("newhorizons_backend.service.threading.Thread") as thread:
+            thread.side_effect = lambda target, args, **kw: mock.Mock(start=lambda: target(*args))
+            self.assertIsNone(service.device_command_catalog(UID))
+            self.assertIsNone(service.device_command_catalog(UID))  # probed recently
+            self.assertEqual(published, ["capabilities"])
+            # Its reply carries the version and goes on to fetch the catalog.
+            service._record_result(UID, {"command": "capabilities", "status": "ok", "ok": True,
+                                         "data": {"firmware_version": "v1.15.0-beta.3", "command_schema_hash": 1}})
+        self.assertEqual(published, ["capabilities", "commands"])
+
+    def test_old_firmware_is_probed_once_then_left_alone(self):
+        service = NewHorizonsService(mock_mode=False)
+        published = []
+        service.publish_command = lambda uid, payload: published.append(payload["command"])
+        service._devices[UID] = {"device_uid": UID}
+        with mock.patch("newhorizons_backend.service.threading.Thread") as thread:
+            thread.side_effect = lambda target, args, **kw: mock.Mock(start=lambda: target(*args))
+            service.device_command_catalog(UID)
+            service._record_result(UID, {"command": "capabilities", "status": "ok", "ok": True,
+                                         "data": {"firmware_version": "v1.14.0"}})
+            service.device_command_catalog(UID)
+        self.assertEqual(published, ["capabilities"])
+
     def test_a_paged_catalog_reply_is_recorded(self):
         import json
         service = NewHorizonsService(mock_mode=False)
