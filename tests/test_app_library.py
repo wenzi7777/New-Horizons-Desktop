@@ -157,19 +157,23 @@ class PackageValidationTests(unittest.TestCase):
         ]
         self.assertEqual(validate_package(doc)["nodes"], 4)
 
-    def test_every_op_and_capability_the_sdk_knows_is_known_here(self):
-        # The vendored SDK is what App Studio compiles with; an op it can emit
-        # that this module does not know is an app the Desktop builds and then
-        # refuses to install.
-        from newhorizons_backend.app_library import CAPABILITIES, KNOWN_OPS
-        import re
-        opset = (ROOT / "frontend" / "src" / "sdk" / "lib" / "opset.mjs").read_text(encoding="utf-8")
-        sdk_ops = set(re.findall(r'^\s*op\("([a-z_0-9]+)"', opset, re.M))
-        self.assertTrue(sdk_ops)
-        self.assertEqual(sdk_ops, KNOWN_OPS)
-        block = re.search(r"export const CAPABILITIES = Object\.freeze\(\{(.*?)\}\);", opset, re.S)
-        sdk_caps = set(re.findall(r"^\s*([a-z_]+):", block.group(1), re.M))
-        self.assertEqual(sdk_caps, CAPABILITIES)
+    def test_app_contract_is_what_the_vendored_sdk_generates(self):
+        # app_contract.py is generated from the App Library's opset.mjs; App
+        # Studio compiles with the vendored copy, so the two must agree or the
+        # Desktop builds an app and then refuses to install it.
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        contract = ROOT / "frontend" / "src" / "sdk" / "lib" / "contract.mjs"
+        generated = subprocess.run(
+            [node, "--input-type=module", "-e",
+             f"import {{ backendModule }} from {json.dumps(contract.as_uri())}; process.stdout.write(backendModule());"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        current = (ROOT / "backend" / "newhorizons_backend" / "app_contract.py").read_text(encoding="utf-8")
+        self.assertEqual(current, generated, "run scripts/sync_app_sdk.sh, then nhos.mjs gen-contract")
 
     def test_unknown_op(self):
         doc = json.loads(json.dumps(GOOD_PACKAGE))

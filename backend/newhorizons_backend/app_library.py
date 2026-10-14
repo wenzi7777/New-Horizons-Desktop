@@ -25,6 +25,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+# Generated from the App Library's opset.mjs (`nhos.mjs gen-contract`).
+from .app_contract import CAPABILITIES, KNOWN_OPS, MAX_EVENT_NAME, MAX_NODES, MAX_PACKAGE_BYTES
+
 
 DEFAULT_LIBRARY_INDEX_URL = (
     "https://raw.githubusercontent.com/wenzi7777/NHOS-App-Library/main/index.json"
@@ -38,20 +41,9 @@ APP_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")
 RESERVED_APP_IDS = {"index"}
 # FlowApp::kMaxNodes since firmware v1.3.0 (12 before). A graph over 12 also
 # carries min_os v1.3.0, which the device itself checks against its version.
-MAX_RULE_NODES = 24
-MAX_PACKAGE_BYTES = 4096  # the firmware's parse buffer, for either kind
-MAX_EVENT_NAME = 23
+MAX_RULE_NODES = MAX_NODES
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 MIN_OS_RE = re.compile(r"^v?\d+\.\d+\.\d+$")
-
-# button and display since firmware v1.4.0 (the OLED and the action button);
-# drive_ext_led since v1.5.0 (the external LED strip); tick, power, link,
-# read_mag and persist since v1.6.0 (background running, the battery, the
-# link, the magnetometer and persisted counters).
-CAPABILITIES = {
-    "read_matrix", "read_imu", "emit_event", "drive_led", "write_file", "button", "display", "drive_ext_led",
-    "tick", "power", "link", "read_mag", "persist",
-}
 
 # Commands a readout may poll. Enforced here as well as in the library's CI:
 # a package can arrive from a hand-edited catalog, and nothing that renders in
@@ -63,25 +55,6 @@ READOUT_SOURCES = {
     "sensor_sample",
 }
 READOUT_SECTION_KINDS = {"stats", "table", "chart"}
-
-# Mirrors the App Library's sdk/lib/opset.mjs. Kept as a flat set because this module's job is to
-# reject the impossible, not to estimate cost -- the device does that.
-# v1.1.0 renamed the engine from "rule" to "flow"; the op names did not change.
-KNOWN_OPS = {
-    "total", "peak", "region_sum", "active_cells", "threshold", "debounce", "emit",
-    "const", "add", "sub", "mul", "div", "min", "max", "abs", "clamp",
-    "mean", "max_hold", "delta", "integrate", "counter",
-    "features", "feature_get", "arg_max", "row_centroid", "col_centroid",
-    "led", "emit_value", "select", "gate", "budget_load", "grace_left",
-    # v1.4.0: the OLED and the action button
-    "mod", "button", "oled_text", "oled_bar",
-    # v1.5.0: the external LED strip
-    "ext_pixel", "ext_meter",
-    # v1.6.0: time, logic, region sweeps and the other sensors
-    "not", "duration", "interval", "peak_since", "counter_reset", "sqrt", "atan2",
-    "region_peak", "region_active", "region_row_centroid", "region_col_centroid",
-    "imu", "mag", "battery", "linked", "uptime",
-}
 
 FETCH_TIMEOUT_SEC = 5
 DEFAULT_TTL_SEC = 900
