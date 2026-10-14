@@ -17,6 +17,145 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .terminal import DEVICE_COMMAND_ALLOWLIST
+
+# --- the static tables ------------------------------------------------------
+#
+# What the backend knows without a catalog: which commands exist and which
+# mode each may run in. Devices on firmware older than v1.15.0 are gated by
+# these alone; NewHorizonsService exposes them as class attributes.
+
+STATUS_COMMANDS = {"status", "query", "memory_status", "scan_health", "storage_status"}
+
+SHARED_COMMANDS = {
+    "status",
+    "query",
+    "memory_status",
+    "sensor_sample",
+    # The battery card's slice of status (firmware v1.14.0+), polled
+    # instead of the ~18 KB status while a gauge resync runs.
+    "battery_status",
+    "scan_health",
+    "storage_status",
+    "findme_discover",
+    "findme_switch_gateway",
+    "set_wifi",
+    "log_tail",
+    "log_clear",
+    "file_list",
+    "file_read_begin",
+    "file_read_chunk",
+    "set_log",
+    "set_ota_config",
+    "check_update",
+    "apply_update",
+    "reboot",
+    "reboot_wifi_setup",
+    "set_transport",
+    # v1.0.0 kernel layer. The firmware gates none of these on maintenance
+    # mode, so they belong here rather than in MAINTENANCE_COMMANDS.
+    "task_list",
+    "service_list",
+    "service_restart",
+    "dmesg",
+    "crash_log",
+    "crash_clear",
+    "health",
+    "capabilities",
+    "config_schema",
+    "config_get",
+    "config_set",
+    "set_time",
+    "clock_sync",
+    "clock_status",
+    "set_clock_config",
+    "set_power_profile",
+    "app_list",
+    "app_enable",
+    "app_disable",
+    "app_revive",
+    "app_load_flow",
+    "app_unload_flow",
+    "app_events",
+    "app_list_packages",
+    "app_verify",
+    # v1.7.0: what the apps' OLED rows, status LED and strip show now.
+    "app_view",
+    # v1.15.0: the device's own command table (device_commands.py).
+    "commands",
+}
+
+NORMAL_COMMANDS = SHARED_COMMANDS | {
+    "enter_maintenance",
+    "set_matrix_layout",
+    "set_scan_timing",
+    "set_stream_buffer",
+    "set_charge_profile",
+    "set_battery_profile",
+    "resync_battery_gauge",
+    "power_set_state",
+    "set_action_button",
+    "set_indicators",
+    "set_imu",
+    "set_filter",
+    "set_raw_adc",
+    "calibration_status",
+    "calibration_enable",
+    "calibration_disable",
+    "calibration_dump_tare",
+    "calibration_dump_level",
+    "calibration_dump_fit",
+    # Zeroing pauses the scan itself (firmware v1.5.1+); older firmware
+    # answers maintenance_required and the Desktop falls back.
+    "calibration_tare_capture",
+    "calibration_tare_clear",
+}
+
+MAINTENANCE_COMMANDS = NORMAL_COMMANDS | {
+    "exit_maintenance",
+    "calibration_clear_profile",
+    "calibration_delete_level",
+    "calibration_session_begin",
+    "calibration_session_abort",
+    "calibration_session_commit",
+    "calibration_capture_tare",
+    "calibration_capture_cell",
+    "calibration_capture_all",
+    "calibration_set_fit",
+    "calibration_set_reference",
+    "file_write_begin",
+    "file_write_chunk",
+    "file_write_finish",
+    "file_delete",
+    "app_install",
+    "app_uninstall",
+    "app_activate",
+    "app_deactivate",
+    "app_reindex",
+}
+
+MODE_COMMANDS = {
+    "normal": NORMAL_COMMANDS,
+    "maintenance": MAINTENANCE_COMMANDS,
+    "safe_maintenance": MAINTENANCE_COMMANDS,
+    "safemaintenance": MAINTENANCE_COMMANDS,
+}
+
+# Commands that target a Hub/Gateway process itself (via
+# publish_gateway_command()) rather than a downstream device_uid. Small
+# and flat on purpose -- unlike device commands, Hubs have no "mode"
+# concept to gate against.
+HUB_COMMANDS = {"set_config", "factory_reset", "clock_sync", "check_update", "apply_update", "set_update_channel"}
+
+# Device commands the backend issues on its own behalf (hub migration, WiFi
+# provisioning). They are deliberately absent from the terminal allowlist --
+# users do not type them -- but they are real commands, so the existence
+# check has to know about them.
+INTERNAL_DEVICE_COMMANDS = {"set_transport", "set_wifi"}
+
+KNOWN_DEVICE_COMMANDS = DEVICE_COMMAND_ALLOWLIST | INTERNAL_DEVICE_COMMANDS
+
+
 # First firmware that answers `commands`. Betas of it count (core compare).
 CATALOG_MIN_FIRMWARE = (1, 15, 0)
 # A `commands` request that got no reply (device went offline, relay dropped

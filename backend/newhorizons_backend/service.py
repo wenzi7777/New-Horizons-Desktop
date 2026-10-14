@@ -17,13 +17,23 @@ from .arduino_protocol import CONTROL_PORT, is_arduino_heartbeat_packet, is_ardu
 from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_for_hardware_model, normalize_hardware_model
 from .packet_parser import PacketParseError, parse_binary_packet
 from .result_chunks import RESULT_CHUNK_TYPE, ResultChunkReassembler, normalize_device_result
-from .terminal import DEVICE_COMMAND_ALLOWLIST
-from .device_commands import CommandCatalogStore
+from .device_commands import (
+    HUB_COMMANDS,
+    INTERNAL_DEVICE_COMMANDS,
+    KNOWN_DEVICE_COMMANDS,
+    MAINTENANCE_COMMANDS,
+    MODE_COMMANDS,
+    NORMAL_COMMANDS,
+    SHARED_COMMANDS,
+    STATUS_COMMANDS,
+    CommandCatalogStore,
+)
 from .discovery import DiscoveryResponder
 from .hub_channel_watch import HubChannelWatcher
 from .udp_ingest import UDPIngestServer
 from .mock_device import MockDeviceMixin
 from .update_state import UpdateStateMixin
+from .command_gating import CommandGatingMixin
 
 
 from .service_constants import (  # noqa: F401  (re-exported for api.py / ws.py)
@@ -41,7 +51,7 @@ from .service_constants import (  # noqa: F401  (re-exported for api.py / ws.py)
 )
 
 
-class NewHorizonsService(MockDeviceMixin, UpdateStateMixin):
+class NewHorizonsService(MockDeviceMixin, UpdateStateMixin, CommandGatingMixin):
     COMMAND_TTL_MS = 15000
     BOOT_GRACE_SEC = 90.0
     ARDUINO_STREAM_STATUS_INTERVAL_SEC = 5.0
@@ -66,122 +76,16 @@ class NewHorizonsService(MockDeviceMixin, UpdateStateMixin):
         "device_not_connected",
         "gateway_send_failed",
     }
-    STATUS_COMMANDS = {"status", "query", "memory_status", "scan_health", "storage_status"}
-    SHARED_COMMANDS = {
-        "status",
-        "query",
-        "memory_status",
-        "sensor_sample",
-        # The battery card's slice of status (firmware v1.14.0+), polled
-        # instead of the ~18 KB status while a gauge resync runs.
-        "battery_status",
-        "scan_health",
-        "storage_status",
-        "findme_discover",
-        "findme_switch_gateway",
-        "set_wifi",
-        "log_tail",
-        "log_clear",
-        "file_list",
-        "file_read_begin",
-        "file_read_chunk",
-        "set_log",
-        "set_ota_config",
-        "check_update",
-        "apply_update",
-        "reboot",
-        "reboot_wifi_setup",
-        "set_transport",
-        # v1.0.0 kernel layer. The firmware gates none of these on maintenance
-        # mode, so they belong here rather than in MAINTENANCE_COMMANDS.
-        "task_list",
-        "service_list",
-        "service_restart",
-        "dmesg",
-        "crash_log",
-        "crash_clear",
-        "health",
-        "capabilities",
-        "config_schema",
-        "config_get",
-        "config_set",
-        "set_time",
-        "clock_sync",
-        "clock_status",
-        "set_clock_config",
-        "set_power_profile",
-        "app_list",
-        "app_enable",
-        "app_disable",
-        "app_revive",
-        "app_load_flow",
-        "app_unload_flow",
-        "app_events",
-        "app_list_packages",
-        "app_verify",
-        # v1.7.0: what the apps' OLED rows, status LED and strip show now.
-        "app_view",
-        # v1.15.0: the device's own command table (device_commands.py).
-        "commands",
-    }
-    NORMAL_COMMANDS = SHARED_COMMANDS | {
-        "enter_maintenance",
-        "set_matrix_layout",
-        "set_scan_timing",
-        "set_stream_buffer",
-        "set_charge_profile",
-        "set_battery_profile",
-        "resync_battery_gauge",
-        "power_set_state",
-        "set_action_button",
-        "set_indicators",
-        "set_imu",
-        "set_filter",
-        "set_raw_adc",
-        "calibration_status",
-        "calibration_enable",
-        "calibration_disable",
-        "calibration_dump_tare",
-        "calibration_dump_level",
-        "calibration_dump_fit",
-        # Zeroing pauses the scan itself (firmware v1.5.1+); older firmware
-        # answers maintenance_required and the Desktop falls back.
-        "calibration_tare_capture",
-        "calibration_tare_clear",
-    }
-    MAINTENANCE_COMMANDS = NORMAL_COMMANDS | {
-        "exit_maintenance",
-        "calibration_clear_profile",
-        "calibration_delete_level",
-        "calibration_session_begin",
-        "calibration_session_abort",
-        "calibration_session_commit",
-        "calibration_capture_tare",
-        "calibration_capture_cell",
-        "calibration_capture_all",
-        "calibration_set_fit",
-        "calibration_set_reference",
-        "file_write_begin",
-        "file_write_chunk",
-        "file_write_finish",
-        "file_delete",
-        "app_install",
-        "app_uninstall",
-        "app_activate",
-        "app_deactivate",
-        "app_reindex",
-    }
-    MODE_COMMANDS = {
-        "normal": NORMAL_COMMANDS,
-        "maintenance": MAINTENANCE_COMMANDS,
-        "safe_maintenance": MAINTENANCE_COMMANDS,
-        "safemaintenance": MAINTENANCE_COMMANDS,
-    }
-    # Commands that target a Hub/Gateway process itself (via
-    # publish_gateway_command()) rather than a downstream device_uid. Small
-    # and flat on purpose -- unlike device commands, Hubs have no "mode"
-    # concept to gate against.
-    HUB_COMMANDS = {"set_config", "factory_reset", "clock_sync", "check_update", "apply_update", "set_update_channel"}
+    # Which commands exist and which mode they may run in, without a device
+    # catalog (device_commands.py). Class attributes too: tests and cls.X read them.
+    STATUS_COMMANDS = STATUS_COMMANDS
+    SHARED_COMMANDS = SHARED_COMMANDS
+    NORMAL_COMMANDS = NORMAL_COMMANDS
+    MAINTENANCE_COMMANDS = MAINTENANCE_COMMANDS
+    MODE_COMMANDS = MODE_COMMANDS
+    HUB_COMMANDS = HUB_COMMANDS
+    INTERNAL_DEVICE_COMMANDS = INTERNAL_DEVICE_COMMANDS
+    KNOWN_DEVICE_COMMANDS = KNOWN_DEVICE_COMMANDS
 
     # Failures a relay (Hub or Gateway) reports on a device's behalf when the
     # device never answered. They arrive as ordinary "result"s, but they are
@@ -196,13 +100,6 @@ class NewHorizonsService(MockDeviceMixin, UpdateStateMixin):
         "command_too_large",
         "gateway_send_failed",
     }
-
-    # Device commands the backend issues on its own behalf (hub migration, WiFi
-    # provisioning). They are deliberately absent from the terminal allowlist --
-    # users do not type them -- but they are real commands, so the existence
-    # check has to know about them.
-    INTERNAL_DEVICE_COMMANDS = {"set_transport", "set_wifi"}
-    KNOWN_DEVICE_COMMANDS = DEVICE_COMMAND_ALLOWLIST | INTERNAL_DEVICE_COMMANDS
 
     def __init__(self, autostart: bool = False, mock_mode: bool | None = None) -> None:
         self._lock = threading.RLock()
@@ -2587,274 +2484,6 @@ class NewHorizonsService(MockDeviceMixin, UpdateStateMixin):
             "recording_enabled": device_uid in self._recording_enabled,
             "recording_error": self._recording_errors.get(device_uid, ""),
         }
-
-    def _boot_command_mode_error_locked(self, device_uid: str, payload: dict[str, Any]) -> str:
-        status = self._latest_status.get(device_uid) or {}
-        catalog_error = self._catalog_command_mode_error(device_uid, status, payload)
-        if catalog_error is not None:
-            return catalog_error
-        return self._boot_command_mode_error_for_status(status, payload)
-
-    def _catalog_command_mode_error(self, device_uid: str, status: dict[str, Any], payload: dict[str, Any]) -> str | None:
-        """Mode gating from the device's own flags; None means "no catalog".
-
-        The firmware only distinguishes "needs maintenance" from "runs
-        anywhere", so that is all this checks; an unknown mode stays
-        wrong_mode as in the static path.
-        """
-        command = str(payload.get("command") or payload.get("cmd") or "").strip()
-        if not command:
-            return None
-        current_mode = self._mode_from_payload(status)
-        if current_mode in ("safe", "safe-maintenance"):
-            current_mode = "safe_maintenance"
-        # No known mode: only existence is checked, as the static path does.
-        maintenance = current_mode != "normal"
-        error = self._command_catalogs.mode_error(device_uid, command, maintenance)
-        if error is None:
-            return None
-        if not error and current_mode and current_mode not in self.MODE_COMMANDS:
-            return "wrong_mode"
-        return error
-
-    @classmethod
-    def _boot_command_mode_error_for_status(cls, status: dict[str, Any], payload: dict[str, Any]) -> str:
-        command = str(payload.get("command") or payload.get("cmd") or "").strip()
-        current_mode = cls._mode_from_payload(status)
-        # Existence is the allowlist's question; MODE_COMMANDS only answers
-        # "may it run in this mode". Deriving existence from the mode sets is
-        # what made every v1.0.0 kernel command fail as "unknown_command".
-        if command not in cls.KNOWN_DEVICE_COMMANDS:
-            return "unknown_command" if command else ""
-        known_commands = set()
-        for commands in cls.MODE_COMMANDS.values():
-            known_commands.update(commands)
-        if not current_mode:
-            return ""
-        if current_mode in ("safe", "safe-maintenance"):
-            current_mode = "safe_maintenance"
-        maintenance_only = cls.MAINTENANCE_COMMANDS - cls.NORMAL_COMMANDS
-        if command in maintenance_only and current_mode == "normal":
-            return "maintenance_required"
-        if command not in known_commands:
-            return ""
-        allowed = cls.MODE_COMMANDS.get(current_mode)
-        if allowed is None:
-            return "wrong_mode"
-        if allowed is not None and command not in allowed:
-            return "wrong_mode"
-        return ""
-
-    @staticmethod
-    def _maintenance_mode_from_result(payload: dict[str, Any]) -> str | None:
-        # enter/exit_maintenance acks from the firmware do not include a "mode"
-        # field, and the device does not push a status afterwards.  Derive the
-        # resulting mode from the command/message so it is recorded on every
-        # transport (UDP, gateway, TCP) rather than only the synchronous TCP path.
-        if payload.get("ok") is False or str(payload.get("status") or "") == "error":
-            return None
-        command = str(payload.get("command") or payload.get("cmd") or "")
-        message = str(payload.get("message") or "")
-        if command == "enter_maintenance" or message == "maintenance_entered":
-            return "maintenance"
-        if command == "exit_maintenance" or message == "maintenance_exited":
-            return "normal"
-        return None
-
-    @staticmethod
-    def _mode_from_payload(payload: dict[str, Any]) -> str:
-        if not isinstance(payload, dict):
-            return ""
-        mode = str(payload.get("mode") or "").strip().lower()
-        if mode:
-            return mode
-        runtime = payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}
-        return str(runtime.get("mode") or "").strip().lower()
-
-    def _known_mode_from_status_locked(self, device_uid: str) -> str:
-        status = self._latest_status.get(device_uid) or {}
-        return self._mode_from_payload(status)
-
-    def _has_fresh_direct_mode_locked(self, existing: dict[str, Any], now_iso: str) -> bool:
-        # `last_direct_mode_at` is only ever stamped by the direct
-        # status/result/parsed write paths (never by the Gateway/Hub relay
-        # path) -- see _record_status()/_record_result()/_record_parsed().
-        direct_at = existing.get("last_direct_mode_at")
-        if not direct_at or not existing.get("mode"):
-            return False
-        direct_dt = self._parse_iso_datetime(str(direct_at))
-        if direct_dt is None:
-            return False
-        now_dt = self._parse_iso_datetime(now_iso) or datetime.now(timezone.utc)
-        age = now_dt.timestamp() - direct_dt.timestamp()
-        return 0 <= age <= self.DIRECT_MODE_FRESH_SEC
-
-    def _clear_boot_pending_if_mode_changed_locked(self, device_uid: str, previous_mode: str, current_mode: str) -> None:
-        transition = self._boot_transitions.get(device_uid)
-        if transition and current_mode and current_mode == str(transition.get("target_mode") or ""):
-            self._boot_transitions.pop(device_uid, None)
-        if not previous_mode or not current_mode or previous_mode == current_mode:
-            return
-        pending_for_device = self._pending_commands.get(device_uid)
-        if not pending_for_device:
-            return
-        return
-
-    def _remember_pending_command(self, device_uid: str, payload: dict[str, Any]) -> None:
-        request_id = str(payload.get("request_id") or "")
-        command = str(payload.get("command") or payload.get("cmd") or "")
-        if not request_id or not command:
-            return
-        boot_target = self._boot_target_mode(command)
-        if boot_target:
-            self._boot_transitions[device_uid] = {
-                "request_id": request_id,
-                "command": command,
-                "target_mode": boot_target,
-                "created_at": time.monotonic(),
-                "expires_at": time.monotonic() + self.BOOT_GRACE_SEC,
-            }
-            existing = dict(self._devices.get(device_uid, {}))
-            if existing:
-                existing["booting"] = True
-                existing["boot_target_mode"] = boot_target
-                existing["boot_command"] = command
-                existing["mode"] = "booting"
-                self._devices[device_uid] = existing
-        self._pending_commands.setdefault(device_uid, {})[request_id] = {
-            "request_id": request_id,
-            "command": command,
-            "target_mode": payload.get("target_mode", ""),
-            "created_at": time.monotonic(),
-        }
-
-    @staticmethod
-    def _boot_target_mode(command: str) -> str:
-        _ = command
-        return ""
-
-    def _active_boot_transition_locked(self, device_uid: str) -> dict[str, Any] | None:
-        transition = self._boot_transitions.get(device_uid)
-        if not transition:
-            return None
-        if time.monotonic() > float(transition.get("expires_at") or 0):
-            self._boot_transitions.pop(device_uid, None)
-            return None
-        return transition
-
-    def _with_command_expiry(self, payload: dict[str, Any]) -> dict[str, Any]:
-        result = dict(payload)
-        if "expires_at_ms" not in result:
-            result["expires_at_ms"] = int(time.time() * 1000) + self.COMMAND_TTL_MS
-        return result
-
-    def _forget_pending_command(self, device_uid: str, payload: dict[str, Any]) -> None:
-        request_id = str(payload.get("request_id") or "")
-        if not request_id:
-            return
-        pending_for_device = self._pending_commands.get(device_uid)
-        if not pending_for_device:
-            return
-        pending_for_device.pop(request_id, None)
-        if not pending_for_device:
-            self._pending_commands.pop(device_uid, None)
-
-    def _pending_result_from_status(self, device_uid: str, payload: dict[str, Any]) -> dict[str, Any] | None:
-        with self._lock:
-            pending_for_device = self._pending_commands.get(device_uid)
-            if not pending_for_device:
-                return None
-            now = time.monotonic()
-            for request_id, pending in list(pending_for_device.items()):
-                if now - float(pending.get("created_at") or 0) > 30:
-                    pending_for_device.pop(request_id, None)
-            if not pending_for_device:
-                self._pending_commands.pop(device_uid, None)
-                return None
-            update_state = payload.get("update_state")
-            state = update_state if isinstance(update_state, dict) else {}
-
-            for request_id, pending in list(pending_for_device.items()):
-                command = str(pending.get("command") or "")
-                result = self._result_from_pending_status(command, request_id, payload, state)
-                if result is not None:
-                    pending_for_device.pop(request_id, None)
-                    if not pending_for_device:
-                        self._pending_commands.pop(device_uid, None)
-                    return result
-            return None
-
-    @classmethod
-    def _result_from_pending_status(
-        cls,
-        command: str,
-        request_id: str,
-        payload: dict[str, Any],
-        state: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        if command in ("status", "query", "memory_status", "scan_health"):
-            result = dict(payload)
-            result["command"] = command
-            result["request_id"] = request_id
-            result.setdefault("status", "ok")
-            result.setdefault("message", command)
-            return result
-        if command == "storage_status":
-            has_storage_payload = any(
-                key in payload for key in ("total_bytes", "used_bytes", "free_bytes", "categories")
-            ) or isinstance(payload.get("storage"), dict)
-            if not has_storage_payload:
-                return None
-            result = dict(payload)
-            result["command"] = command
-            result["request_id"] = request_id
-            result.setdefault("status", "ok")
-            result.setdefault("message", command)
-            return result
-        if command == "enter_maintenance" and str(payload.get("mode") or "") == "maintenance":
-            result = dict(payload)
-            result["command"] = command
-            result["request_id"] = request_id
-            result.setdefault("status", "ok")
-            result.setdefault("message", "maintenance_entered")
-            return result
-        if command == "exit_maintenance" and str(payload.get("mode") or "") == "normal":
-            result = dict(payload)
-            result["command"] = command
-            result["request_id"] = request_id
-            result.setdefault("status", "ok")
-            result.setdefault("message", "maintenance_exited")
-            return result
-
-        operation = str(state.get("operation") or "")
-        phase = str(state.get("phase") or "")
-        if command == "check_update" and operation == command and phase == "ready":
-            return {
-                "status": "ok",
-                "message": "update_checked",
-                "command": command,
-                "request_id": request_id,
-                "latest_version": state.get("version", ""),
-                "manifest_url": state.get("manifest_url", ""),
-                "changelog_url": state.get("changelog_url", ""),
-                "update_state": state,
-                "reboot_required": False,
-            }
-        if command == "apply_update" and operation == command and cls._write_state_complete(state):
-            state = cls._normalize_completed_write_state(state)
-            return {
-                "status": "ok",
-                "message": "update_applied",
-                "command": command,
-                "request_id": request_id,
-                "version": state.get("version", ""),
-                "downloaded_files": int(state.get("downloaded_files") or 0),
-                "skipped_files": int(state.get("skipped_files") or 0),
-                "deleted_files": int(state.get("deleted_files") or 0),
-                "update_state": state,
-                "reboot_required": bool(state.get("reboot_required", True)),
-            }
-        return None
 
     # Blocks written by more than one source -- a relay's presence snapshot
     # and the device's own status -- each carrying a different subset of
