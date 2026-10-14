@@ -204,6 +204,9 @@ class CommandCatalogStore:
         self._requested: dict[str, tuple[str, float]] = {}
         # When each device was last asked for its firmware version (needs_probe).
         self._probed: dict[str, float] = {}
+        # The firmware each device last reported, from any reply that carried
+        # it: a device behind a Hub reports it in no heartbeat.
+        self._firmware: dict[str, str] = {}
 
     def get(self, device_uid: str) -> CommandCatalog | None:
         with self._lock:
@@ -222,6 +225,16 @@ class CommandCatalogStore:
             if requested is None or requested[0] != firmware:
                 return True
             return now - requested[1] >= CATALOG_RETRY_SEC
+
+    def note_firmware(self, device_uid: str, firmware_version: Any) -> None:
+        version = str(firmware_version or "")
+        if device_uid and version:
+            with self._lock:
+                self._firmware[device_uid] = version
+
+    def firmware(self, device_uid: str) -> str:
+        with self._lock:
+            return self._firmware.get(device_uid, "")
 
     def needs_probe(self, device_uid: str, now: float | None = None) -> bool:
         """Whether to ask a device whose firmware is unknown for it (a small
@@ -242,6 +255,10 @@ class CommandCatalogStore:
     def forget_request(self, device_uid: str) -> None:
         with self._lock:
             self._requested.pop(device_uid, None)
+
+    def forget_probe(self, device_uid: str) -> None:
+        with self._lock:
+            self._probed.pop(device_uid, None)
 
     def invalidate_if_hash_differs(self, device_uid: str, schema_hash: Any) -> bool:
         """`capabilities` carries command_schema_hash: a mismatch means the

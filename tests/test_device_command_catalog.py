@@ -224,6 +224,25 @@ class HubRelayedFetchTests(unittest.TestCase):
             service.device_command_catalog(UID)
         self.assertEqual(published, ["capabilities"])
 
+    def test_a_failed_fetch_or_probe_is_retried_on_the_next_ask(self):
+        # A Hub refuses a command while another is in flight; waiting out the
+        # 30 s interval outlasted the Terminal page's asking.
+        service = NewHorizonsService(mock_mode=False)
+        published = []
+        service.publish_command = lambda uid, payload: published.append(payload["command"])
+        service._devices[UID] = {"device_uid": UID}
+        busy = {"status": "error", "ok": False, "message": "device_command_already_in_flight"}
+        with mock.patch("newhorizons_backend.service.threading.Thread") as thread:
+            thread.side_effect = lambda target, args, **kw: mock.Mock(start=lambda: target(*args))
+            service.device_command_catalog(UID)
+            service._record_result(UID, dict(busy, command="capabilities"))
+            service.device_command_catalog(UID)
+            service._record_result(UID, {"command": "capabilities", "status": "ok", "ok": True,
+                                         "data": {"firmware_version": "v1.15.0-beta.3"}})
+            service._record_result(UID, dict(busy, command="commands"))
+            service.device_command_catalog(UID)
+        self.assertEqual(published, ["capabilities", "capabilities", "commands", "commands"])
+
     def test_a_paged_catalog_reply_is_recorded(self):
         import json
         service = NewHorizonsService(mock_mode=False)

@@ -589,10 +589,10 @@ export function TerminalPage() {
   const [deviceCatalog, setDeviceCatalog] = useState<DeviceCommandSpec[] | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
 
-  // The device's own command table (firmware v1.15.0+). The backend fetches it
-  // after the device's first status, so a fresh device may not have one yet:
-  // ask again a few times. Older firmware never has one; the static blocks
-  // below are then all there is.
+  // The device's own command table (firmware v1.15.0+). Asking starts a fetch
+  // when the backend has none (through a Hub that is a few relayed commands,
+  // and a busy Hub can refuse one), so keep asking for up to a minute. Older
+  // firmware never has one; the static blocks below are then all there is.
   useEffect(() => {
     setDeviceCatalog(null);
     if (!selectedDevice) return;
@@ -606,7 +606,7 @@ export function TerminalPage() {
         .then((response) => {
           if (cancelled) return;
           if (response.catalog) setDeviceCatalog(response.catalog.commands);
-          else if (attempts < 4) timer = window.setTimeout(load, 5000);
+          else if (attempts < 12) timer = window.setTimeout(load, 5000);
         })
         .catch(() => undefined);
     };
