@@ -33,7 +33,8 @@ class FindMeMergeTest(unittest.TestCase):
         self.assertEqual(after["findme"], {"state": "idle", "gateway_id": ""})
 
     def test_a_hub_snapshot_does_not_write_findme(self):
-        source = (BACKEND_ROOT / "newhorizons_backend" / "service.py").read_text(encoding="utf-8")
+        # NewHorizonsService's relay handling lives in its gateway_registry mixin.
+        source = (BACKEND_ROOT / "newhorizons_backend" / "gateway_registry.py").read_text(encoding="utf-8")
         presence = source[source.index("def _record_gateway_device_presence_locked"):]
         presence = presence[: presence.index("\n    def ", 10)]
         self.assertIn('get("client_type") == "hub"', presence)
