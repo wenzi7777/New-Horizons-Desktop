@@ -221,6 +221,9 @@ class NewHorizonsService(
             discovery = self._discovery
             self._udp_ingest = None
             self._discovery = None
+        # The app-event poller parks only once recording stops; without this
+        # it kept polling a device after the service itself was stopped.
+        self._app_event_stop.set()
         if stale_timer is not None:
             stale_timer.cancel()
         if discovery is not None:

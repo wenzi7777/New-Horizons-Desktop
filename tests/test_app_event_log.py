@@ -178,3 +178,21 @@ class PollerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PollerStopTests(unittest.TestCase):
+    def test_stopping_the_service_stops_the_poller(self):
+        # stop() never set _app_event_stop, so a poller started by a recording
+        # kept running (and polling) after the service was stopped.
+        from newhorizons_backend.service import NewHorizonsService
+
+        service = NewHorizonsService(mock_mode=False)
+        service.APP_EVENT_POLL_SEC = 0.01
+        with service._lock:
+            service._recording_enabled.add("80456B76AAF4")
+        service._ensure_app_event_poller()
+        thread = service._app_event_thread
+        self.assertTrue(thread.is_alive())
+        service.stop()
+        thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
