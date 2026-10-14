@@ -166,6 +166,56 @@ class ServiceGatingTests(unittest.TestCase):
         self.assertIsNone(self.service.device_command_catalog(UID))
 
 
+class HubRelayedFetchTests(unittest.TestCase):
+    """The catalog fetch end to end through a Hub, which pages the reply."""
+
+    def test_backend_commands_carry_a_request_id(self):
+        # Pages are joined by request_id; the background fetch used to send
+        # none, so every page of its ~19 KB reply was dropped.
+        service = NewHorizonsService(mock_mode=False)
+        sent = []
+        service._gateway_senders[UID] = sent.append
+        service._devices[UID] = {"device_uid": UID}
+        service.publish_command(UID, {"command": "commands", "quiet": True})
+        self.assertTrue(sent[0]["request_id"])
+        self.assertEqual(sent[0]["payload"]["request_id"], sent[0]["request_id"])
+        # One the caller chose is kept.
+        service.publish_command(UID, {"command": "status", "request_id": "mine"})
+        self.assertEqual(sent[1]["request_id"], "mine")
+
+    def test_asking_for_a_missing_catalog_fetches_it(self):
+        service = NewHorizonsService(mock_mode=False)
+        published = []
+        service.publish_command = lambda uid, payload: published.append(payload["command"])
+        service._devices[UID] = {"device_uid": UID, "firmware_version": "v1.15.0-beta.3"}
+        with mock.patch("newhorizons_backend.service.threading.Thread") as thread:
+            thread.side_effect = lambda target, args, **kw: mock.Mock(start=lambda: target(*args))
+            self.assertIsNone(service.device_command_catalog(UID))
+            self.assertIsNone(service.device_command_catalog(UID))  # already requested
+        self.assertEqual(published, ["commands"])
+
+    def test_a_paged_catalog_reply_is_recorded(self):
+        import json
+        service = NewHorizonsService(mock_mode=False)
+        sent = []
+        service._gateway_senders[UID] = sent.append
+        service._devices[UID] = {"device_uid": UID}
+        service._record_result(UID, {"command": "status", "status": "ok", "ok": True,
+                                     "data": {"firmware_version": "v1.15.0-beta.3", "mode": "normal"}})
+        service._fetch_command_catalog(UID)
+        request = sent[-1]
+        self.assertEqual(request["payload"]["command"], "commands")
+        reply = json.dumps({"ok": True, "cmd": "commands", "message": "commands", "data": CATALOG, "error": ""})
+        size = len(reply) // 3 + 1
+        for i in range(3):
+            # What a Hub sends for each page (EspNowCommandDispatcher).
+            service.record_gateway_result_chunk(UID, {
+                "request_id": request["request_id"], "command": "commands",
+                "page": {"rid": 1, "chunk": i, "chunks": 3, "data": reply[i * size:(i + 1) * size]},
+            })
+        self.assertIn("blink_twice", service.device_command_names(UID))
+
+
 class AllowlistTests(unittest.TestCase):
     def test_catalog_commands_pass_validation(self):
         with self.assertRaises(ValueError):

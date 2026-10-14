@@ -4,6 +4,7 @@ import csv
 import os
 import threading
 import time
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -465,6 +466,12 @@ class NewHorizonsService(
     def publish_command(self, device_uid: str, payload: dict[str, Any]) -> dict[str, Any]:
         device_uid = self._resolve_known_device_uid(device_uid)
         payload = self._with_command_expiry(payload)
+        # Every command needs a request_id, including the ones the backend
+        # sends on its own (the catalog fetch, app_events polling): a reply a
+        # Hub relays in pages is joined by request_id, and pages without one
+        # were dropped -- so `commands` (~19 KB) never arrived through a Hub.
+        if not str(payload.get("request_id") or ""):
+            payload["request_id"] = uuid.uuid4().hex
         with self._lock:
             mode_error = self._boot_command_mode_error_locked(device_uid, payload)
         if mode_error:
@@ -877,8 +884,13 @@ class NewHorizonsService(
         return self._command_catalogs.public_names(self._resolve_known_device_uid(device_uid))
 
     def device_command_catalog(self, device_uid: str) -> dict[str, Any] | None:
-        catalog = self._command_catalogs.get(self._resolve_known_device_uid(device_uid))
+        device_uid = self._resolve_known_device_uid(device_uid)
+        catalog = self._command_catalogs.get(device_uid)
         if catalog is None:
+            # Asked for before any status triggered a fetch (the Terminal page
+            # polls no status): fetch now, from the firmware last seen, so the
+            # page's next ask finds it.
+            self._maybe_fetch_command_catalog(device_uid, {})
             return None
         result = catalog.as_json()
         result["commands"] = [item for item in result["commands"] if not item.get("internal")]
