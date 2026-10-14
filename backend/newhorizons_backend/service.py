@@ -1,22 +1,15 @@
 from __future__ import annotations
 
-import hashlib
-import os
 import csv
-import json
+import os
 import threading
 import time
-import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from .app_event_log import append_dropped_marker, append_events, events_lost_since
-from .arduino_protocol import CONTROL_PORT, is_arduino_heartbeat_packet, is_arduino_stream_packet, packet_device_uid, send_control_command
-from .board_profile import GCU_HARDWARE_MODEL, V1_HARDWARE_MODEL, board_profile_for_hardware_model, normalize_hardware_model
-from .packet_parser import PacketParseError, parse_binary_packet
-from .result_chunks import RESULT_CHUNK_TYPE, ResultChunkReassembler, normalize_device_result
 from .device_commands import (
     HUB_COMMANDS,
     INTERNAL_DEVICE_COMMANDS,
@@ -30,33 +23,37 @@ from .device_commands import (
 )
 from .discovery import DiscoveryResponder
 from .hub_channel_watch import HubChannelWatcher
-from .udp_ingest import UDPIngestServer
-from .mock_device import MockDeviceMixin
-from .update_state import UpdateStateMixin
-from .command_gating import CommandGatingMixin
-from .gateway_registry import GatewayRegistryMixin
-from .arduino_response import ArduinoResponseMixin
-from .device_identity import DeviceIdentityMixin
-from .device_labels import DeviceLabelsMixin
-from .datagram_ingest import DatagramIngestMixin
-
-
+from .result_chunks import ResultChunkReassembler
 from .service_constants import (  # noqa: F401  (re-exported for api.py / ws.py)
-    DEFAULT_DEVICE_NAME_PREFIX,
-    DEFAULT_DEVICE_NAME_PREFIXES,
     DEVICE_BOOTING,
-    DEVICE_BOOTING_MESSAGE,
     DEVICE_CONTROL_UNAVAILABLE,
-    DEVICE_CONTROL_UNAVAILABLE_MESSAGE,
     GATEWAY_CONTROL_UNAVAILABLE,
-    GATEWAY_CONTROL_UNAVAILABLE_MESSAGE,
-    LEGACY_DEFAULT_DEVICE_NAME_PREFIXES,
-    MOCK_FIRMWARE_VERSION,
     command_error_message,
 )
+from .udp_ingest import UDPIngestServer
+
+# NewHorizonsService is split by concern into mixins. They share the
+# service's one lock and its state, and none has an __init__ of its own.
+from .arduino_response import ArduinoResponseMixin
+from .command_gating import CommandGatingMixin
+from .datagram_ingest import DatagramIngestMixin
+from .device_identity import DeviceIdentityMixin
+from .device_labels import DeviceLabelsMixin
+from .gateway_registry import GatewayRegistryMixin
+from .mock_device import MockDeviceMixin
+from .update_state import UpdateStateMixin
 
 
-class NewHorizonsService(MockDeviceMixin, UpdateStateMixin, CommandGatingMixin, GatewayRegistryMixin, ArduinoResponseMixin, DeviceIdentityMixin, DeviceLabelsMixin, DatagramIngestMixin):
+class NewHorizonsService(
+    MockDeviceMixin,
+    UpdateStateMixin,
+    CommandGatingMixin,
+    GatewayRegistryMixin,
+    ArduinoResponseMixin,
+    DeviceIdentityMixin,
+    DeviceLabelsMixin,
+    DatagramIngestMixin,
+):
     COMMAND_TTL_MS = 15000
     BOOT_GRACE_SEC = 90.0
     ARDUINO_STREAM_STATUS_INTERVAL_SEC = 5.0
