@@ -14,7 +14,8 @@ ARDUINO_ROOT = ROOT / "NewHorizonsOS-OTA" / "firmware" / "newhorizons_os"
 FINDME_CPP = ARDUINO_ROOT / "FindMeClient.cpp"
 FINDME_H = ARDUINO_ROOT / "FindMeClient.h"
 CONFIG_H = ARDUINO_ROOT / "Config.h"
-PACKET_WIRE_H = ARDUINO_ROOT / "PacketWireConstants.h"  # generated from spec/wire.json
+# Generated from spec/wire.json into nhos_core, the library shared with the Hub.
+PACKET_WIRE_H = ROOT / "NewHorizonsOS-OTA" / "firmware" / "libraries" / "nhos_core" / "src" / "PacketWireConstants.h"
 CONTROL_CPP = ARDUINO_ROOT / "ControlServer.cpp"
 PACKET_BUILDER_CPP = ARDUINO_ROOT / "PacketBuilder.cpp"
 PACKET_BUILDER_H = ARDUINO_ROOT / "PacketBuilder.h"
