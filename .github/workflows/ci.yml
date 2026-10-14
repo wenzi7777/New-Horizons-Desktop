@@ -29,6 +29,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # Before the backend tests: a few of them run frontend TypeScript
+      # through node and need frontend/node_modules (typescript).
+      - name: Install frontend dependencies
+        working-directory: New-Horizons-Desktop/frontend
+        run: npm ci
       - name: Backend tests
         working-directory: New-Horizons-Desktop
         run: |
@@ -37,6 +42,5 @@ jobs:
       - name: Frontend build and tests
         working-directory: New-Horizons-Desktop/frontend
         run: |
-          npm ci
           npm run build
           npm test
