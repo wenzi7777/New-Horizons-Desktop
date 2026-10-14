@@ -3,29 +3,33 @@ from __future__ import annotations
 import struct
 from typing import Any
 
+from .wire import (
+    BATTERY_BYTES_V5,
+    FLAG_BATTERY,
+    FLAG_EPOCH_VALID,
+    FLAG_EXTENSIONS,
+    FLAG_HEARTBEAT,
+    FLAG_HMAC,
+    FLAG_IMU,
+    FLAG_MAG,
+    FLAG_RAW_ADC as FLAG_RAWADC,
+    IMU_BYTES,
+    MAG_BYTES,
+    PACKET_MAGIC as MAGIC,
+    PACKET_VERSION_V5 as ARDUINO_PACKET_VERSION_V5,
+)
 
 HEADER_LEN = 20
 HEADER_PREFIX_STRUCT = struct.Struct("<HBB")
 HEADER_TAIL_STRUCT = struct.Struct("<IIH")
 HEADER_LEN_V4 = 24
 HEADER_TAIL_STRUCT_V4 = struct.Struct("<IQH")
-MAGIC = 0xA55A
 PACKET_VERSION = 2
 ARDUINO_PACKET_VERSION = 3
 ARDUINO_PACKET_VERSION_V4 = 4
-ARDUINO_PACKET_VERSION_V5 = 5
-IMU_BYTES = 7 * 4
-MAG_BYTES = 3 * 4
 BATTERY_BYTES = 4
-BATTERY_BYTES_V5 = 6
-FLAG_IMU = 0x01
-FLAG_BATTERY = 0x02
-FLAG_MAG = 0x04
-FLAG_RAWADC = 0x08
-FLAG_EPOCH_VALID = 0x10
-FLAG_EXTENSIONS = 0x20
-FLAG_HMAC = 0x40
-FLAG_HEARTBEAT = 0x80
+# The v5 constants above come from wire.py, generated from the firmware's
+# spec/wire.json; the older versions here are frozen history.
 
 
 class PacketParseError(ValueError):
