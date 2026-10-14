@@ -36,6 +36,9 @@ from .update_state import UpdateStateMixin
 from .command_gating import CommandGatingMixin
 from .gateway_registry import GatewayRegistryMixin
 from .arduino_response import ArduinoResponseMixin
+from .device_identity import DeviceIdentityMixin
+from .device_labels import DeviceLabelsMixin
+from .datagram_ingest import DatagramIngestMixin
 
 
 from .service_constants import (  # noqa: F401  (re-exported for api.py / ws.py)
@@ -53,7 +56,7 @@ from .service_constants import (  # noqa: F401  (re-exported for api.py / ws.py)
 )
 
 
-class NewHorizonsService(MockDeviceMixin, UpdateStateMixin, CommandGatingMixin, GatewayRegistryMixin, ArduinoResponseMixin):
+class NewHorizonsService(MockDeviceMixin, UpdateStateMixin, CommandGatingMixin, GatewayRegistryMixin, ArduinoResponseMixin, DeviceIdentityMixin, DeviceLabelsMixin, DatagramIngestMixin):
     COMMAND_TTL_MS = 15000
     BOOT_GRACE_SEC = 90.0
     ARDUINO_STREAM_STATUS_INTERVAL_SEC = 5.0
@@ -447,94 +450,6 @@ class NewHorizonsService(MockDeviceMixin, UpdateStateMixin, CommandGatingMixin, 
         with self._lock:
             return device_uid in self._recording_enabled
 
-    @staticmethod
-    def _normalize_uid(value: Any) -> str:
-        raw = str(value or "").strip().upper()
-        collapsed = raw.replace(":", "").replace("-", "").replace(" ", "")
-        if collapsed and all(ch in "0123456789ABCDEF" for ch in collapsed):
-            return collapsed
-        return raw
-
-    @classmethod
-    def _is_full_hex_uid(cls, value: Any) -> bool:
-        normalized = cls._normalize_uid(value)
-        return len(normalized) == 12 and all(ch in "0123456789ABCDEF" for ch in normalized)
-
-    def _resolve_known_device_uid(self, value: Any) -> str:
-        normalized = self._normalize_uid(value)
-        if not normalized:
-            return ""
-        with self._lock:
-            mapped = self._device_id_to_uid.get(normalized)
-            if mapped:
-                return mapped
-            if normalized in self._devices:
-                return normalized
-            if not self._is_full_hex_uid(normalized):
-                matches = [
-                    device_uid
-                    for device_uid in self._devices
-                    if self._is_full_hex_uid(device_uid) and device_uid.endswith(normalized)
-                ]
-                if len(matches) == 1:
-                    return matches[0]
-        return normalized
-
-    def _device_uid_from_payload(self, fallback: Any, payload: dict[str, Any]) -> str:
-        system = payload.get("system") if isinstance(payload.get("system"), dict) else {}
-        candidates = (
-            payload.get("device_uid"),
-            payload.get("device_id"),
-            payload.get("dn"),
-            payload.get("id"),
-            system.get("device_uid"),
-            system.get("device_id"),
-            system.get("id"),
-            fallback,
-        )
-        for candidate in candidates:
-            normalized = self._normalize_uid(candidate)
-            if self._is_full_hex_uid(normalized):
-                return normalized
-        for candidate in candidates:
-            normalized = self._normalize_uid(candidate)
-            if normalized:
-                return normalized
-        return ""
-
-    @staticmethod
-    def _canonical_device_name(device_name: str, device_uid: str) -> str:
-        if (
-            device_name.startswith(DEFAULT_DEVICE_NAME_PREFIXES)
-            and len(device_uid) == 12
-            and device_uid.endswith(device_name.rsplit("-", 1)[-1].strip().upper())
-            and not device_name.endswith(device_uid)
-        ):
-            return "{}{}".format(DEFAULT_DEVICE_NAME_PREFIX, device_uid)
-        return device_name
-
-    def _purge_short_aliases_locked(self, device_uid: str) -> bool:
-        if not self._is_full_hex_uid(device_uid):
-            return False
-        aliases = [
-            key
-            for key in set(self._devices) | set(self._latest_status) | set(self._latest_result) | set(self._latest_visualization)
-            if key != device_uid and key and len(key) < len(device_uid) and device_uid.endswith(str(key).upper())
-        ]
-        if not aliases:
-            return False
-        for alias in aliases:
-            self._devices.pop(alias, None)
-            self._latest_status.pop(alias, None)
-            self._latest_result.pop(alias, None)
-            self._latest_visualization.pop(alias, None)
-            self._csv_paths.pop(alias, None)
-            self._pending_commands.pop(alias, None)
-            self._recording_errors.pop(alias, None)
-            self._recording_enabled.discard(alias)
-            self._device_id_to_uid[self._normalize_uid(alias)] = device_uid
-        return True
-
     def _emit_event(self, event: dict[str, Any]) -> None:
         with self._lock:
             listeners = list(self._event_listeners)
@@ -546,48 +461,6 @@ class NewHorizonsService(MockDeviceMixin, UpdateStateMixin, CommandGatingMixin, 
 
     def files_root(self) -> Path:
         return self._data_root
-
-    def set_device_nickname(self, device_uid: str, nickname: str) -> dict[str, Any]:
-        device_uid = self._resolve_known_device_uid(device_uid)
-        nickname = str(nickname or "").strip()
-        if len(nickname) > 64:
-            raise ValueError("nickname_too_long")
-        with self._lock:
-            if nickname:
-                self._nicknames[device_uid] = nickname
-            else:
-                self._nicknames.pop(device_uid, None)
-            self._save_nicknames()
-            if device_uid in self._devices:
-                self._devices[device_uid] = self._decorate_device_entry(self._devices[device_uid])
-            return {
-                "status": "saved",
-                "device_uid": device_uid,
-                "nickname": nickname,
-            }
-
-    def set_device_group(self, device_uid: str, group: str) -> dict[str, Any]:
-        device_uid = self._resolve_known_device_uid(device_uid)
-        group = str(group or "").strip()
-        if len(group) > 64:
-            raise ValueError("device_group_too_long")
-        event_item: dict[str, Any] | None = None
-        with self._lock:
-            if group:
-                self._device_groups[device_uid] = group
-            else:
-                self._device_groups.pop(device_uid, None)
-            self._save_device_groups()
-            if device_uid in self._devices:
-                self._devices[device_uid] = self._decorate_device_entry(self._devices[device_uid])
-                event_item = dict(self._devices[device_uid])
-        if event_item is not None:
-            self._emit_event({"type": "device_update", "item": event_item})
-        return {
-            "status": "saved",
-            "device_uid": device_uid,
-            "group": group,
-        }
 
     def publish_command(self, device_uid: str, payload: dict[str, Any]) -> dict[str, Any]:
         device_uid = self._resolve_known_device_uid(device_uid)
@@ -672,115 +545,6 @@ class NewHorizonsService(MockDeviceMixin, UpdateStateMixin, CommandGatingMixin, 
             self._forget_pending_command(device_uid, payload)
             raise RuntimeError(DEVICE_CONTROL_UNAVAILABLE)
 
-    def _handle_udp_datagram(self, payload: bytes, addr: tuple[str, int]) -> None:
-        if payload.lstrip().startswith(b"{"):
-            self._handle_udp_control_datagram(payload, addr)
-            return
-        if is_arduino_heartbeat_packet(payload):
-            device_uid = self._device_uid_from_payload(packet_device_uid(payload), {})
-            if not device_uid:
-                return
-            now = datetime.now(timezone.utc).isoformat()
-            with self._lock:
-                # Only register a direct TCP session for real peer addresses.
-                # When packets arrive via the gateway relay, addr is a sentinel
-                # ("gateway", 0) and must not be used as a TCP control target.
-                if addr[0] != "gateway":
-                    self._arduino_control_sessions[device_uid] = (addr[0], CONTROL_PORT)
-            self._record_status(
-                device_uid,
-                {
-                    "device_uid": device_uid,
-                    "device_id": device_uid,
-                    "device_name": "NHOS-{}".format(device_uid),
-                    "protocol": "NHO/Arduino/1",
-                    "transport_path": "arduino_heartbeat",
-                    "gateway_connected": True,
-                    "last_heartbeat_at": now,
-                    "findme": {
-                        "state": "attached",
-                        "host": addr[0],
-                        "udp_port": self._udp_port,
-                        "last_success_ms": now,
-                        "last_error": "",
-                    },
-                    "received_at": now,
-                },
-            )
-            return
-        is_arduino = is_arduino_stream_packet(payload)
-        try:
-            parsed = parse_binary_packet(payload, sensor_count=self._v5_extension_sensor_count(payload))
-        except PacketParseError:
-            return
-        device_uid = self._device_uid_from_payload(parsed.get("device_uid") or parsed.get("dn"), parsed)
-        if not device_uid:
-            return
-        parsed["dn"] = device_uid
-        parsed["device_uid"] = device_uid
-        parsed["device_id"] = device_uid
-        if is_arduino:
-            self._record_arduino_stream_presence(device_uid, addr)
-        self._record_parsed(device_uid, parsed, source="udp")
-
-    def _record_arduino_stream_presence(self, device_uid: str, addr: tuple[str, int]) -> None:
-        now = time.monotonic()
-        should_emit_status = False
-        with self._lock:
-            if addr[0] != "gateway":
-                self._arduino_control_sessions[device_uid] = (addr[0], CONTROL_PORT)
-            last_status_at = float(self._arduino_stream_status_at.get(device_uid) or 0.0)
-            if device_uid not in self._devices or now - last_status_at >= self.ARDUINO_STREAM_STATUS_INTERVAL_SEC:
-                self._arduino_stream_status_at[device_uid] = now
-                should_emit_status = True
-        if not should_emit_status:
-            return
-        self._record_status(
-            device_uid,
-            {
-                "device_uid": device_uid,
-                "device_id": device_uid,
-                "device_name": "NHOS-{}".format(device_uid),
-                "protocol": "NHO/Arduino/1",
-                "transport_path": "arduino_udp",
-                "gateway_connected": True,
-            },
-        )
-
-    def _handle_udp_control_datagram(self, payload: bytes, addr: tuple[str, int]) -> None:
-        try:
-            frame = json.loads(payload.decode("utf-8"))
-        except Exception:
-            return
-        if not isinstance(frame, dict):
-            return
-        if str(frame.get("type") or "") == RESULT_CHUNK_TYPE:
-            # A reply over ~1.2 KB arrives split across datagrams
-            # (ControlServer::sendUdpResult); nothing to do until it is whole.
-            assembled = self._result_chunks.add(frame)
-            if assembled is None:
-                return
-            frame = {"type": "result", **assembled}
-        frame_payload = frame.get("payload") if isinstance(frame.get("payload"), dict) else {}
-        device_uid = self._device_uid_from_payload(
-            frame.get("device_uid") or frame_payload.get("device_uid") or frame_payload.get("device_id"),
-            frame_payload,
-        )
-        if not device_uid:
-            return
-        with self._lock:
-            self._udp_control_sessions[device_uid] = addr
-        message_type = str(frame.get("type") or "")
-        data = dict(frame_payload)
-        data.setdefault("device_uid", device_uid)
-        data.setdefault("received_at", datetime.now(timezone.utc).isoformat())
-        data.setdefault("request_id", frame.get("request_id", ""))
-        if message_type in ("hello", "status", "update_progress"):
-            self._record_status(device_uid, data)
-            return
-        if message_type == "result":
-            self._record_result(device_uid, data)
-
     def _record_status(self, device_uid: str, payload: Any) -> None:
         if not isinstance(payload, dict):
             return
@@ -844,50 +608,6 @@ class NewHorizonsService(MockDeviceMixin, UpdateStateMixin, CommandGatingMixin, 
             else:
                 merged[key] = value
         return merged
-
-    @staticmethod
-    def _matrix_shape_tuple(value: Any) -> tuple[int, int] | None:
-        if not isinstance(value, dict):
-            return None
-        try:
-            rows = int(value.get("rows") or 0)
-            cols = int(value.get("cols") or 0)
-        except Exception:
-            return None
-        if rows <= 0 or cols <= 0:
-            return None
-        return rows, cols
-
-    @classmethod
-    def _known_sensor_count_from_device(cls, device: dict[str, Any]) -> int | None:
-        status = device.get("last_status") if isinstance(device.get("last_status"), dict) else {}
-        for candidate in (status, device):
-            layout = candidate.get("matrix_layout") if isinstance(candidate.get("matrix_layout"), dict) else {}
-            rows = cls._int_list(layout.get("analog_pins") or layout.get("active_rows"))
-            cols = cls._int_list(layout.get("select_pins") or layout.get("active_cols"))
-            if rows and cols:
-                return len(rows) * len(cols)
-            shape = cls._matrix_shape_tuple(candidate.get("matrix_shape"))
-            if shape is not None:
-                return shape[0] * shape[1]
-
-        hardware_model = str(status.get("hardware_model") or device.get("hardware_model") or "").strip()
-        if not hardware_model:
-            return None
-        profile = board_profile_for_hardware_model(hardware_model)
-        if normalize_hardware_model(profile.get("hardware_model")) != normalize_hardware_model(hardware_model):
-            return None
-        rows = cls._int_list(profile.get("default_analog_pins"))
-        cols = cls._int_list(profile.get("default_select_pins"))
-        return len(rows) * len(cols) if rows and cols else None
-
-    def _v5_extension_sensor_count(self, payload: bytes) -> int | None:
-        if len(payload) < 10 or payload[2] != 5 or not payload[3] & 0x20:
-            return None
-        device_uid = payload[4:10].hex().upper()
-        with self._lock:
-            device = dict(self._devices.get(device_uid) or {})
-        return self._known_sensor_count_from_device(device)
 
     def _clear_incompatible_visualization_locked(self, device_uid: str, merged: dict[str, Any]) -> None:
         matrix_shape = self._matrix_shape_tuple(merged.get("matrix_shape"))
@@ -1218,97 +938,6 @@ class NewHorizonsService(MockDeviceMixin, UpdateStateMixin, CommandGatingMixin, 
             "maintenance_exited",
         )
 
-    def _record_parsed(self, device_uid: str, payload: dict[str, Any], source: str) -> None:
-        device_uid = self._device_uid_from_payload(device_uid, payload)
-        if not device_uid:
-            return
-        payload = dict(payload)
-        payload["dn"] = device_uid
-        payload["device_uid"] = device_uid
-        payload["device_id"] = device_uid
-        with self._lock:
-            should_record = device_uid in self._recording_enabled
-        if should_record:
-            try:
-                self._write_csv_sample(device_uid, payload)
-            except Exception as exc:
-                error = str(exc)
-                with self._lock:
-                    self._recording_enabled.discard(device_uid)
-                    self._csv_paths.pop(device_uid, None)
-                    self._recording_errors[device_uid] = error
-                    if device_uid in self._devices:
-                        self._devices[device_uid]["recording_enabled"] = False
-                        self._devices[device_uid]["recording_error"] = error
-                self._emit_event({"type": "recording_update", "device_uid": device_uid, "enabled": False, "error": error})
-        with self._lock:
-            device_udp_fps = self._mark_visualization_received_locked(device_uid)
-            payload["device_udp_fps"] = device_udp_fps
-            payload["received_at_ms"] = int(time.monotonic() * 1000)
-            purged_aliases = self._purge_short_aliases_locked(device_uid)
-            self._latest_visualization[device_uid] = payload
-            entry = self._normalize_device_entry(device_uid, payload, kind="parsed")
-            entry["latest_sample"] = payload
-            entry["visualization_source"] = source
-            existing = self._devices.get(device_uid, {})
-            merged = self._merge_device_entry(existing, entry)
-            # Arduino v5 carries battery telemetry on the high-rate stream.
-            # Keep a valid sample in last_status as well as visualization so
-            # status-oriented Desktop surfaces (such as the launchpad card)
-            # can show SoC without waiting for the next control status poll.
-            if isinstance(payload.get("battery"), dict):
-                latest_status = merged.get("last_status")
-                latest_status = dict(latest_status) if isinstance(latest_status, dict) else {}
-                existing_battery = latest_status.get("battery")
-                latest_status["battery"] = (
-                    self._merge_nested_status_dict(existing_battery, payload["battery"])
-                    if isinstance(existing_battery, dict)
-                    else dict(payload["battery"])
-                )
-                latest_status["device_uid"] = device_uid
-                latest_status.setdefault("device_id", device_uid)
-                latest_status["received_at"] = datetime.now(timezone.utc).isoformat()
-                merged["last_status"] = latest_status
-                self._latest_status[device_uid] = latest_status
-            merged["recording_enabled"] = device_uid in self._recording_enabled
-            if device_uid in self._recording_errors:
-                merged["recording_error"] = self._recording_errors[device_uid]
-            if merged.get("mode"):
-                # This payload only carries received_at_ms (epoch ms), not
-                # the ISO string the other two direct paths use -- stamp
-                # with "now" directly instead.
-                merged["last_direct_mode_at"] = datetime.now(timezone.utc).isoformat()
-            self._devices[device_uid] = merged
-            is_new_device = not bool(existing)
-            event_item = self._decorate_device_entry(merged)
-        self._emit_event({"type": "visualization_update", "device_uid": device_uid, "data": payload})
-        if is_new_device:
-            self._emit_event({"type": "device_update", "item": event_item})
-        if purged_aliases:
-            self._emit_event({"type": "device_snapshot", "items": self.list_devices()})
-
-    def _remember_device_id_mapping(self, device_uid: str, payload: dict[str, Any]) -> None:
-        candidates = []
-        for key in ("device_id", "id"):
-            if payload.get(key):
-                candidates.append(str(payload.get(key)))
-        system = payload.get("system") if isinstance(payload.get("system"), dict) else {}
-        for key in ("device_id", "id"):
-            if system.get(key):
-                candidates.append(str(system.get(key)))
-        with self._lock:
-            for value in candidates:
-                normalized = self._normalize_device_id(value)
-                if normalized:
-                    self._device_id_to_uid[normalized] = device_uid
-
-    @staticmethod
-    def _normalize_device_id(value: str) -> str:
-        normalized = NewHorizonsService._normalize_uid(value)
-        if normalized.startswith("0X"):
-            return "0x" + normalized[2:]
-        return normalized
-
     @staticmethod
     def _csv_timestamp_ms(payload: dict[str, Any], fallback: datetime) -> int:
         device_epoch_ms = payload.get("device_epoch_ms")
@@ -1489,39 +1118,6 @@ class NewHorizonsService(MockDeviceMixin, UpdateStateMixin, CommandGatingMixin, 
         result["recording_enabled"] = str(result.get("device_uid") or "") in self._recording_enabled
         result["recording_error"] = self._recording_errors.get(str(result.get("device_uid") or ""), "")
         return result
-
-    def _load_nicknames(self) -> dict[str, str]:
-        return self._load_string_map(self._nicknames_path)
-
-    def _load_device_groups(self) -> dict[str, str]:
-        return self._load_string_map(self._device_groups_path)
-
-    @staticmethod
-    def _load_string_map(path: Path) -> dict[str, str]:
-        try:
-            if not path.exists():
-                return {}
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-        if not isinstance(data, dict):
-            return {}
-        return {
-            str(key): str(value).strip()
-            for key, value in data.items()
-            if str(key).strip() and str(value).strip()
-        }
-
-    def _save_nicknames(self) -> None:
-        self._save_string_map(self._nicknames_path, self._nicknames)
-
-    def _save_device_groups(self) -> None:
-        self._save_string_map(self._device_groups_path, self._device_groups)
-
-    @staticmethod
-    def _save_string_map(path: Path, values: dict[str, str]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(dict(sorted(values.items())), indent=2, sort_keys=True), encoding="utf-8")
 
     @staticmethod
     def _system_summary(device_uid: str, payload: dict[str, Any], received_at: str) -> dict[str, Any]:
