@@ -763,6 +763,12 @@ class NewHorizonsService(
                 if entry_payload.get(key) in (None, "") and key in inner:
                     entry_payload[key] = inner[key]
         entry = self._normalize_device_entry(device_uid, entry_payload, kind="result")
+        # check_update / apply_update replies carry the device's update_state.
+        update_result_state = None
+        if str(payload.get("command") or "") in ("check_update", "apply_update"):
+            nested = inner.get("update_state") if isinstance(inner.get("update_state"), dict) else payload.get("update_state")
+            if isinstance(nested, dict):
+                update_result_state = nested
         with self._lock:
             purged_aliases = self._purge_short_aliases_locked(device_uid)
             previous_mode = self._known_mode_from_status_locked(device_uid)
@@ -805,6 +811,16 @@ class NewHorizonsService(
                 # last `status` poll, and the page reverted to it.
                 status_payload = dict(self._latest_status[device_uid])
                 status_payload["calibration"] = calibration_status
+                self._latest_status[device_uid] = status_payload
+                merged["last_status"] = status_payload
+            elif update_result_state is not None and self._latest_status.get(device_uid):
+                # The update card reads the last status first. Without this an
+                # Apply through a Hub kept showing the "ready" the previous
+                # Check's status left there, so the card never noticed the
+                # transfer running and never polled its progress.
+                status_payload = dict(self._latest_status[device_uid])
+                status_payload["update_state"] = self._merge_update_state(
+                    status_payload.get("update_state"), update_result_state)
                 self._latest_status[device_uid] = status_payload
                 merged["last_status"] = status_payload
             self._clear_incompatible_visualization_locked(device_uid, merged)

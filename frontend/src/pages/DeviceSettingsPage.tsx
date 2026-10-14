@@ -7,7 +7,7 @@ import { useI18n } from "../i18n";
 import { V15F_HARDWARE_MODEL, boardProfileForHardwareModel, displayHardwareModel, manifestUrlForHardwareModel } from "../lib/boardProfile";
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
 import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
-import { isHubRelayed, normalizeDevice, useDevicesPolling } from "../lib/device";
+import { isHubRelayed, normalizeDevice, updateTransferProgress, useDevicesPolling } from "../lib/device";
 import { pollDeviceCommand, quietCommand, useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
 import { storageSnapshotFromDevice } from "../lib/storageStatus";
@@ -2438,6 +2438,9 @@ export function DeviceSettingsPage() {
             </div>
             <div className="settings-detail-grid compact">
               <DetailBox label="Phase" value={updateState.phase ?? "-"} />
+              {updateTransferProgress(updateState) ? (
+                <DetailBox label={t("updateProgress")} value={updateTransferProgress(updateState)} />
+              ) : null}
               <DetailBox label="Version" value={updateState.version ?? "-"} />
               <DetailBox label="URL" value={updateState.url ?? "-"} />
               <DetailBox label="Error" value={updateState.last_error ?? updateState.error ?? "-"} />

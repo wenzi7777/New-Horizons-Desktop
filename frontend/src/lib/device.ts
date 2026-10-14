@@ -4,6 +4,10 @@ import type { DeviceEntry } from "./api";
 import { deriveConnectionState } from "./connectionState";
 import { valueToCsv } from "./valueFormat";
 import { useWsState } from "./wsClient";
+import { isAppliedComplete, type UpdateState } from "./updateProgress";
+
+// Pure helpers, in their own module so node tests can load them.
+export { appliedFileCount, isAppliedComplete, progressOf, updateTransferProgress, type UpdateState } from "./updateProgress";
 
 export type DeviceMode = "normal" | "maintenance" | "safe_maintenance" | "booting" | "offline" | string;
 export type { DeviceConnectionState } from "./connectionState";
@@ -41,23 +45,6 @@ export type NormalizedDevice = {
   raw: DeviceEntry;
 };
 
-type UpdateState = {
-  phase?: string;
-  operation?: string;
-  version?: string;
-  manifest_url?: string;
-  changelog_url?: string;
-  total_files?: number;
-  applied_files?: number;
-  skipped_files?: number;
-  downloaded_files?: number;
-  deleted_files?: number;
-  current_file?: string;
-  last_error?: string;
-  last_result?: string;
-  request_id?: string;
-  reboot_required?: boolean;
-};
 
 const STATUS_SNAPSHOT_COMMANDS = new Set([
   "status",
@@ -114,28 +101,6 @@ function batterySocPercentOf(battery: Record<string, unknown>): number | null {
 export function updateStateOf(device: DeviceEntry | undefined): UpdateState {
   const value = device?.last_status?.update_state ?? device?.update_state ?? device?.last_result?.update_state;
   return objectValue(value) as UpdateState;
-}
-
-export function appliedFileCount(state: UpdateState): number {
-  return Number(state.applied_files ?? Number(state.downloaded_files ?? 0) + Number(state.skipped_files ?? 0));
-}
-
-export function isAppliedComplete(state: UpdateState): boolean {
-  const operation = String(state.operation ?? "");
-  const total = Number(state.total_files ?? 0);
-  return operation === "apply_update" && total > 0 && appliedFileCount(state) >= total;
-}
-
-export function progressOf(state: UpdateState): number {
-  if (isAppliedComplete(state)) return 100;
-  if (state.phase === "done") return 100;
-  if (state.phase === "ready") return 12;
-  if (state.phase === "downloading") {
-    const total = Number(state.total_files ?? 0);
-    return total > 0 ? Math.min(96, Math.max(12, Math.round((appliedFileCount(state) / total) * 100))) : 12;
-  }
-  if (state.phase === "error") return 100;
-  return state.operation ? 8 : 0;
 }
 
 export function normalizeDevice(device: DeviceEntry): NormalizedDevice {
