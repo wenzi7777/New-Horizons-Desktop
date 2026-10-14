@@ -846,7 +846,8 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn(".app-version", styles)
 
     def test_backend_service_keeps_arduino_tcp_fallback_for_current_firmware(self):
-        source = SERVICE.read_text(encoding="utf-8")
+        # The direct-connection code is NewHorizonsService's arduino_response mixin.
+        source = SERVICE.read_text(encoding="utf-8") + SERVICE.with_name("arduino_response.py").read_text(encoding="utf-8")
 
         self.assertIn("_arduino_control_sessions", source)
         self.assertIn("send_control_command", source)
