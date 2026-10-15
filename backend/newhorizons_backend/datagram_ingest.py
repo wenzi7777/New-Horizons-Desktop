@@ -185,6 +185,9 @@ class DatagramIngestMixin:
         if should_record:
             try:
                 self._write_csv_sample(device_uid, payload)
+                # After the sample, so the frame clock already has this frame.
+                if payload.get("app_events"):
+                    self._capture_streamed_app_events(device_uid, payload["app_events"])
             except Exception as exc:
                 error = str(exc)
                 with self._lock:

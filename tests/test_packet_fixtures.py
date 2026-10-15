@@ -68,7 +68,20 @@ class FirmwarePacketFixtureTest(unittest.TestCase):
                     battery = dict(parsed["battery"])
                     battery.pop("soc_percent", None)
                     self.assertEqual(battery, expect["battery"])
-                self.assertEqual(parsed["extensions"], [])
+                # App events ride as extension TLVs (firmware v1.16.0+); the
+                # sensor count is inferred around them, as without a known
+                # matrix shape. Each decodes to the app_events command's shape.
+                expected_events = [
+                    {key: value for key, value in event.items() if not (key == "value" and value is None)}
+                    for event in expect.get("app_events", [])
+                ]
+                self.assertEqual(parsed["app_events"], expected_events)
+                self.assertEqual(len(parsed["extensions"]), len(expected_events))
+
+    def test_a_packet_with_events_parses_with_a_known_sensor_count_too(self):
+        case = next(case for case in self.fixture["packets"] if case["expect"].get("app_events"))
+        parsed = parse_binary_packet(bytes.fromhex(case["hex"]), sensor_count=case["expect"]["point_count"])
+        self.assertEqual([event["seq"] for event in parsed["app_events"]], [3, 4])
 
 
 if __name__ == "__main__":

@@ -4,7 +4,9 @@ import struct
 from typing import Any
 
 from .wire import (
+    APP_EVENT_FLAG_VALUE,
     BATTERY_BYTES_V5,
+    EXT_APP_EVENT,
     FLAG_BATTERY,
     FLAG_EPOCH_VALID,
     FLAG_EXTENSIONS,
@@ -69,12 +71,91 @@ def _parse_extensions(payload: bytes) -> list[dict[str, Any]]:
     return extensions
 
 
+APP_EVENT_FIXED = struct.Struct("<IIIB")  # seq, frame_seq, uptime_ms, flags
+
+
+def decode_app_event(value: bytes) -> dict[str, Any] | None:
+    """An app_event TLV value (spec/PROTOCOL.md 3.1) in the shape the
+    `app_events` command reports, or None when it is not one exactly."""
+    if len(value) < APP_EVENT_FIXED.size:
+        return None
+    seq, frame_seq, uptime_ms, event_flags = APP_EVENT_FIXED.unpack_from(value, 0)
+    offset = APP_EVENT_FIXED.size
+    number: float | None = None
+    if event_flags & APP_EVENT_FLAG_VALUE:
+        if len(value) < offset + 4:
+            return None
+        # app_events prints the value with three decimals; match it.
+        number = round(struct.unpack_from("<f", value, offset)[0], 3)
+        offset += 4
+    texts = []
+    for _ in range(3):
+        if offset >= len(value):
+            return None
+        length = value[offset]
+        offset += 1
+        if offset + length > len(value):
+            return None
+        try:
+            texts.append(value[offset:offset + length].decode("utf-8"))
+        except UnicodeDecodeError:
+            return None
+        offset += length
+    if offset != len(value):
+        return None
+    event: dict[str, Any] = {
+        "seq": int(seq),
+        "frame_seq": int(frame_seq),
+        "ms": int(uptime_ms),
+        "app": texts[0],
+        "event": texts[1],
+        "detail": texts[2],
+    }
+    if number is not None:
+        event["value"] = number
+    return event
+
+
+def _extensions_are_known(extensions: list[dict[str, Any]]) -> bool:
+    return bool(extensions) and all(
+        item["type"] == EXT_APP_EVENT and decode_app_event(item["value"]) is not None for item in extensions
+    )
+
+
+def _v5_fixed_trailer_len(flags: int) -> int:
+    return (IMU_BYTES if flags & FLAG_IMU else 0) + (MAG_BYTES if flags & FLAG_MAG else 0) + (BATTERY_BYTES_V5 if flags & FLAG_BATTERY else 0)
+
+
+def _infer_sensor_count_with_extensions(flags: int, payload: bytes) -> int:
+    """Without the device's matrix shape the extensions' start is unknown: try
+    each sensor count and keep the one whose tail is exactly well-formed TLVs
+    of known types. Only one fits in practice; more than one is refused."""
+    per_sensor = 8 if flags & FLAG_RAWADC else 4
+    fixed = _v5_fixed_trailer_len(flags)
+    candidates = []
+    for count in range(max(0, (len(payload) - fixed) // per_sensor), -1, -1):
+        tail = payload[count * per_sensor + fixed:]
+        if not tail:
+            continue
+        try:
+            extensions = _parse_extensions(tail)
+        except PacketParseError:
+            continue
+        if _extensions_are_known(extensions):
+            candidates.append(count)
+            if len(candidates) > 1:
+                raise PacketParseError("sensor_count_ambiguous")
+    if not candidates:
+        raise PacketParseError("sensor_count_required_for_extensions")
+    return candidates[0]
+
+
 def _split_v5_extensions(flags: int, payload: bytes, sensor_count: int | None) -> tuple[bytes, list[dict[str, Any]]]:
     if not flags & FLAG_EXTENSIONS:
         return payload, []
     if sensor_count is None:
-        raise PacketParseError("sensor_count_required_for_extensions")
-    base_len = (sensor_count * (8 if flags & FLAG_RAWADC else 4)) + (IMU_BYTES if flags & FLAG_IMU else 0) + (MAG_BYTES if flags & FLAG_MAG else 0) + (BATTERY_BYTES_V5 if flags & FLAG_BATTERY else 0)
+        sensor_count = _infer_sensor_count_with_extensions(flags, payload)
+    base_len = (sensor_count * (8 if flags & FLAG_RAWADC else 4)) + _v5_fixed_trailer_len(flags)
     if base_len > len(payload):
         raise PacketParseError("sensor_count_out_of_range")
     return payload[:base_len], _parse_extensions(payload[base_len:])
@@ -199,6 +280,10 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
         "imu": imu_payload,
         "battery": battery_payload,
         "extensions": extensions,
+        "app_events": [
+            event for event in (decode_app_event(item["value"]) for item in extensions if item["type"] == EXT_APP_EVENT)
+            if event is not None
+        ],
         "flags": int(flags),
     }
     if epoch_ms is not None:

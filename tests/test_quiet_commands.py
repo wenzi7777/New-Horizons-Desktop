@@ -53,9 +53,9 @@ class QuietFlagTests(unittest.TestCase):
         self.assertIn("runnerRef.current(quietCommand({ command: source.command }))", view)
 
     def test_backend_background_commands_are_quiet(self):
-        service = read(BACKEND / "service.py")
-        poller = service[service.index('{"command": "app_events", "since_seq": since'):]
-        self.assertIn('"quiet": True', poller[:120])
+        capture = read(BACKEND / "app_event_capture.py")
+        poller = capture[capture.index('{"command": "app_events", "since_seq": since'):]
+        self.assertIn('"quiet": True', poller[:160])
         gateway = read(BACKEND / "gateway_ws.py")
         push = gateway[gateway.index('"command": "set_time"'):]
         self.assertIn('"quiet": True', push[:300])

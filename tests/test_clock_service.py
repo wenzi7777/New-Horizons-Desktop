@@ -76,6 +76,7 @@ class CsvTimeRefTests(unittest.TestCase):
         # Only the CSV writer's own state, not a whole running service.
         self.service = object.__new__(NewHorizonsService)
         self.service._csv_paths = {}
+        self.service._csv_frame_clocks = {}
         self.service._data_root = Path(self._tmp.name)
 
     def rows(self):

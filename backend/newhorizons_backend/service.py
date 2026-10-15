@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .app_event_log import append_dropped_marker, append_events, events_lost_since
+from .app_event_capture import AppEventCaptureMixin
+from .app_event_log import FrameClock
 from .device_commands import (
     HUB_COMMANDS,
     INTERNAL_DEVICE_COMMANDS,
@@ -54,6 +55,7 @@ class NewHorizonsService(
     DeviceIdentityMixin,
     DeviceLabelsMixin,
     DatagramIngestMixin,
+    AppEventCaptureMixin,
 ):
     COMMAND_TTL_MS = 15000
     BOOT_GRACE_SEC = 90.0
@@ -126,6 +128,9 @@ class NewHorizonsService(
         self._latest_status: dict[str, dict[str, Any]] = {}
         self._latest_result: dict[str, dict[str, Any]] = {}
         self._csv_paths: dict[str, Path] = {}
+        # When each frame of the current recording was sampled, so app events
+        # (stamped with the device's boot time) get the sample CSV's time.
+        self._csv_frame_clocks: dict[str, FrameClock] = {}
         # Mock-mode file uploads in progress, keyed by (device_uid, scope, path).
         # The mock used to ack writes without storing anything, so an "uploaded"
         # file never appeared in file_list and nothing could be installed from it.
@@ -136,8 +141,21 @@ class NewHorizonsService(
         self._mock_packages: dict[str, list[dict[str, Any]]] = {}
         self._recording_enabled: set[str] = set()
         self._recording_errors: dict[str, str] = {}
-        # Highest app-event sequence already written to a sidecar, per device.
+        # App event capture (app_event_capture.py), per device: the highest
+        # event sequence handled; an event held back because its frame has
+        # not been recorded yet (its seq, since when); the sequences written
+        # (an ordered set, bounded); the ones the stream lost, until the
+        # device is asked for them; devices that stream their events; when
+        # app_events was last sent; and what each request asked from.
         self._app_event_seq: dict[str, int] = {}
+        self._app_event_hold: dict[str, tuple[int, float]] = {}
+        self._app_event_written: dict[str, dict[int, None]] = {}
+        self._app_event_missing: dict[str, set[int]] = {}
+        self._app_event_streaming: set[str] = set()
+        self._app_event_requested_at: dict[str, float] = {}
+        self._app_event_requests: dict[str, int] = {}
+        # Stream packets and app_events replies arrive on different threads.
+        self._app_event_lock = threading.Lock()
         self._app_event_thread: threading.Thread | None = None
         self._app_event_stop = threading.Event()
         # What each device (firmware v1.15.0+) says it accepts; see
@@ -429,11 +447,12 @@ class NewHorizonsService(
             if enabled:
                 self._recording_enabled.add(device_uid)
                 self._recording_errors.pop(device_uid, None)
-                self._app_event_seq.pop(device_uid, None)
             else:
                 self._recording_enabled.discard(device_uid)
                 self._csv_paths.pop(device_uid, None)
                 self._recording_errors.pop(device_uid, None)
+            self._csv_frame_clocks.pop(device_uid, None)
+            self._reset_app_event_state(device_uid)
             if device_uid in self._devices:
                 self._devices[device_uid]["recording_enabled"] = enabled
                 self._devices[device_uid].pop("recording_error", None)
@@ -631,97 +650,6 @@ class NewHorizonsService(
             return
         self._latest_visualization.pop(device_uid, None)
         merged.pop("latest_sample", None)
-
-    # -- app event capture --------------------------------------------------
-    #
-    # This is the one place the backend sends commands on its own initiative.
-    # It earns that because it already owns the recording's lifecycle: the
-    # frontend cannot be the one polling, since closing the tab would silently
-    # stop capturing events half way through a session.
-    APP_EVENT_POLL_SEC = 0.5
-
-    def _ensure_app_event_poller(self) -> None:
-        if self._mock_mode:
-            return
-        if self._app_event_thread is not None and self._app_event_thread.is_alive():
-            return
-        self._app_event_stop.clear()
-        self._app_event_thread = threading.Thread(
-            target=self._app_event_loop, name="newhorizons-app-events", daemon=True
-        )
-        self._app_event_thread.start()
-
-    def _app_event_loop(self) -> None:
-        while not self._app_event_stop.wait(self.APP_EVENT_POLL_SEC):
-            with self._lock:
-                recording = sorted(self._recording_enabled)
-            if not recording:
-                # Nothing to capture; the thread parks itself rather than
-                # polling devices nobody is recording.
-                return
-            for device_uid in recording:
-                since = self._app_event_seq.get(device_uid, 0)
-                try:
-                    # quiet: polled, so the device skips its LED ack (v1.7.2+).
-                    self.publish_command(device_uid, {"command": "app_events", "since_seq": since,
-                                                      "quiet": True})
-                except RuntimeError:
-                    # Offline, booting, or the firmware predates app_events.
-                    # Not an error worth surfacing on every tick.
-                    continue
-
-    def _capture_app_events(self, device_uid: str, payload: dict[str, Any]) -> None:
-        """Write an app_events result into the recording's sidecar."""
-        with self._lock:
-            if device_uid not in self._recording_enabled:
-                return
-            sample_path = self._csv_paths.get(device_uid)
-        if sample_path is None:
-            return
-
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            return
-        events = data.get("events")
-        if not isinstance(events, list):
-            return
-
-        try:
-            device_seq = int(data.get("seq") or 0)
-        except (TypeError, ValueError):
-            device_seq = 0
-        previous = self._app_event_seq.get(device_uid, 0)
-        if previous and device_seq < previous:
-            # The device restarted and its sequence began again. Keeping the old
-            # high-water mark would filter out every new event from now on.
-            previous = 0
-            self._app_event_seq[device_uid] = 0
-
-        try:
-            written = append_events(sample_path, events)
-            # Not data["dropped"]: that is cumulative since boot and would mark
-            # a loss on every poll once the ring had wrapped even once.
-            lost = events_lost_since(previous, device_seq, events)
-            if lost:
-                append_dropped_marker(sample_path, previous, lost)
-        except OSError:
-            # A failed sidecar write must never interrupt the sample recording,
-            # which is the thing actually being measured.
-            return
-
-        highest = 0
-        for event in events:
-            if isinstance(event, dict):
-                try:
-                    highest = max(highest, int(event.get("seq") or 0))
-                except (TypeError, ValueError):
-                    continue
-        if highest:
-            self._app_event_seq[device_uid] = highest
-        elif device_seq > previous:
-            # Nothing returned but the device moved on (first poll, or all of it
-            # rolled off): advance, or the same loss is counted again next poll.
-            self._app_event_seq[device_uid] = device_seq
 
     def _record_result(self, device_uid: str, payload: Any) -> None:
         if not isinstance(payload, dict):
@@ -1032,6 +960,7 @@ class NewHorizonsService(
         if path is None:
             path = self._data_root / device_uid / now.strftime("%Y%m%d") / "{}.csv".format(now.strftime("%H%M%S"))
             self._csv_paths[device_uid] = path
+            self._csv_frame_clocks[device_uid] = FrameClock()
         path.parent.mkdir(parents=True, exist_ok=True)
         is_new = not path.exists()
         imu = payload.get("imu") if isinstance(payload.get("imu"), dict) else {}
@@ -1041,6 +970,8 @@ class NewHorizonsService(
         raw_adc = payload.get("raw_adc")
         include_raw = isinstance(raw_adc, list) and len(raw_adc) == len(pressures)
         timestamp = self._csv_timestamp_ms(payload, now)
+        time_ref = self._csv_time_ref(payload)
+        frame_seq = int(payload.get("frame_id") or 0)
         with path.open("a", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             if is_new:
@@ -1064,9 +995,12 @@ class NewHorizonsService(
                 + list(mag[:3])
                 + list(gyro[:3])
                 + list(acc[:3])
-                + [int(payload.get("frame_id") or 0)]
-                + [self._csv_time_ref(payload)]
+                + [frame_seq]
+                + [time_ref]
             )
+        clock = self._csv_frame_clocks.get(device_uid)
+        if clock is not None:
+            clock.record(frame_seq, timestamp, time_ref)
 
     @classmethod
     def _payload_is_live(cls, payload: dict[str, Any], kind: str) -> bool:
