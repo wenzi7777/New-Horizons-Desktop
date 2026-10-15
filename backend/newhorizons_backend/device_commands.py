@@ -161,6 +161,19 @@ CATALOG_MIN_FIRMWARE = (1, 15, 0)
 # A `commands` request that got no reply (device went offline, relay dropped
 # it) is retried after this long rather than never.
 CATALOG_RETRY_SEC = 30.0
+# A request that failed outright (a busy Hub refused it, a page timed out) is
+# retried sooner, backing off while it keeps failing: 4 s, 8 s, 16 s ... up
+# to 5 min (under the Terminal page's 5 s asking, so a retry is never just missed).
+# Immediate retries made every status of a device whose `commands`
+# could never get through (e.g. through a Hub without paging) fetch ~19 KB.
+FAILURE_BACKOFF_MIN_SEC = 4.0
+FAILURE_BACKOFF_MAX_SEC = 300.0
+
+
+def failure_backoff_sec(failures: int) -> float:
+    if failures <= 0:
+        return 0.0
+    return min(FAILURE_BACKOFF_MAX_SEC, FAILURE_BACKOFF_MIN_SEC * 2 ** (failures - 1))
 
 _VERSION_RE = re.compile(r"^\s*[vV]?(\d+)(?:\.(\d+))?(?:\.(\d+))?")
 
@@ -204,6 +217,8 @@ class CommandCatalogStore:
         self._requested: dict[str, tuple[str, float]] = {}
         # When each device was last asked for its firmware version (needs_probe).
         self._probed: dict[str, float] = {}
+        # Consecutive failures of the `commands` fetch, for its backoff.
+        self._fetch_failures: dict[str, int] = {}
         # The firmware each device last reported, from any reply that carried
         # it: a device behind a Hub reports it in no heartbeat.
         self._firmware: dict[str, str] = {}
@@ -252,13 +267,24 @@ class CommandCatalogStore:
         with self._lock:
             self._requested[device_uid] = (str(firmware_version or ""), now)
 
-    def forget_request(self, device_uid: str) -> None:
+    def note_fetch_failed(self, device_uid: str, now: float | None = None) -> None:
+        """The `commands` request failed: allow the next one after the backoff."""
+        now = time.monotonic() if now is None else now
         with self._lock:
-            self._requested.pop(device_uid, None)
+            failures = self._fetch_failures.get(device_uid, 0) + 1
+            self._fetch_failures[device_uid] = failures
+            requested = self._requested.get(device_uid)
+            if requested is not None:
+                # needs_fetch() retries CATALOG_RETRY_SEC after the stamp.
+                self._requested[device_uid] = (requested[0], now - CATALOG_RETRY_SEC + failure_backoff_sec(failures))
 
-    def forget_probe(self, device_uid: str) -> None:
+    def note_probe_failed(self, device_uid: str, now: float | None = None) -> None:
+        """The firmware probe failed: allow the next one FAILURE_BACKOFF_MIN_SEC
+        later. No growing backoff: a probe is ~600 B and only an ask (the
+        Terminal page, a dozen times at most) starts one."""
+        now = time.monotonic() if now is None else now
         with self._lock:
-            self._probed.pop(device_uid, None)
+            self._probed[device_uid] = now - CATALOG_RETRY_SEC + FAILURE_BACKOFF_MIN_SEC
 
     def invalidate_if_hash_differs(self, device_uid: str, schema_hash: Any) -> bool:
         """`capabilities` carries command_schema_hash: a mismatch means the
@@ -303,6 +329,7 @@ class CommandCatalogStore:
         with self._lock:
             self._catalogs[device_uid] = catalog
             self._requested.pop(device_uid, None)
+            self._fetch_failures.pop(device_uid, None)
         return catalog
 
     def public_names(self, device_uid: str) -> set[str] | None:

@@ -94,6 +94,11 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(store.get(UID))
         self.assertTrue(store.needs_fetch(UID, "v1.15.0"))
 
+    def test_failure_backoff_grows_and_is_capped(self):
+        from newhorizons_backend.device_commands import failure_backoff_sec
+        self.assertEqual([failure_backoff_sec(n) for n in range(5)], [0, 4, 8, 16, 32])
+        self.assertEqual(failure_backoff_sec(20), 300)
+
     def test_mode_error_follows_the_flags(self):
         store = CommandCatalogStore()
         self.assertIsNone(store.mode_error(UID, "status", maintenance=False))
@@ -224,24 +229,39 @@ class HubRelayedFetchTests(unittest.TestCase):
             service.device_command_catalog(UID)
         self.assertEqual(published, ["capabilities"])
 
-    def test_a_failed_fetch_or_probe_is_retried_on_the_next_ask(self):
-        # A Hub refuses a command while another is in flight; waiting out the
-        # 30 s interval outlasted the Terminal page's asking.
+    def test_a_failed_fetch_or_probe_is_retried_after_a_short_backoff(self):
+        # A Hub refuses a command while another is in flight. Waiting out the
+        # 30 s interval outlasted the Terminal page's asking; retrying at once
+        # made a device whose `commands` never gets through fetch on every
+        # status. 4 s, doubling while it keeps failing.
         service = NewHorizonsService(mock_mode=False)
         published = []
         service.publish_command = lambda uid, payload: published.append(payload["command"])
         service._devices[UID] = {"device_uid": UID}
         busy = {"status": "error", "ok": False, "message": "device_command_already_in_flight"}
-        with mock.patch("newhorizons_backend.service.threading.Thread") as thread:
+        clock = [1000.0]
+        status = {"command": "status", "status": "ok", "ok": True, "data": {"firmware_version": "v1.15.0", "mode": "normal"}}
+        with mock.patch("newhorizons_backend.service.threading.Thread") as thread, \
+                mock.patch("newhorizons_backend.device_commands.time.monotonic", lambda: clock[0]):
             thread.side_effect = lambda target, args, **kw: mock.Mock(start=lambda: target(*args))
-            service.device_command_catalog(UID)
+            service.device_command_catalog(UID)                        # probe
             service._record_result(UID, dict(busy, command="capabilities"))
-            service.device_command_catalog(UID)
+            service.device_command_catalog(UID)                        # within backoff: nothing
+            clock[0] += 5
+            service.device_command_catalog(UID)                        # probe again
             service._record_result(UID, {"command": "capabilities", "status": "ok", "ok": True,
-                                         "data": {"firmware_version": "v1.15.0-beta.3"}})
-            service._record_result(UID, dict(busy, command="commands"))
-            service.device_command_catalog(UID)
-        self.assertEqual(published, ["capabilities", "capabilities", "commands", "commands"])
+                                         "data": {"firmware_version": "v1.15.0"}})  # -> fetch
+            self.assertEqual(published, ["capabilities", "capabilities", "commands"])
+            service._record_result(UID, dict(busy, command="commands"))       # it fails
+            # Status polls: refetch only once the backoff (5 s, then 10 s) is up.
+            for wait, expect_fetch in ((0, False), (5, True), (5, False), (5, True)):
+                clock[0] += wait
+                before = len(published)
+                service._record_result(UID, dict(status))
+                fetched = len(published) > before
+                self.assertEqual(fetched, expect_fetch, (wait, published))
+                if fetched:
+                    service._record_result(UID, dict(busy, command="commands"))  # fails again
 
     def test_a_paged_catalog_reply_is_recorded(self):
         import json
@@ -263,6 +283,20 @@ class HubRelayedFetchTests(unittest.TestCase):
                 "page": {"rid": 1, "chunk": i, "chunks": 3, "data": reply[i * size:(i + 1) * size]},
             })
         self.assertIn("blink_twice", service.device_command_names(UID))
+
+
+class PendingCommandTests(unittest.TestCase):
+    def test_unanswered_commands_do_not_pile_up(self):
+        # A device behind a Hub sends no statuses, which is where the table
+        # used to be pruned; the backend's own polls (app_events at 2 Hz)
+        # carry request_ids now.
+        service = NewHorizonsService(mock_mode=False)
+        clock = [100.0]
+        with mock.patch("newhorizons_backend.command_gating.time.monotonic", lambda: clock[0]):
+            for i in range(50):
+                service._remember_pending_command(UID, {"command": "app_events", "request_id": f"r{i}"})
+                clock[0] += 1.0
+        self.assertLessEqual(len(service._pending_commands[UID]), 31)
 
 
 class AllowlistTests(unittest.TestCase):

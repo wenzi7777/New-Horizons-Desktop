@@ -18,6 +18,8 @@ import time
 
 
 class CommandGatingMixin:
+    # How long a command waits for its reply in the pending table.
+    PENDING_COMMAND_TTL_SEC = 30
     def _boot_command_mode_error_locked(self, device_uid: str, payload: dict[str, Any]) -> str:
         status = self._latest_status.get(device_uid) or {}
         catalog_error = self._catalog_command_mode_error(device_uid, status, payload)
@@ -151,11 +153,20 @@ class CommandGatingMixin:
                 existing["boot_command"] = command
                 existing["mode"] = "booting"
                 self._devices[device_uid] = existing
-        self._pending_commands.setdefault(device_uid, {})[request_id] = {
+        pending_for_device = self._pending_commands.setdefault(device_uid, {})
+        now = time.monotonic()
+        # Entries whose reply never came are of no use after PENDING_COMMAND_TTL_SEC
+        # (_pending_result_from_status drops them too, but only a device that
+        # sends statuses reaches it -- one behind a Hub never does). Every
+        # command has a request_id now, the backend's own polls included.
+        for stale_id, stale in list(pending_for_device.items()):
+            if now - float(stale.get("created_at") or 0) > self.PENDING_COMMAND_TTL_SEC:
+                pending_for_device.pop(stale_id, None)
+        pending_for_device[request_id] = {
             "request_id": request_id,
             "command": command,
             "target_mode": payload.get("target_mode", ""),
-            "created_at": time.monotonic(),
+            "created_at": now,
         }
 
     @staticmethod
@@ -196,7 +207,7 @@ class CommandGatingMixin:
                 return None
             now = time.monotonic()
             for request_id, pending in list(pending_for_device.items()):
-                if now - float(pending.get("created_at") or 0) > 30:
+                if now - float(pending.get("created_at") or 0) > self.PENDING_COMMAND_TTL_SEC:
                     pending_for_device.pop(request_id, None)
             if not pending_for_device:
                 self._pending_commands.pop(device_uid, None)

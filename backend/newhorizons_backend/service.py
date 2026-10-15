@@ -744,8 +744,8 @@ class NewHorizonsService(
             self._record_command_catalog(device_uid, payload)
         elif str(payload.get("command") or "") == "capabilities" and self._result_failed(payload):
             # A probe a relay could not deliver (another command in flight):
-            # let the next ask probe again instead of waiting out the interval.
-            self._command_catalogs.forget_probe(device_uid)
+            # probe again after a short backoff, not after the full interval.
+            self._command_catalogs.note_probe_failed(device_uid)
         self._mark_relayed_update_started(payload)
         is_status_snapshot = self._is_status_snapshot_result(payload)
         calibration_status = self._calibration_status_from_result(payload)
@@ -892,8 +892,8 @@ class NewHorizonsService(
             # quiet: the user did not ask for this, so no LED ack.
             self.publish_command(device_uid, {"command": "commands", "quiet": True})
         except RuntimeError:
-            # Not sent (offline, booting): the next status or ask tries again.
-            self._command_catalogs.forget_request(device_uid)
+            # Not sent (offline, booting): tried again after the backoff.
+            self._command_catalogs.note_fetch_failed(device_uid)
 
     @staticmethod
     def _result_failed(payload: dict[str, Any]) -> bool:
@@ -903,13 +903,13 @@ class NewHorizonsService(
         try:
             self.publish_command(device_uid, {"command": "capabilities", "quiet": True})
         except RuntimeError:
-            self._command_catalogs.forget_probe(device_uid)
+            self._command_catalogs.note_probe_failed(device_uid)
 
     def _record_command_catalog(self, device_uid: str, payload: dict[str, Any]) -> None:
         if self._result_failed(payload):
             # Undelivered (a relay busy with another command, a page timeout):
-            # retry on the next status or ask, not after CATALOG_RETRY_SEC.
-            self._command_catalogs.forget_request(device_uid)
+            # retry after a short backoff that grows while it keeps failing.
+            self._command_catalogs.note_fetch_failed(device_uid)
             return
         firmware = self._device_firmware_version(device_uid, {})
         self._command_catalogs.record(device_uid, firmware, self._result_data(payload))

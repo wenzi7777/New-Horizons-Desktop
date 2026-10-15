@@ -21,23 +21,9 @@ import {
   type PasteWarning,
 } from "../lib/terminalCommands";
 import { valueToCsv } from "../lib/valueFormat";
+import { updateStateOf } from "../lib/device";
+import { appliedFileCount, isAppliedComplete, progressOf, totalUnits, type UpdateState } from "../lib/updateProgress";
 
-type UpdateState = {
-  phase?: string;
-  operation?: string;
-  version?: string;
-  manifest_url?: string;
-  changelog_url?: string;
-  total_files?: number;
-  applied_files?: number;
-  skipped_files?: number;
-  downloaded_files?: number;
-  deleted_files?: number;
-  current_file?: string;
-  last_error?: string;
-  last_result?: string;
-  reboot_required?: boolean;
-};
 
 type TerminalLogEntry =
   | { type: "line"; text: string }
@@ -49,39 +35,11 @@ const LOCAL_HELP: TerminalHelpEntry = {
   example: "io-config",
 };
 
-function updateStateOf(device: DeviceEntry | undefined): UpdateState {
-  const value = device?.update_state ?? device?.last_status?.update_state;
-  return value && typeof value === "object" ? (value as UpdateState) : {};
-}
-
-function appliedFileCount(state: UpdateState): number {
-  return Number(state.applied_files ?? Number(state.downloaded_files ?? 0) + Number(state.skipped_files ?? 0));
-}
-
-function isAppliedComplete(state: UpdateState): boolean {
-  const operation = String(state.operation ?? "");
-  const total = Number(state.total_files ?? 0);
-  return operation === "apply_update" && total > 0 && appliedFileCount(state) >= total;
-}
-
-function progressOf(state: UpdateState): number {
-  if (isAppliedComplete(state)) return 100;
-  if (state.phase === "done") return 100;
-  if (state.phase === "ready") return 12;
-  if (state.phase === "downloading") {
-    const total = Number(state.total_files ?? 0);
-    const done = appliedFileCount(state);
-    return total > 0 ? Math.min(96, Math.max(12, Math.round((done / total) * 100))) : 12;
-  }
-  if (state.phase === "error") return 100;
-  return state.operation ? 8 : 0;
-}
-
 function stateToken(state: UpdateState) {
   return [
     state.phase ?? "",
     state.operation ?? "",
-    state.total_files ?? 0,
+    totalUnits(state),
     appliedFileCount(state),
     state.current_file ?? "",
     state.last_error ?? "",
@@ -133,7 +91,7 @@ function resultSummaryRows(result: Record<string, unknown>) {
     ["applied_release", isWriteCommand ? result.version ?? state.version : ""],
     ["phase", showUpdateState ? state.phase : ""],
     ["operation", showUpdateState ? state.operation : ""],
-    ["progress", showUpdateState && state.total_files ? `${state.applied_files ?? state.downloaded_files ?? 0}/${state.total_files}` : ""],
+    ["progress", showUpdateState && totalUnits(state) ? `${appliedFileCount(state)}/${totalUnits(state)}` : ""],
     ["current_file", showUpdateState ? state.current_file : ""],
     ["request_id", result.request_id],
   ];
@@ -195,7 +153,7 @@ function lineCardText(text: string) {
 }
 
 function formatProgressLine(state: UpdateState) {
-  const total = Number(state.total_files ?? 0);
+  const total = totalUnits(state);
   const applied = appliedFileCount(state);
   const progress = progressOf(state);
   const filled = Math.max(0, Math.min(20, Math.round(progress / 5)));

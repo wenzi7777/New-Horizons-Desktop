@@ -27,7 +27,8 @@ export function appliedFileCount(state: UpdateState): number {
   return Number(state.applied_files ?? Number(state.downloaded_files ?? 0) + Number(state.skipped_files ?? 0));
 }
 
-function totalUnits(state: UpdateState): number {
+/** Files over WiFi, chunks through a Hub; 0 when unknown. */
+export function totalUnits(state: UpdateState): number {
   return Number(state.total_chunks ?? 0) > 0 ? Number(state.total_chunks) : Number(state.total_files ?? 0);
 }
 

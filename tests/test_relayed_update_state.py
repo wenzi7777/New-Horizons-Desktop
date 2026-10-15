@@ -48,6 +48,20 @@ class RelayedUpdateStateTests(unittest.TestCase):
         state = self.card_state()
         self.assertEqual((state["phase"], state["applied_chunks"], state["total_chunks"]), ("downloading", 120, 425))
 
+    def test_an_update_that_never_reported_progress_does_not_stay_running(self):
+        # Apply, no status during the relay, then the device reboots with
+        # auto-update-on-boot off: its receiver reports idle. The card (and
+        # its 4 s status polling) must not stay on the "checking" the apply
+        # reply left.
+        self.service._record_result(UID, {
+            "command": "apply_update", "status": "ok", "ok": True, "message": "update_started",
+            "data": {"update_state": {"phase": "checking", "operation": "apply_update", "transport": "espnow_relay"}}})
+        self.service._record_result(UID, {"command": "status", "status": "ok", "ok": True, "data": {
+            "firmware_version": "v1.15.0",
+            "update_state": {"phase": "idle", "operation": "", "available": False, "version": "",
+                             "transport": "espnow_relay"}}})
+        self.assertEqual(self.card_state()["phase"], "idle")
+
 
 if __name__ == "__main__":
     unittest.main()
