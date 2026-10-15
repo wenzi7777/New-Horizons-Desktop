@@ -228,6 +228,8 @@ export type CsvExplorerEntry = {
   is_dir: boolean;
   size: number;
   kind: "directory" | "csv" | string;
+  // Last modification, epoch ms (Desktop v0.25.0+ backends).
+  modified_ms?: number;
 };
 
 export type CsvDirectoryResponse = {

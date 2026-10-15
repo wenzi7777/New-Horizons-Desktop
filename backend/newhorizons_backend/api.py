@@ -182,6 +182,7 @@ def create_blueprint(
         return target.relative_to(device_root).as_posix()
 
     def _csv_directory_item(device_root: Path, path: Path) -> dict[str, Any] | None:
+        # modified_ms: the file browser's "Date Modified" column (and its sort).
         if path.is_dir():
             return {
                 "name": path.name,
@@ -189,14 +190,17 @@ def create_blueprint(
                 "is_dir": True,
                 "size": 0,
                 "kind": "directory",
+                "modified_ms": int(path.stat().st_mtime * 1000),
             }
         if path.is_file() and path.suffix.lower() == ".csv":
+            stat = path.stat()
             return {
                 "name": path.name,
                 "path": _path_from_device_root(device_root, path),
                 "is_dir": False,
-                "size": path.stat().st_size,
+                "size": stat.st_size,
                 "kind": "csv",
+                "modified_ms": int(stat.st_mtime * 1000),
             }
         return None
 

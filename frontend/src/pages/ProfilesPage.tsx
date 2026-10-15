@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from "react";
 
+import { CirclePlus, Download, Eraser, Hand, ImagePlus, Minus, MousePointer2, Move, Plus, RefreshCw, Save, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+
+import { ConfirmModal } from "../components/ConfirmModal";
 import { useI18n } from "../i18n";
 import { api, type ProfileListEntry, type VisualizationEntry } from "../lib/api";
 import { streamSensorLabel } from "../lib/sensorLabel";
@@ -221,7 +224,9 @@ export function ProfilesPage() {
   const [selectedName, setSelectedName] = useState("");
   const [draft, setDraft] = useState<ProfileDraft>(EMPTY_PROFILE);
   const [showRawJson, setShowRawJson] = useState(false);
-  const [statusMessage, setStatusMessage] = useState(t("profileStart"));
+  // A short-lived confirmation beside the Save button, where the eye already is.
+  const [statusMessage, setStatusMessage] = useState("");
+  const [confirming, setConfirming] = useState<"delete" | "clear" | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [tool, setTool] = useState<ProfileTool>("add");
   const [selectedSensorId, setSelectedSensorId] = useState<number | null>(null);
@@ -318,6 +323,12 @@ export function ProfilesPage() {
       setMonitorDeviceUid(normalizeUid(devices[0].device_uid));
     }
   }, [devices, monitorDeviceUid]);
+
+  useEffect(() => {
+    if (!statusMessage) return undefined;
+    const timer = window.setTimeout(() => setStatusMessage(""), 3200);
+    return () => window.clearTimeout(timer);
+  }, [statusMessage]);
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -615,51 +626,78 @@ export function ProfilesPage() {
     updateSensor(selectedSensor.id, { index });
   }
 
+  const savedProfile = profiles.some((item) => item.name === selectedName);
+  const tools = [
+    { id: "add", icon: CirclePlus },
+    { id: "select", icon: MousePointer2 },
+    { id: "move", icon: Move },
+    { id: "delete", icon: Eraser },
+  ] as const;
+
   return (
     <>
-      <section className="page-header">
+      <section className="page-header profile-page-header">
         <div>
           <h2>{t("profileTitle")}</h2>
           <p className="page-copy">{t("profileEditorCopy")}</p>
+        </div>
+        <div className="profile-header-actions">
+          {errorMessage ? <span className="profile-toast error" role="alert">{errorMessage}</span> : null}
+          {!errorMessage && statusMessage ? <span className="profile-toast" role="status">{statusMessage}</span> : null}
+          <button className="button" type="button" onClick={() => importRef.current?.click()}>
+            <Upload size={15} strokeWidth={2} aria-hidden="true" />
+            {t("importJson")}
+          </button>
+          <button className="button" type="button" onClick={handleExport}>
+            <Download size={15} strokeWidth={2} aria-hidden="true" />
+            {t("exportJson")}
+          </button>
+          <button className="button primary" type="button" onClick={() => void handleSave()}>
+            <Save size={15} strokeWidth={2} aria-hidden="true" />
+            {t("save")}
+          </button>
+          <input ref={importRef} hidden type="file" accept=".json,application/json" onChange={(event) => handleImport(event.target.files?.[0])} />
         </div>
       </section>
 
       <section className="profile-workspace">
         <aside className="panel profile-sidebar profile-sidebar-primary">
-          <div className="profile-sidebar-section">
+          <div className="profile-source-list-header">
             <h3>{t("profiles")}</h3>
-            <select value={selectedName} onChange={(event) => void handleSelect(event.target.value)}>
-              <option value="">{t("profileStart")}</option>
-              {profiles.map((item) => (
-                <option key={item.name} value={item.name}>
-                  {displayNameForProfile(item)}
-                </option>
-              ))}
-            </select>
-            <div className="inline-actions">
-              <button className="button" type="button" onClick={() => void loadProfiles(selectedName)}>
-                {t("refresh")}
-              </button>
-              <button className="button danger" type="button" disabled={!selectedName} onClick={() => void handleDelete()}>
-                {t("delete")}
-              </button>
-            </div>
+            <button className="profile-icon-button" type="button" title={t("refresh")} aria-label={t("refresh")} onClick={() => void loadProfiles(selectedName)}>
+              <RefreshCw size={14} strokeWidth={2} />
+            </button>
           </div>
-
-          <div className="profile-sidebar-section">
-            <h3>{t("profileActions")}</h3>
-            <button className="button primary" type="button" onClick={() => void handleSave()}>
-              {t("save")}
-            </button>
-            <button className="button" type="button" onClick={handleExport}>
-              {t("exportJson")}
-            </button>
-            <button className="button" type="button" onClick={() => importRef.current?.click()}>
-              {t("importJson")}
-            </button>
+          <ul className="profile-source-list" role="listbox" aria-label={t("profiles")}>
+            {!savedProfile ? (
+              <li>
+                <button type="button" className="profile-source-item selected" role="option" aria-selected="true">
+                  <span>{selectedName || t("newProfile")}</span>
+                  <small>{t("profileUnsaved")}</small>
+                </button>
+              </li>
+            ) : null}
+            {profiles.map((item) => (
+              <li key={item.name}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={item.name === selectedName}
+                  className={`profile-source-item${item.name === selectedName ? " selected" : ""}`}
+                  onClick={() => void handleSelect(item.name)}
+                >
+                  <span>{displayNameForProfile(item)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {profiles.length === 0 ? <p className="field-note">{t("profileListEmpty")}</p> : null}
+          <div className="profile-source-list-footer">
             <button
-              className="button"
+              className="profile-icon-button"
               type="button"
+              title={t("newProfile")}
+              aria-label={t("newProfile")}
               onClick={() => {
                 setSelectedName("");
                 setDraftProfile(EMPTY_PROFILE);
@@ -667,152 +705,65 @@ export function ProfilesPage() {
                 resetStageView();
               }}
             >
-              {t("newProfile")}
-            </button>
-            <input ref={importRef} hidden type="file" accept=".json,application/json" onChange={(event) => handleImport(event.target.files?.[0])} />
-          </div>
-
-          <div className="profile-sidebar-section">
-            <h3>{t("backgroundImage")}</h3>
-            <button className="button" type="button" onClick={() => imageRef.current?.click()}>
-              {t("uploadBackground")}
+              <Plus size={15} strokeWidth={2} />
             </button>
             <button
-              className="button"
+              className="profile-icon-button"
               type="button"
-              onClick={() => {
-                updateDraft((current) => ({ ...current, background: { imageData: "", aspectRatio: 1 } }));
-                resetStageView();
-              }}
+              title={t("delete")}
+              aria-label={t("delete")}
+              disabled={!savedProfile}
+              onClick={() => setConfirming("delete")}
             >
-              {t("clearBackground")}
+              <Minus size={15} strokeWidth={2} />
             </button>
-            <p className="field-note">
-              {draft.background.imageData ? `AR ${draft.background.aspectRatio.toFixed(3)}` : t("noBackground")}
-            </p>
-            <input ref={imageRef} hidden type="file" accept="image/*" onChange={(event) => handleImageUpload(event.target.files?.[0])} />
           </div>
-
         </aside>
 
         <article className="panel profile-main profile-canvas-panel">
-          <div className="profile-form-grid">
-            <div className="field">
-              <label>{t("profileName")}</label>
-              <input
-                value={selectedName}
-                onChange={(event) => {
-                  const nextName = profileKeyFromName(event.target.value);
-                  setSelectedName(nextName);
-                  updateDraft((current) => ({ ...current, name: nextName }));
-                }}
-                placeholder="profile_name"
-              />
-            </div>
-            <div className="field">
-              <label>{t("profileDisplayMode")}</label>
-              <div className="segmented-control">
-                <button
-                  className={draft.display.mode === "3d" ? "active" : ""}
-                  type="button"
-                  onClick={() => updateDraft((current) => ({ ...current, display: { ...current.display, mode: "3d" } }))}
-                >
-                  {t("surface3d")}
-                </button>
-                <button
-                  className={draft.display.mode === "2d" ? "active" : ""}
-                  type="button"
-                  onClick={() => updateDraft((current) => ({ ...current, display: { ...current.display, mode: "2d" } }))}
-                >
-                  {t("heatmap2d")}
-                </button>
-              </div>
-            </div>
-            <div className="field">
-              <label>{t("pressureMin")}</label>
-              <input
-                type="number"
-                value={draft.display.pressureMin}
-                onChange={(event) =>
-                  updateDraft((current) => ({
-                    ...current,
-                    display: { ...current.display, pressureMin: Number(event.target.value) || 0 },
-                  }))
-                }
-              />
-            </div>
-            <div className="field">
-              <label>{t("pressureMax")}</label>
-              <input
-                type="number"
-                value={draft.display.pressureMax}
-                onChange={(event) =>
-                  updateDraft((current) => ({
-                    ...current,
-                    display: { ...current.display, pressureMax: Math.max(Number(event.target.value) || 1, current.display.pressureMin + 1) },
-                  }))
-                }
-              />
-            </div>
-            <div className="field">
-              <label>{t("dotSize")}: {draft.display.dotSize.toFixed(2)}x</label>
-              <input
-                type="range"
-                min="0.5"
-                max="4"
-                step="0.25"
-                value={draft.display.dotSize}
-                onChange={(event) =>
-                  updateDraft((current) => ({
-                    ...current,
-                    display: { ...current.display, dotSize: clamp(Number(event.target.value) || 1, 0.5, 4) },
-                  }))
-                }
-              />
-            </div>
-          </div>
-
           <div className="profile-canvas-toolbar">
-            <div className="profile-tool-row">
-              {(["add", "select", "move", "delete"] as const).map((item) => (
+            <div className="profile-tool-segments" role="radiogroup" aria-label={t("profileTools")}>
+              {tools.map(({ id, icon: Icon }) => (
                 <button
-                  key={item}
-                  className={`button small ${tool === item ? "primary" : ""}`}
+                  key={id}
+                  className={tool === id ? "active" : ""}
                   type="button"
-                  onClick={() => setTool(item)}
+                  role="radio"
+                  aria-checked={tool === id}
+                  title={t(`profileToolHint_${id}`)}
+                  onClick={() => setTool(id)}
                 >
-                  {t(`profileTool_${item}`)}
+                  <Icon size={15} strokeWidth={2} aria-hidden="true" />
+                  {t(`profileTool_${id}`)}
                 </button>
               ))}
-              <span className="profile-canvas-toolbar-sep" />
-              <button
-                className={`button small ${panMode ? "primary" : ""}`}
-                type="button"
-                onClick={() => setPanMode((v) => !v)}
-              >
-                Pan
-              </button>
             </div>
+            <button
+              className={`profile-toolbar-toggle${panMode ? " active" : ""}`}
+              type="button"
+              aria-pressed={panMode}
+              onClick={() => setPanMode((v) => !v)}
+            >
+              <Hand size={15} strokeWidth={2} aria-hidden="true" />
+              {t("profilePan")}
+            </button>
             <div className="profile-canvas-toolbar-zoom">
-              <button className="button small" type="button" onClick={() => zoomFromCenter(1.25)}>＋</button>
-              <button className="button small" type="button" onClick={() => zoomFromCenter(1 / 1.25)}>－</button>
-              <button className="button small" type="button" onClick={fitStageContent}>Fit</button>
-              <button
-                className="button danger small"
-                type="button"
-                onClick={() => {
-                  setDraftProfile({ ...draft, sensors: [] });
-                  setSelectedSensorId(null);
-                }}
-              >
-                {t("clearSensors")}
+              <button className="profile-icon-button" type="button" title={t("profileZoomOut")} aria-label={t("profileZoomOut")} onClick={() => zoomFromCenter(1 / 1.25)}>
+                <ZoomOut size={15} strokeWidth={2} />
+              </button>
+              <span className="profile-zoom-readout">{zoomInfo}</span>
+              <button className="profile-icon-button" type="button" title={t("profileZoomIn")} aria-label={t("profileZoomIn")} onClick={() => zoomFromCenter(1.25)}>
+                <ZoomIn size={15} strokeWidth={2} />
+              </button>
+              <button className="button small" type="button" onClick={fitStageContent}>
+                {t("profileFit")}
               </button>
             </div>
           </div>
 
           <div
             ref={stageViewportRef}
-            className={`profile-stage profile-stage-viewport tool-${tool}`}
+            className={`profile-stage profile-stage-viewport tool-${tool}${panMode ? " panning" : ""}`}
             onPointerDown={handleStagePointerDown}
             onPointerMove={handleStagePointerMove}
             onPointerUp={handleStagePointerUp}
@@ -867,60 +818,197 @@ export function ProfilesPage() {
           </div>
 
           <div className="profile-editor-footer">
-            <span>{t("sensorCount")}: {draft.sensors.length}</span>
-            <span>{t("wsStatus")}: {wsStatus}</span>
-            <span>Zoom: {zoomInfo}</span>
-            <span>Cursor: {cursorInfo}</span>
-            <span>{selectedSensor ? `${t("selectedSensor")}: ${selectedSensor.label}` : t("selectSensorFirst")}</span>
             <span className="profile-tool-hint">{t(`profileToolHint_${tool}`)}</span>
+            <span>{t("sensorCount")} <strong>{draft.sensors.length}</strong></span>
+            <span>{selectedSensor ? <>{t("selectedSensor")} <strong>{selectedSensor.label}</strong></> : t("selectSensorFirst")}</span>
+            <span>{t("profileCursor")} <strong>{cursorInfo}</strong></span>
+            <span>{t("wsStatus")} <strong>{wsStatus}</strong></span>
           </div>
         </article>
 
         <aside className="panel profile-inspector profile-sidebar-secondary">
-          <section>
-            <h3>{t("sectionSensors")}</h3>
+          <section className="profile-inspector-group">
+            <h3>{t("profileGeneral")}</h3>
+            <div className="profile-inspector-row">
+              <label htmlFor="profile-name">{t("profileName")}</label>
+              <input
+                id="profile-name"
+                value={selectedName}
+                onChange={(event) => {
+                  const nextName = profileKeyFromName(event.target.value);
+                  setSelectedName(nextName);
+                  updateDraft((current) => ({ ...current, name: nextName }));
+                }}
+                placeholder="profile_name"
+              />
+            </div>
+            <div className="profile-inspector-row">
+              <span className="profile-inspector-label">{t("profileDisplayMode")}</span>
+              <div className="segmented-control profile-view-toggle" role="radiogroup" aria-label={t("profileDisplayMode")}>
+                <button
+                  className={draft.display.mode === "3d" ? "active" : ""}
+                  type="button"
+                  role="radio"
+                  aria-checked={draft.display.mode === "3d"}
+                  onClick={() => updateDraft((current) => ({ ...current, display: { ...current.display, mode: "3d" } }))}
+                >
+                  {t("surface3d")}
+                </button>
+                <button
+                  className={draft.display.mode === "2d" ? "active" : ""}
+                  type="button"
+                  role="radio"
+                  aria-checked={draft.display.mode === "2d"}
+                  onClick={() => updateDraft((current) => ({ ...current, display: { ...current.display, mode: "2d" } }))}
+                >
+                  {t("heatmap2d")}
+                </button>
+              </div>
+            </div>
+            <div className="profile-inspector-row">
+              <span className="profile-inspector-label">{t("pressureRange")}</span>
+              <div className="profile-range-inputs">
+                <input
+                  type="number"
+                  aria-label={t("pressureMin")}
+                  title={t("pressureMin")}
+                  value={draft.display.pressureMin}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      display: { ...current.display, pressureMin: Number(event.target.value) || 0 },
+                    }))
+                  }
+                />
+                <span aria-hidden="true">–</span>
+                <input
+                  type="number"
+                  aria-label={t("pressureMax")}
+                  title={t("pressureMax")}
+                  value={draft.display.pressureMax}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      display: { ...current.display, pressureMax: Math.max(Number(event.target.value) || 1, current.display.pressureMin + 1) },
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="profile-inspector-row">
+              <label htmlFor="profile-dot-size">{t("dotSize")}</label>
+              <div className="profile-slider">
+                <input
+                  id="profile-dot-size"
+                  type="range"
+                  min="0.5"
+                  max="4"
+                  step="0.25"
+                  value={draft.display.dotSize}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      display: { ...current.display, dotSize: clamp(Number(event.target.value) || 1, 0.5, 4) },
+                    }))
+                  }
+                />
+                <output htmlFor="profile-dot-size">{draft.display.dotSize.toFixed(2)}×</output>
+              </div>
+            </div>
+          </section>
+
+          <section className="profile-inspector-group">
+            <h3>{t("backgroundImage")}</h3>
+            <div className="profile-background-well">
+              {draft.background.imageData ? (
+                <img src={draft.background.imageData} alt="" />
+              ) : (
+                <ImagePlus size={22} strokeWidth={1.6} aria-hidden="true" />
+              )}
+              <span>{draft.background.imageData ? `AR ${draft.background.aspectRatio.toFixed(3)}` : t("noBackground")}</span>
+            </div>
+            <div className="inline-actions">
+              <button className="button small" type="button" onClick={() => imageRef.current?.click()}>
+                {t("uploadBackground")}
+              </button>
+              <button
+                className="button small"
+                type="button"
+                disabled={!draft.background.imageData}
+                onClick={() => {
+                  updateDraft((current) => ({ ...current, background: { imageData: "", aspectRatio: 1 } }));
+                  resetStageView();
+                }}
+              >
+                {t("clearBackground")}
+              </button>
+            </div>
+            <input ref={imageRef} hidden type="file" accept="image/*" onChange={(event) => handleImageUpload(event.target.files?.[0])} />
+          </section>
+
+          <section className="profile-inspector-group">
+            <div className="section-heading-row">
+              <h3>{t("sectionSensors")}</h3>
+              <button className="button small danger" type="button" disabled={draft.sensors.length === 0} onClick={() => setConfirming("clear")}>
+                {t("clearSensors")}
+              </button>
+            </div>
             <div className="profile-sensor-table">
-              {draft.sensors.length === 0 ? <p className="field-note">{t("noSensors")}</p> : null}
+              {draft.sensors.length === 0 ? (
+                <p className="field-note">{t("noSensors")}</p>
+              ) : (
+                <div className="profile-sensor-row profile-sensor-head" aria-hidden="true">
+                  <span>#</span>
+                  <span>{t("sensorColLabel")}</span>
+                  <span>{t("sensorColChannel")}</span>
+                  <span>{t("sensorColOn")}</span>
+                  <span />
+                </div>
+              )}
               {draft.sensors.map((sensor) => (
-                <div key={sensor.id} className={`profile-sensor-row ${selectedSensorId === sensor.id ? "selected" : ""}`}>
+                <div
+                  key={sensor.id}
+                  className={`profile-sensor-row ${selectedSensorId === sensor.id ? "selected" : ""}`}
+                  title={`${sensor.x.toFixed(3)}, ${sensor.y.toFixed(3)}`}
+                >
                   <button type="button" className="profile-sensor-select" onClick={() => setSelectedSensorId(sensor.id)}>
-                    #{sensor.id}
+                    {sensor.id}
                   </button>
-                  <input value={sensor.label} onChange={(event) => updateSensor(sensor.id, { label: event.target.value })} />
+                  <input aria-label={t("sensorColLabel")} value={sensor.label} onChange={(event) => updateSensor(sensor.id, { label: event.target.value })} />
                   <input
+                    aria-label={t("sensorColChannel")}
                     type="number"
                     min={0}
                     value={sensor.index}
                     onChange={(event) => updateSensor(sensor.id, { index: Math.max(0, Math.floor(Number(event.target.value) || 0)) })}
                   />
-                  <label className="switch-row">
-                    <input type="checkbox" checked={sensor.enabled} onChange={(event) => updateSensor(sensor.id, { enabled: event.target.checked })} />
-                  </label>
-                  <button className="button danger" type="button" onClick={() => removeSensor(sensor.id)}>
-                    ×
+                  <input
+                    aria-label={t("sensorColOn")}
+                    type="checkbox"
+                    checked={sensor.enabled}
+                    onChange={(event) => updateSensor(sensor.id, { enabled: event.target.checked })}
+                  />
+                  <button className="profile-icon-button" type="button" aria-label={t("delete")} title={t("delete")} onClick={() => removeSensor(sensor.id)}>
+                    <X size={14} strokeWidth={2} />
                   </button>
-                  <span className="profile-position">{sensor.x.toFixed(3)}, {sensor.y.toFixed(3)}</span>
                 </div>
               ))}
             </div>
           </section>
 
-          <section>
+          <section className="profile-inspector-group">
             <h3>{t("liveChannelMonitor")}</h3>
-            <div className="field">
-              <label>{t("deviceName")}</label>
-              <select value={monitorDeviceUid} onChange={(event) => setMonitorDeviceUid(event.target.value)}>
-                <option value="">{t("noDevicesDiscovered")}</option>
-                {devices.map((device) => {
-                  const deviceUid = normalizeUid(device.device_uid);
-                  return (
-                    <option key={deviceUid} value={deviceUid}>
-                      {device.display_name || device.device_name || deviceUid}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
+            <select aria-label={t("deviceName")} value={monitorDeviceUid} onChange={(event) => setMonitorDeviceUid(event.target.value)}>
+              {devices.length === 0 ? <option value="">{t("noDevicesDiscovered")}</option> : null}
+              {devices.map((device) => {
+                const deviceUid = normalizeUid(device.device_uid);
+                return (
+                  <option key={deviceUid} value={deviceUid}>
+                    {device.display_name || device.device_name || deviceUid}
+                  </option>
+                );
+              })}
+            </select>
             <div className="profile-channel-list">
               {monitorValues.length === 0 ? <p className="field-note">{t("noData")}</p> : null}
               {monitorValues.map((value, index) => {
@@ -940,20 +1028,52 @@ export function ProfilesPage() {
             </div>
           </section>
 
-          <section>
-            <div className="section-heading-row">
-              <h3>{t("jsonPreview")}</h3>
-              <button className="button small" type="button" onClick={() => setShowRawJson((value) => !value)}>
-                {showRawJson ? t("decodedCsv") : t("rawJson")}
-              </button>
+          <details className="profile-inspector-group profile-json-group">
+            <summary>{t("jsonPreview")}</summary>
+            <div className="profile-json-toggle">
+              <div className="segmented-control">
+                <button className={showRawJson ? "" : "active"} type="button" onClick={() => setShowRawJson(false)}>
+                  {t("decodedCsv")}
+                </button>
+                <button className={showRawJson ? "active" : ""} type="button" onClick={() => setShowRawJson(true)}>
+                  {t("rawJson")}
+                </button>
+              </div>
             </div>
             <textarea className="profile-json-preview" readOnly value={showRawJson ? rawJsonText : jsonCsvText} />
-          </section>
-
-          {statusMessage ? <p className="notice success">{statusMessage}</p> : null}
-          {errorMessage ? <p className="notice error">{errorMessage}</p> : null}
+          </details>
         </aside>
       </section>
+
+      {confirming === "delete" ? (
+        <ConfirmModal
+          title={t("profileDeleteTitle").replace("{name}", selectedName)}
+          message={t("profileDeleteBody")}
+          confirmLabel={t("delete")}
+          cancelLabel={t("cancel")}
+          destructive
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => {
+            setConfirming(null);
+            void handleDelete();
+          }}
+        />
+      ) : null}
+      {confirming === "clear" ? (
+        <ConfirmModal
+          title={t("profileClearSensorsTitle")}
+          message={t("profileClearSensorsBody")}
+          confirmLabel={t("clearSensors")}
+          cancelLabel={t("cancel")}
+          destructive
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => {
+            setConfirming(null);
+            setDraftProfile({ ...draft, sensors: [] });
+            setSelectedSensorId(null);
+          }}
+        />
+      ) : null}
     </>
   );
 }

@@ -61,8 +61,22 @@ class ProfilesPageStaticTest(unittest.TestCase):
         self.assertIn("profile-sidebar-primary", source)
         self.assertIn("profile-canvas-panel", source)
         self.assertIn("profile-sidebar-secondary", source)
-        self.assertIn("minmax(560px, 1.35fr)", styles)
+        self.assertIn("grid-template-columns: 210px minmax(560px, 1fr) 300px;", styles)
         self.assertIn("min-height: 640px;", styles)
+
+    def test_segmented_control_has_one_column_per_segment(self):
+        # A fixed three columns left the two-way "Default view" toggle with an
+        # empty third slot that read as a missing option.
+        styles = STYLES.read_text()
+        rule = styles.split("\n.segmented-control {", 1)[1].split("}", 1)[0]
+        self.assertIn("grid-auto-flow: column;", rule)
+        self.assertNotIn("grid-template-columns", rule)
+
+    def test_destructive_profile_actions_are_confirmed(self):
+        source = PROFILES_PAGE.read_text()
+        self.assertIn('setConfirming("delete")', source)
+        self.assertIn('setConfirming("clear")', source)
+        self.assertIn("<ConfirmModal", source)
 
 
 if __name__ == "__main__":

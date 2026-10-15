@@ -114,24 +114,28 @@ class VisualizationPageStaticTest(unittest.TestCase):
     def test_add_device_modal_shows_real_connection_state_not_operating_mode(self):
         source = VISUALIZATION_PAGE.read_text()
         modal = source.split('className="modal-panel add-device-modal"', 1)[1]
+        # The card is shared with the App Store install dialog.
+        self.assertIn("<DevicePickCard", modal)
+        self.assertIn("device={normalized}", modal)
+        card = (ROOT / "frontend" / "src" / "components" / "DevicePickCard.tsx").read_text()
 
         # The picker must normalize, so it sees connectionState at all.
-        self.assertIn("connectionStateLabel(normalized, t)", modal)
-        self.assertIn("statusDot(normalized)", modal)
-        self.assertIn("deviceClassName(normalized)", modal)
+        self.assertIn("connectionStateLabel(device, t)", card)
+        self.assertIn("statusDot(device)", card)
+        self.assertIn("deviceClassName(device)", card)
 
-        # The two bugs being fixed. `device.mode` is the operating mode, not
+        # The two bugs being fixed. `mode` is the operating mode, not
         # reachability; `last_seen_at` is refreshed by the gateway even for
         # disconnected devices, so it is never a liveness signal.
-        self.assertNotIn("device.mode", modal)
-        self.assertNotIn("device.last_seen_at", modal)
-        self.assertIn("normalized.lastSeen", modal)
+        self.assertNotIn("device.mode", card)
+        self.assertNotIn("last_seen_at", card)
+        self.assertIn("device.lastSeen", card)
 
         # Detail parity with the Launchpad card.
-        self.assertIn("normalized.hardwareModel", modal)
-        self.assertIn("normalized.firmwareVersion", modal)
-        self.assertIn("normalized.protocol", modal)
-        self.assertIn("DeviceBatteryChip", modal)
+        self.assertIn("device.hardwareModel", card)
+        self.assertIn("device.firmwareVersion", card)
+        self.assertIn("device.protocol", card)
+        self.assertIn("DeviceBatteryChip", card)
 
     def test_add_device_modal_is_searchable_and_sorted_by_reachability(self):
         source = VISUALIZATION_PAGE.read_text()
@@ -151,8 +155,8 @@ class VisualizationPageStaticTest(unittest.TestCase):
     def test_add_device_card_stays_readable_when_offline_and_already_added(self):
         styles = STYLES.read_text()
 
-        # .device-card.offline (0.72) x .add-device-card:disabled (0.58) = 0.42.
-        self.assertIn(".add-device-card.offline:disabled", styles)
+        # .device-card.offline (0.72) x .device-pick-card:disabled (0.58) = 0.42.
+        self.assertIn(".device-pick-card.offline:disabled", styles)
         # The search box must not scroll away with the list.
         self.assertIn(".add-device-modal .device-grid", styles)
 

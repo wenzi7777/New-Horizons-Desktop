@@ -6,10 +6,11 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { api, type DeviceEntry, type ProfileListEntry, type VisualizationEntry } from "../lib/api";
 import { streamSensorLabel } from "../lib/sensorLabel";
 import { DeviceBatteryChip } from "../components/DeviceBatteryChip";
+import { DevicePickCard } from "../components/DevicePickCard";
 import { deviceBatteryReadout } from "../lib/batteryProfile";
-import { boardProfileForHardwareModel, displayHardwareModel } from "../lib/boardProfile";
+import { boardProfileForHardwareModel } from "../lib/boardProfile";
 import { isHubRelayed, normalizeDevice } from "../lib/device";
-import { connectionRank, connectionStateLabel, deviceClassName, statusDot } from "../lib/deviceStatus";
+import { connectionRank } from "../lib/deviceStatus";
 import { fitProfileRect, profilePointToScreen, profilePointToWorld, type FittedProfileRect } from "../lib/profileLayout";
 import { cssColorForValue, valueRatio } from "../lib/pressureColor";
 import { useI18n } from "../i18n";
@@ -1600,47 +1601,17 @@ export function VisualizationPage() {
               {devices.length > 0 && addCandidates.length === 0 ? (
                 <div className="panel span-12">{t("noDevicesMatchFilter")}</div>
               ) : null}
-              {addCandidates.map(({ device, uid, normalized, added }) => {
-                const batteryReadout = deviceBatteryReadout({
-                  supported: boardProfileForHardwareModel(normalized.hardwareModel).supportsBatteryPercentageIndicator,
-                  battery: recordValue(recordValue(device.last_status).battery),
-                  power: recordValue(recordValue(device.last_status).power),
-                  batteryLed: recordValue(recordValue(recordValue(device.last_status).indicators).battery_led),
-                });
-                return (
-                  <button
-                    key={uid}
-                    className={`device-card add-device-card ${deviceClassName(normalized)}`}
-                    type="button"
-                    disabled={added}
-                    onClick={() => addDeviceView(uid)}
-                  >
-                    <div className="device-card-header">
-                      <h3>
-                        <span className={statusDot(normalized)} aria-hidden="true" />
-                        {normalized.displayName}
-                      </h3>
-                      <span className={`device-badge ${deviceClassName(normalized)}`}>
-                        {connectionStateLabel(normalized, t)}
-                      </span>
-                      {isHubRelayed(device) ? <span className="device-badge hub-relay">{t("deviceViaHub")}</span> : null}
-                    </div>
-                    <div className="device-uid">{uid}</div>
-                    <div className="device-meta-grid">
-                      <span>{t("hardwareModel")}: {displayHardwareModel(normalized.hardwareModel)}</span>
-                      <span>{t("firmwareVersion")}: {normalized.firmwareVersion}</span>
-                      <span>{t("protocol")}: {normalized.protocol}</span>
-                      <span>{t("matrixShape")}: {normalized.matrixShape}</span>
-                      <span className="device-battery-reading">
-                        <DeviceBatteryChip readout={batteryReadout} t={t} />
-                      </span>
-                      <span>{t("transport")}: {normalized.transportMode}</span>
-                      <span>{t("lastSeen")}: {normalized.lastSeen}</span>
-                      <span>{added ? t("deviceAlreadyAdded") : t("addDeviceView")}</span>
-                    </div>
-                  </button>
-                );
-              })}
+              {addCandidates.map(({ device, uid, normalized, added }) => (
+                <DevicePickCard
+                  key={uid}
+                  entry={device}
+                  device={normalized}
+                  disabled={added}
+                  onClick={() => addDeviceView(uid)}
+                  footer={added ? t("deviceAlreadyAdded") : t("addDeviceView")}
+                  t={t}
+                />
+              ))}
             </div>
           </div>
         </div>

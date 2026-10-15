@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Check, Circle, Loader2, X } from "lucide-react";
 
+import { DevicePickCard } from "./DevicePickCard";
 import { useI18n } from "../i18n";
 import { api, type DeviceEntry } from "../lib/api";
 import { compareVersionCores, useLocalised, type AppCatalogEntry, type AppPackage } from "../lib/appLibrary";
-import { displayHardwareModel } from "../lib/boardProfile";
 import { normalizeDevice, type NormalizedDevice } from "../lib/device";
 import { appErrorKey } from "../lib/deviceApps";
 import { useDeviceCommand } from "../lib/deviceCommand";
@@ -153,7 +153,7 @@ export function AppInstallDialog({
   return (
     <div className="modal-backdrop" role="presentation" onClick={stage === "installing" ? undefined : onClose}>
       <div
-        className="modal-panel app-install-dialog"
+        className={`modal-panel app-install-dialog${stage === "pick" ? " picking" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="app-install-title"
@@ -179,34 +179,24 @@ export function AppInstallDialog({
               </label>
             </div>
             {shown.length ? (
-              <ul className="app-install-devices">
+              <div className="device-grid app-install-devices">
                 {shown.map(({ entry, device, blocker }) => (
-                  <li key={entry.device_uid}>
-                    <button
-                      type="button"
-                      className={`app-install-device${selectedUid === entry.device_uid ? " selected" : ""}`}
-                      disabled={Boolean(blocker)}
-                      aria-pressed={selectedUid === entry.device_uid}
-                      onClick={() => setSelectedUid(entry.device_uid)}
-                    >
-                      <span className={`app-install-dot ${device.isControlUnavailable ? "offline" : "online"}`} aria-hidden="true" />
-                      <span className="app-install-device-main">
-                        <strong>{device.displayName}</strong>
-                        <small className="app-mono">{entry.device_uid}</small>
-                      </span>
-                      <span className="app-install-device-meta">
-                        <span>{device.hardwareModel ? displayHardwareModel(device.hardwareModel) : "-"}</span>
-                        <span>{device.firmwareVersion || "-"} · {device.isControlUnavailable ? t("offline") : device.mode}</span>
-                        {blocker ? (
-                          <span className="app-install-blocker">
-                            {t(blocker).replace("{version}", minFirmware)}
-                          </span>
-                        ) : null}
-                      </span>
-                    </button>
-                  </li>
+                  <DevicePickCard
+                    key={entry.device_uid}
+                    entry={entry}
+                    device={device}
+                    disabled={Boolean(blocker)}
+                    selected={selectedUid === entry.device_uid}
+                    onClick={() => setSelectedUid(entry.device_uid)}
+                    footer={blocker ? (
+                      <span className="app-install-blocker">{t(blocker).replace("{version}", minFirmware)}</span>
+                    ) : selectedUid === entry.device_uid ? (
+                      <span className="app-install-chosen"><Check size={13} strokeWidth={2.4} aria-hidden="true" /> {t("appInstallSelected")}</span>
+                    ) : t("appInstallChoose")}
+                    t={t}
+                  />
                 ))}
-              </ul>
+              </div>
             ) : (
               <p className="app-empty">{candidates.length ? t("appInstallNoCompatible") : t("appInstallNoDevices")}</p>
             )}

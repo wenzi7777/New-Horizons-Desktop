@@ -58,6 +58,7 @@ class FilesApiTest(unittest.TestCase):
             ["3CDC7545CCD0/20260528", "3CDC7545CCD0/20260529", "3CDC7545CCD0/root.csv"],
         )
         self.assertEqual([item["kind"] for item in root_payload["items"]], ["directory", "directory", "csv"])
+        self.assertTrue(all(isinstance(item["modified_ms"], int) and item["modified_ms"] > 0 for item in root_payload["items"]))
 
         self.assertEqual(child_response.status_code, 200)
         child_payload = child_response.get_json()

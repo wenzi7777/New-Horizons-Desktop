@@ -5,33 +5,42 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FILES_PAGE = ROOT / "frontend" / "src" / "pages" / "FilesPage.tsx"
 STYLES = ROOT / "frontend" / "src" / "styles.css"
+API = ROOT / "backend" / "newhorizons_backend" / "api.py"
 
 
 class FilesPageStaticTest(unittest.TestCase):
-    def test_csv_export_page_uses_finder_style_explorer_and_preview_workspace(self):
+    def test_csv_export_page_is_a_finder_window(self):
         source = FILES_PAGE.read_text(encoding="utf-8")
         styles = STYLES.read_text(encoding="utf-8")
 
-        self.assertIn("formatFileSize", source)
-        self.assertIn("loadingFiles", source)
         self.assertIn("api.csvDirectory(", source)
         self.assertIn("api.previewCsv(", source)
         self.assertIn("api.deleteCsvEntry(", source)
-        self.assertIn('t("currentPath")', source)
-        self.assertIn('t("parentFolder")', source)
-        self.assertIn('t("preview")', source)
-        self.assertIn('t("deleteFolderConfirm")', source)
-        self.assertIn("csv-workspace", source)
-        self.assertIn("csv-explorer-panel", source)
-        self.assertIn("csv-preview-panel", source)
-        self.assertIn("csv-breadcrumb", source)
-        self.assertIn("csv-entry-row", source)
-        self.assertIn("csv-preview-table", source)
-        self.assertIn("csv-summary-grid", styles)
-        self.assertIn("csv-explorer-layout", styles)
-        self.assertIn("csv-entry-row", styles)
-        self.assertIn("csv-preview-panel", styles)
-        self.assertIn("csv-breadcrumb", styles)
+        # Sidebar of devices, sortable list view, preview pane, path bar.
+        for name in ("finder-window", "finder-toolbar", "finder-sidebar", "finder-list-head", "finder-row", "finder-preview", "finder-pathbar", "finder-status"):
+            self.assertIn(name, source)
+            self.assertIn(f".{name}", styles)
+        for column in ("name", "modified", "size", "kind"):
+            self.assertIn(f'column="{column}"', source)
+
+    def test_finder_navigation_and_selection(self):
+        source = FILES_PAGE.read_text(encoding="utf-8")
+        # Back/forward history, enclosing folder, double click opens.
+        self.assertIn("function goBack()", source)
+        self.assertIn("function goForward()", source)
+        self.assertIn("function goUp()", source)
+        self.assertIn("onDoubleClick={() => openEntry(entry)}", source)
+        # Multiple selection: command toggles, shift extends, keyboard too.
+        self.assertIn("event.metaKey || event.ctrlKey", source)
+        self.assertIn("event.shiftKey && anchorPath", source)
+        self.assertIn('aria-multiselectable="true"', source)
+        self.assertIn("onKeyDown={handleListKey}", source)
+        # Deleting asks first, in the app's own dialog.
+        self.assertIn("<ConfirmModal", source)
+        self.assertNotIn("window.confirm", source)
+
+    def test_listing_reports_modification_time(self):
+        self.assertIn('"modified_ms": int(', API.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
