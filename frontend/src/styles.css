@@ -9273,6 +9273,11 @@ button.cal-matrix-cell:active {
   color: var(--accent);
 }
 
+/* Not connected now: its recordings are still listed, the icon is muted. */
+.finder-sidebar-item svg.finder-offline {
+  color: var(--text-muted);
+}
+
 .finder-sidebar-item span {
   overflow: hidden;
   text-overflow: ellipsis;

@@ -42,6 +42,20 @@ class FilesApiTest(unittest.TestCase):
         self.assertEqual(login.status_code, 200)
         return client, data_root
 
+    def test_devices_with_recordings_are_listed_from_disk(self):
+        # Right after a restart no device is connected; the recordings must
+        # still be reachable (the CSV page listed only connected devices).
+        client, data_root = self.create_client()
+        (data_root / "_app_library").mkdir()
+        (data_root / "_newhorizons_device_groups.json").write_text("{}", encoding="utf-8")
+        (data_root / "80456B76AAF4").mkdir()
+        response = client.get("/newhorizons/api/files/devices")
+        self.assertEqual(response.status_code, 200)
+        items = response.get_json()["items"]
+        self.assertEqual(sorted(item["device_uid"] for item in items), ["3CDC7545CCD0", "80456B76AAF4"])
+        self.assertTrue(all(item["connected"] is False for item in items))
+        self.assertTrue(all(item["modified_ms"] > 0 for item in items))
+
     def test_files_list_returns_directories_and_csv_for_current_directory_only(self):
         client, _ = self.create_client()
 

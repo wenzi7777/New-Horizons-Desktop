@@ -279,7 +279,10 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
         "mag": mag,
         "imu": imu_payload,
         "battery": battery_payload,
-        "extensions": extensions,
+        # Hex, not bytes: this dict is the visualization payload, sent to the
+        # browser as JSON -- bytes there failed json.dumps and closed the
+        # browser's WebSocket whenever a packet carried an app event.
+        "extensions": [{"type": item["type"], "hex": item["value"].hex()} for item in extensions],
         "app_events": [
             event for event in (decode_app_event(item["value"]) for item in extensions if item["type"] == EXT_APP_EVENT)
             if event is not None

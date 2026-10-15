@@ -137,7 +137,7 @@ class ArduinoControlTcpTest(unittest.TestCase):
 
         parsed = service.latest_visualization("3CDC7545CCD0")[0]
         self.assertEqual(parsed["p"], [1.0, 2.0, 3.0, 4.0])
-        self.assertEqual(parsed["extensions"], [{"type": 0x21, "value": b"\xAA"}])
+        self.assertEqual(parsed["extensions"], [{"type": 0x21, "hex": "aa"}])
 
     def test_arduino_v3_stream_packet_registers_tcp_control_route(self):
         service = NewHorizonsService(mock_mode=False)

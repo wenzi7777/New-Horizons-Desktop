@@ -150,7 +150,13 @@ class _WsClient:
             if event.get("type") == "_close":
                 break
             try:
-                self.ws.send(json.dumps(event, separators=(",", ":")))
+                message = json.dumps(event, separators=(",", ":"))
+            except (TypeError, ValueError):
+                # One event that cannot be encoded is skipped; closing here
+                # froze the browser's live view until it reloaded.
+                continue
+            try:
+                self.ws.send(message)
                 if event.get("type") == "visualization_update":
                     self.hub.note_sent_visualization()
             except Exception:

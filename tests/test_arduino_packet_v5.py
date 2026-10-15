@@ -35,7 +35,7 @@ class ArduinoPacketV5ParserTest(unittest.TestCase):
         self.assertEqual(parsed["p"], [1.25, 2.5])
         self.assertEqual(parsed["mag"], [7.0, 8.0, 9.0])
         self.assertEqual(parsed["battery"], {"status": 1, "fault": 2, "vbat_mv": 4175, "soc_centi_percent": 7350, "soc_percent": 73.5})
-        self.assertEqual(parsed["extensions"], [{"type": 0x21, "value": b"abc"}])
+        self.assertEqual(parsed["extensions"], [{"type": 0x21, "hex": "616263"}])
         self.assertEqual(parsed["device_epoch_ms"], 1700000000123)
 
     def test_v5_omits_mag_and_battery_without_fake_values(self):

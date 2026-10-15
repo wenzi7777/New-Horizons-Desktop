@@ -23,6 +23,24 @@ class FakeWebSocket:
 
 
 class WebSocketBackpressureTest(unittest.TestCase):
+    def test_an_event_that_cannot_be_encoded_is_skipped_not_fatal(self):
+        # bytes in a visualization payload used to close the connection, and
+        # the browser's live view froze until it reloaded (v0.26.0).
+        service = NewHorizonsService(mock_mode=False)
+        hub = WebSocketHub(service)
+        ws = FakeWebSocket()
+        client = _WsClient(hub, ws)
+        client.start()
+        try:
+            client.enqueue({"type": "device_update", "item": {"raw": b"\x01"}})
+            client.enqueue({"type": "device_update", "item": {"ok": True}})
+            deadline = time.time() + 2.0
+            while time.time() < deadline and not ws.sent:
+                time.sleep(0.01)
+        finally:
+            client.close()
+        self.assertEqual(ws.sent, [{"type": "device_update", "item": {"ok": True}}])
+
     def test_command_result_is_sent_before_coalesced_visualization_frames(self):
         service = NewHorizonsService(mock_mode=False)
         hub = WebSocketHub(service)

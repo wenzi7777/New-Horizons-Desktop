@@ -78,6 +78,13 @@ class FirmwarePacketFixtureTest(unittest.TestCase):
                 self.assertEqual(parsed["app_events"], expected_events)
                 self.assertEqual(len(parsed["extensions"]), len(expected_events))
 
+    def test_every_parsed_packet_is_json(self):
+        # The parsed packet is the visualization payload the browser gets as
+        # JSON; bytes in it closed the browser's WebSocket (v0.26.0).
+        for case in self.fixture["packets"]:
+            with self.subTest(case["name"]):
+                json.dumps(parse_binary_packet(bytes.fromhex(case["hex"])))
+
     def test_a_packet_with_events_parses_with_a_known_sensor_count_too(self):
         case = next(case for case in self.fixture["packets"] if case["expect"].get("app_events"))
         parsed = parse_binary_packet(bytes.fromhex(case["hex"]), sensor_count=case["expect"]["point_count"])

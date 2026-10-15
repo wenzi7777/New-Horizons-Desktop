@@ -14,6 +14,10 @@ class FilesPageStaticTest(unittest.TestCase):
         styles = STYLES.read_text(encoding="utf-8")
 
         self.assertIn("api.csvDirectory(", source)
+        # The sidebar lists the devices with recordings on disk, not only
+        # the ones connected right now.
+        self.assertIn("api.csvDevices()", source)
+        self.assertNotIn("api.devices()", source)
         self.assertIn("api.previewCsv(", source)
         self.assertIn("api.deleteCsvEntry(", source)
         # Sidebar of devices, sortable list view, preview pane, path bar.

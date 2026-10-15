@@ -232,6 +232,14 @@ export type CsvExplorerEntry = {
   modified_ms?: number;
 };
 
+// A device with a folder of recordings on the server, connected or not.
+export type CsvDeviceEntry = {
+  device_uid: string;
+  display_name: string;
+  connected: boolean;
+  modified_ms: number;
+};
+
 export type CsvDirectoryResponse = {
   device_uid: string;
   path: string;
@@ -499,6 +507,7 @@ export const api = {
     request(`/profiles/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
+  csvDevices: () => request<{ items: CsvDeviceEntry[] }>("/files/devices"),
   csvDirectory: (deviceUid: string, path = "") =>
     request<CsvDirectoryResponse>(`/files?device_uid=${encodeURIComponent(deviceUid)}&path=${encodeURIComponent(path)}`),
   previewCsv: (deviceUid: string, path: string) =>

@@ -782,6 +782,32 @@ def create_blueprint(
         path.unlink()
         return json_response({"status": "deleted"})
 
+    @bp.get("/api/files/devices")
+    @auth
+    @_require_roles("admin")
+    def files_devices() -> Response:
+        """Every device that has a folder of recordings, newest first -- read
+        from the disk, so it is complete right after a restart, before any
+        device has connected again (the live list is empty then)."""
+        root = _data_dir().resolve()
+        live = {str(item.get("device_uid") or ""): item for item in svc.list_devices()}
+        nicknames = dict(getattr(svc, "_nicknames", {}) or {})
+        items: list[dict[str, Any]] = []
+        if root.is_dir():
+            for child in root.iterdir():
+                # _app_library, _newhorizons_*.json and dotfiles are not devices.
+                if not child.is_dir() or child.name.startswith(("_", ".")):
+                    continue
+                entry = live.get(child.name) or {}
+                items.append({
+                    "device_uid": child.name,
+                    "display_name": str(entry.get("display_name") or nicknames.get(child.name) or ""),
+                    "connected": bool(entry),
+                    "modified_ms": int(child.stat().st_mtime * 1000),
+                })
+        items.sort(key=lambda item: -item["modified_ms"])
+        return json_response({"items": items})
+
     @bp.get("/api/files")
     @auth
     @_require_roles("admin")

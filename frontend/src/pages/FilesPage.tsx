@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 import { ConfirmModal } from "../components/ConfirmModal";
-import { api, type CsvDirectoryResponse, type CsvExplorerEntry, type CsvPreviewResponse, type DeviceEntry } from "../lib/api";
+import { api, type CsvDeviceEntry, type CsvDirectoryResponse, type CsvExplorerEntry, type CsvPreviewResponse } from "../lib/api";
 import { useI18n } from "../i18n";
 
 // The server's CSV recordings as a Finder window: devices in the sidebar, a
@@ -69,13 +69,15 @@ function compareEntries(a: CsvExplorerEntry, b: CsvExplorerEntry, sort: Sort) {
   return sort.ascending ? order : -order;
 }
 
-function deviceLabel(device: DeviceEntry) {
-  return device.display_name || device.device_name || device.device_uid;
+function deviceLabel(device: CsvDeviceEntry) {
+  return device.display_name || device.device_uid;
 }
 
 export function FilesPage() {
   const { t, locale } = useI18n();
-  const [devices, setDevices] = useState<DeviceEntry[]>([]);
+  // Devices with recordings on the server, from its folders: complete even
+  // right after a restart, when no device has connected yet.
+  const [devices, setDevices] = useState<CsvDeviceEntry[]>([]);
   const [selectedDevice, setSelectedDevice] = useState("");
   const [directory, setDirectory] = useState<CsvDirectoryResponse | null>(null);
   const [backStack, setBackStack] = useState<string[]>([]);
@@ -96,7 +98,7 @@ export function FilesPage() {
 
   useEffect(() => {
     setLoadingDevices(true);
-    void api.devices()
+    void api.csvDevices()
       .then((response) => {
         setDevices(response.items);
         const first = response.items[0]?.device_uid ?? "";
@@ -393,7 +395,7 @@ export function FilesPage() {
                 title={item.device_uid}
                 onClick={() => setSelectedDevice(item.device_uid)}
               >
-                <Cpu size={14} strokeWidth={2} aria-hidden="true" />
+                <Cpu size={14} strokeWidth={2} aria-hidden="true" className={item.connected ? "" : "finder-offline"} />
                 <span>{deviceLabel(item)}</span>
               </button>
             ))}
