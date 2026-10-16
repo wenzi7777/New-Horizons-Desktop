@@ -32,6 +32,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterable
 
+from .recording_meta import EVENTS_SUFFIX, sibling_paths
+
 
 # timestamp_ms used to be the device's boot time; uptime_ms and time_ref are
 # appended rather than inserted so a positional reader keeps working.
@@ -98,12 +100,14 @@ class FrameClock:
             t_lo, t_hi = self._times[lo][0], self._times[hi][0]
             return round(t_lo + (t_hi - t_lo) * (frame_seq - lo) / (hi - lo)), "estimated"
 
-#: Written next to `<session>.csv`, so the pair travels together.
-SIDECAR_SUFFIX = ".events.csv"
+#: Written next to the samples, so the pair travels together:
+#: `<HHMMSS>.data.csv` -> `<HHMMSS>.events.csv`, and for recordings from
+#: before v0.27.0, `<HHMMSS>.csv` -> `<HHMMSS>.events.csv`.
+SIDECAR_SUFFIX = EVENTS_SUFFIX
 
 
 def sidecar_path_for(sample_path: Path) -> Path:
-    return sample_path.with_suffix("") .with_name(sample_path.stem + SIDECAR_SUFFIX)
+    return sibling_paths(sample_path).events
 
 
 def append_events(sample_path: Path, events: Iterable[dict[str, Any]], clock: FrameClock | None = None) -> int:

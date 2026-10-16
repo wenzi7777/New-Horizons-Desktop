@@ -1,19 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import {
+  ChartLine,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
   Cpu,
   Download,
+  FileBraces,
   FileSpreadsheet,
   Folder,
+  FolderClock,
   Search,
   Trash2,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import { ConfirmModal } from "../components/ConfirmModal";
-import { api, type CsvDeviceEntry, type CsvDirectoryResponse, type CsvExplorerEntry, type CsvPreviewResponse } from "../lib/api";
+import { RecordingMetaSummary } from "../components/RecordingMetaSummary";
+import { RecordingTimelinePreview } from "../components/RecordingTimelinePreview";
+import {
+  api,
+  type CsvDeviceEntry,
+  type CsvDirectoryResponse,
+  type CsvExplorerEntry,
+  type CsvPreviewResponse,
+  type FilesPreviewResponse,
+  type RecordingTimelineResponse,
+} from "../lib/api";
+import { isEventsSidecar, isMetaFile, isSamplesCsv, parseRecordingMeta } from "../lib/recordingAnalysis";
 import { useI18n } from "../i18n";
 
 // The server's CSV recordings as a Finder window: devices in the sidebar, a
@@ -73,8 +88,51 @@ function deviceLabel(device: CsvDeviceEntry) {
   return device.display_name || device.device_uid;
 }
 
+// A recording folder (v0.27.0+) is a folder with a size; other folders have none.
+const hasSize = (entry: CsvExplorerEntry) => !entry.is_dir || entry.kind === "recording";
+
+function EntryIcon({ entry, size }: { entry: CsvExplorerEntry; size: number }) {
+  if (entry.kind === "recording") return <FolderClock size={size} strokeWidth={1.8} className="finder-icon recording" aria-hidden="true" />;
+  if (entry.is_dir) return <Folder size={size} strokeWidth={1.8} className="finder-icon folder" aria-hidden="true" />;
+  if (entry.kind === "meta") return <FileBraces size={size} strokeWidth={1.8} className="finder-icon meta" aria-hidden="true" />;
+  return <FileSpreadsheet size={size} strokeWidth={1.8} className="finder-icon file" aria-hidden="true" />;
+}
+
+// A recording's preview opens on its timeline unless the viewer last chose
+// the raw rows; remembered per browser.
+type PreviewMode = "timeline" | "raw";
+const PREVIEW_MODE_KEY = "newhorizons-files-preview-mode";
+
+function loadPreviewMode(): PreviewMode {
+  try {
+    return window.localStorage.getItem(PREVIEW_MODE_KEY) === "raw" ? "raw" : "timeline";
+  } catch {
+    return "timeline";
+  }
+}
+
+function asCsvPreview(preview: FilesPreviewResponse | null): CsvPreviewResponse | null {
+  return preview && (preview.kind ?? "csv") === "csv" && "columns" in preview ? preview : null;
+}
+
+// A recording folder's file, by what it holds.
+function roleLabel(entry: CsvExplorerEntry, t: (key: string) => string) {
+  if (isEventsSidecar(entry.name)) return t("filesRoleEvents");
+  if (isMetaFile(entry.name)) return t("filesRoleMeta");
+  if (isSamplesCsv(entry.name)) return t("filesRoleData");
+  return entry.name;
+}
+
+function kindLabel(entry: CsvExplorerEntry, t: (key: string) => string) {
+  if (entry.kind === "recording") return t("filesKindRecording");
+  if (entry.is_dir) return t("filesKindFolder");
+  if (entry.kind === "meta") return t("filesKindMeta");
+  return t("filesKindCsv");
+}
+
 export function FilesPage() {
   const { t, locale } = useI18n();
+  const navigate = useNavigate();
   // Devices with recordings on the server, from its folders: complete even
   // right after a restart, when no device has connected yet.
   const [devices, setDevices] = useState<CsvDeviceEntry[]>([]);
@@ -86,13 +144,21 @@ export function FilesPage() {
   const [anchorPath, setAnchorPath] = useState("");
   const [sort, setSort] = useState<Sort>({ key: "name", ascending: true });
   const [query, setQuery] = useState("");
-  const [preview, setPreview] = useState<CsvPreviewResponse | null>(null);
+  const [preview, setPreview] = useState<FilesPreviewResponse | null>(null);
   const [loadingDevices, setLoadingDevices] = useState(true);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [previewError, setPreviewError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [previewMode, setPreviewModeState] = useState<PreviewMode>(loadPreviewMode);
+  const [timeline, setTimeline] = useState<RecordingTimelineResponse | null>(null);
+  const [loadingTimeline, setLoadingTimeline] = useState(false);
+  const [timelineError, setTimelineError] = useState("");
+  const [recordingRaw, setRecordingRaw] = useState<CsvPreviewResponse | null>(null);
+  const [loadingRaw, setLoadingRaw] = useState(false);
+  const timelineRequest = useRef(0);
+  const rawRequest = useRef(0);
   const listRef = useRef<HTMLDivElement | null>(null);
   const previewRequest = useRef(0);
 
@@ -138,26 +204,32 @@ export function FilesPage() {
   const items = useMemo(() => directory?.items ?? [], [directory]);
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return items.filter((item) => !needle || item.name.toLowerCase().includes(needle)).sort((a, b) => compareEntries(a, b, sort));
+    const matches = (item: CsvExplorerEntry) =>
+      !needle || item.name.toLowerCase().includes(needle) || (item.children ?? []).some((child) => child.name.toLowerCase().includes(needle));
+    return items.filter(matches).sort((a, b) => compareEntries(a, b, sort));
   }, [items, query, sort]);
-  const selectedEntries = useMemo(() => visible.filter((item) => selection.has(item.path)), [visible, selection]);
+  // A recording's files are shown (and selectable) inside its row.
+  const selectable = useMemo(() => visible.flatMap((item) => [item, ...(item.children ?? [])]), [visible]);
+  const selectedEntries = useMemo(() => selectable.filter((item) => selection.has(item.path)), [selectable, selection]);
   const singleFile = selectedEntries.length === 1 && !selectedEntries[0].is_dir ? selectedEntries[0] : null;
-  const selectedFiles = selectedEntries.filter((item) => !item.is_dir);
-  const totalBytes = useMemo(() => items.reduce((sum, item) => sum + (item.is_dir ? 0 : Number(item.size || 0)), 0), [items]);
+  const singleRecording = selectedEntries.length === 1 && selectedEntries[0].kind === "recording" ? selectedEntries[0] : null;
+  const previewTarget = singleFile ?? singleRecording;
+  const totalBytes = useMemo(() => items.reduce((sum, item) => sum + (hasSize(item) ? Number(item.size || 0) : 0), 0), [items]);
   const pathParts = useMemo(() => (currentPath ? currentPath.split("/").filter(Boolean) : []), [currentPath]);
   const device = devices.find((item) => item.device_uid === selectedDevice);
 
-  // The preview pane follows the selection: one file selected, its preview.
+  // The preview pane follows the selection: one file (or one recording
+  // folder) selected, its preview.
   useEffect(() => {
     setPreviewError("");
-    if (!singleFile || !selectedDevice) {
+    if (!previewTarget || !selectedDevice) {
       setPreview(null);
       setLoadingPreview(false);
       return;
     }
     const request = ++previewRequest.current;
     setLoadingPreview(true);
-    api.previewCsv(selectedDevice, relativeEntryPath(currentPath, singleFile))
+    api.previewCsv(selectedDevice, relativeEntryPath(currentPath, previewTarget))
       .then((response) => {
         if (request === previewRequest.current) setPreview(response);
       })
@@ -169,7 +241,131 @@ export function FilesPage() {
       .finally(() => {
         if (request === previewRequest.current) setLoadingPreview(false);
       });
-  }, [singleFile, selectedDevice, currentPath]);
+  }, [previewTarget, selectedDevice, currentPath]);
+
+  const previewMeta = useMemo(() => parseRecordingMeta(preview?.meta ?? null), [preview]);
+  const csvPreview = asCsvPreview(preview);
+  const singleIsSamples = Boolean(singleFile && isSamplesCsv(singleFile.name));
+  // What the timeline / raw switch applies to: a recording folder, or a
+  // sample CSV (either layout).
+  const recordingTarget = singleRecording ?? (singleIsSamples ? singleFile : null);
+
+  function setPreviewMode(mode: PreviewMode) {
+    setPreviewModeState(mode);
+    try {
+      window.localStorage.setItem(PREVIEW_MODE_KEY, mode);
+    } catch {
+      // Private window or blocked storage: the choice lasts this visit.
+    }
+  }
+
+  useEffect(() => {
+    setTimelineError("");
+    if (previewMode !== "timeline" || !recordingTarget || !selectedDevice) {
+      setTimeline(null);
+      setLoadingTimeline(false);
+      return;
+    }
+    const request = ++timelineRequest.current;
+    setTimeline(null);
+    setLoadingTimeline(true);
+    api.recordingTimeline(selectedDevice, relativeEntryPath(currentPath, recordingTarget))
+      .then((response) => {
+        if (request === timelineRequest.current) setTimeline(response);
+      })
+      .catch((error: Error) => {
+        if (request === timelineRequest.current) setTimelineError(error.message);
+      })
+      .finally(() => {
+        if (request === timelineRequest.current) setLoadingTimeline(false);
+      });
+  }, [previewMode, recordingTarget, selectedDevice, currentPath]);
+
+  // A recording folder's raw rows are its .data.csv's.
+  useEffect(() => {
+    if (previewMode !== "raw" || !singleRecording || preview?.kind !== "recording" || !selectedDevice) {
+      setRecordingRaw(null);
+      setLoadingRaw(false);
+      return;
+    }
+    const data = preview.files.find((file) => isSamplesCsv(file.name));
+    if (!data) {
+      setRecordingRaw(null);
+      return;
+    }
+    const request = ++rawRequest.current;
+    setLoadingRaw(true);
+    api.previewCsv(selectedDevice, `${relativeEntryPath(currentPath, singleRecording)}/${data.name}`)
+      .then((response) => {
+        if (request === rawRequest.current) setRecordingRaw(asCsvPreview(response));
+      })
+      .catch((error: Error) => {
+        if (request === rawRequest.current) setPreviewError(error.message);
+      })
+      .finally(() => {
+        if (request === rawRequest.current) setLoadingRaw(false);
+      });
+  }, [previewMode, singleRecording, preview, selectedDevice, currentPath]);
+
+  function recordingToolbar(entry: CsvExplorerEntry) {
+    return (
+      <div className="finder-preview-toolbar">
+        <div className="finder-segmented" role="radiogroup" aria-label={t("preview")}>
+          {(["timeline", "raw"] as PreviewMode[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={previewMode === mode}
+              className={previewMode === mode ? "active" : ""}
+              onClick={() => setPreviewMode(mode)}
+            >
+              {t(mode === "timeline" ? "filesPreviewTimeline" : "filesPreviewRaw")}
+            </button>
+          ))}
+        </div>
+        <button className="button primary compact finder-analyze" type="button" onClick={() => analyze(entry)} title={t("filesAnalyzeHint")}>
+          <ChartLine size={14} strokeWidth={2} aria-hidden="true" />
+          {t("filesAnalyze")}
+        </button>
+      </div>
+    );
+  }
+
+  function csvTable(table: CsvPreviewResponse) {
+    return (
+      <div className="csv-preview-table-wrap">
+        <table className="csv-preview-table">
+          {table.header.length > 0 ? (
+            <thead>
+              <tr>
+                {table.header.map((cell, index) => (
+                  <th key={`${cell}-${index}`}>{cell}</th>
+                ))}
+              </tr>
+            </thead>
+          ) : null}
+          <tbody>
+            {table.rows.map((row, rowIndex) => (
+              <tr key={`row-${rowIndex}`}>
+                {row.map((cell, cellIndex) => (
+                  <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  const timelineBody = loadingTimeline
+    ? <p className="finder-empty">{t("filesTimelineLoading")}</p>
+    : timelineError
+      ? <p className="notice error">{timelineError}</p>
+      : timeline
+        ? <RecordingTimelinePreview timeline={timeline} />
+        : null;
 
   function navigateTo(path: string) {
     if (!selectedDevice || path === currentPath) return;
@@ -199,16 +395,21 @@ export function FilesPage() {
     navigateTo(directory.parent_path || "");
   }
 
+  // A folder downloads as a zip of everything in it (a recording: its
+  // samples, events and meta together).
   function downloadEntries(entries: CsvExplorerEntry[]) {
     for (const entry of entries) {
-      if (entry.is_dir) continue;
       const anchor = document.createElement("a");
       anchor.href = api.downloadCsvUrl(entry.path);
-      anchor.download = entry.name;
+      anchor.download = entry.is_dir ? `${entry.name}.zip` : entry.name;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
     }
+  }
+
+  function analyze(entry: CsvExplorerEntry) {
+    navigate(`/tools/recording-analysis?device=${encodeURIComponent(selectedDevice)}&path=${encodeURIComponent(entry.path)}`);
   }
 
   function openEntry(entry: CsvExplorerEntry) {
@@ -259,7 +460,8 @@ export function FilesPage() {
 
   function moveSelection(step: number, extend: boolean) {
     if (visible.length === 0) return;
-    const lastIndex = visible.findIndex((item) => item.path === anchorPath);
+    // A file inside a recording's row moves on from its row.
+    const lastIndex = visible.findIndex((item) => item.path === anchorPath || (item.children ?? []).some((child) => child.path === anchorPath));
     const index = lastIndex < 0 ? (step > 0 ? 0 : visible.length - 1) : Math.max(0, Math.min(visible.length - 1, lastIndex + step));
     const path = visible[index].path;
     if (extend) {
@@ -360,8 +562,8 @@ export function FilesPage() {
               className="finder-tool"
               title={t("download")}
               aria-label={t("download")}
-              disabled={selectedFiles.length === 0}
-              onClick={() => downloadEntries(selectedFiles)}
+              disabled={selectedEntries.length === 0}
+              onClick={() => downloadEntries(selectedEntries)}
             >
               <Download size={16} strokeWidth={2} />
             </button>
@@ -396,7 +598,7 @@ export function FilesPage() {
                 onClick={() => setSelectedDevice(item.device_uid)}
               >
                 <Cpu size={14} strokeWidth={2} aria-hidden="true" className={item.connected ? "" : "finder-offline"} />
-                <span>{deviceLabel(item)}</span>
+                <span data-label={deviceLabel(item)}>{deviceLabel(item)}</span>
               </button>
             ))}
           </nav>
@@ -428,25 +630,64 @@ export function FilesPage() {
               ) : null}
               {!loadingFiles && visible.map((entry) => {
                 const selected = selection.has(entry.path);
+                const children = entry.kind === "recording" ? entry.children ?? [] : [];
                 return (
                   <div
                     key={entry.path}
                     data-path={entry.path}
                     role="option"
                     aria-selected={selected}
-                    className={`finder-row${selected ? " selected" : ""}`}
+                    className={`finder-row${selected ? " selected" : ""}${children.length ? " recording" : ""}`}
                     onClick={(event) => handleRowClick(event, entry)}
                     onDoubleClick={() => openEntry(entry)}
                   >
                     <span className="finder-cell finder-name">
-                      {entry.is_dir
-                        ? <Folder size={16} strokeWidth={1.8} className="finder-icon folder" aria-hidden="true" />
-                        : <FileSpreadsheet size={16} strokeWidth={1.8} className="finder-icon file" aria-hidden="true" />}
+                      <EntryIcon entry={entry} size={16} />
                       <span>{entry.name}</span>
                     </span>
                     <span className="finder-cell finder-muted">{formatModified(entry.modified_ms, locale, t)}</span>
-                    <span className="finder-cell finder-muted finder-size">{entry.is_dir ? "—" : formatFileSize(entry.size)}</span>
-                    <span className="finder-cell finder-muted">{entry.is_dir ? t("filesKindFolder") : t("filesKindCsv")}</span>
+                    <span className="finder-cell finder-muted finder-size">{hasSize(entry) ? formatFileSize(entry.size) : "—"}</span>
+                    <span className="finder-cell finder-muted">{kindLabel(entry, t)}</span>
+                    {children.length ? (
+                      // The recording's files, each selectable (its preview) and
+                      // double-click to download, without going into the folder.
+                      <span className="finder-chips">
+                        {children.map((child) => (
+                          <button
+                            key={child.path}
+                            type="button"
+                            data-path={child.path}
+                            className={`finder-chip${selection.has(child.path) ? " selected" : ""}`}
+                            title={child.name}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleRowClick(event, child);
+                            }}
+                            onDoubleClick={(event) => {
+                              event.stopPropagation();
+                              openEntry(child);
+                            }}
+                          >
+                            <EntryIcon entry={child} size={13} />
+                            <span>{roleLabel(child, t)}</span>
+                            <span className="finder-chip-size">{formatFileSize(child.size)}</span>
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className="finder-chip zip"
+                          title={t("filesDownloadZipHint").replace("{name}", `${entry.name}.zip`)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            downloadEntries([entry]);
+                          }}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                        >
+                          <Download size={13} strokeWidth={2} aria-hidden="true" />
+                          <span>zip</span>
+                        </button>
+                      </span>
+                    ) : null}
                   </div>
                 );
               })}
@@ -459,67 +700,86 @@ export function FilesPage() {
               <div className="finder-preview-hero">
                 <FileSpreadsheet size={40} strokeWidth={1.4} aria-hidden="true" />
                 <strong>{t("filesMultiSelected").replace("{count}", String(selectedEntries.length))}</strong>
-                <span>{formatFileSize(selectedFiles.reduce((sum, item) => sum + Number(item.size || 0), 0))}</span>
+                <span>{formatFileSize(selectedEntries.reduce((sum, item) => sum + (hasSize(item) ? Number(item.size || 0) : 0), 0))}</span>
               </div>
             ) : null}
-            {selectedEntries.length === 1 && selectedEntries[0].is_dir ? (
+            {selectedEntries.length === 1 && selectedEntries[0].is_dir && !singleRecording ? (
               <div className="finder-preview-hero">
                 <Folder size={44} strokeWidth={1.4} className="finder-icon folder" aria-hidden="true" />
                 <strong>{selectedEntries[0].name}</strong>
                 <span>{t("filesKindFolder")} · {formatModified(selectedEntries[0].modified_ms, locale, t)}</span>
               </div>
             ) : null}
+            {singleRecording ? (
+              <>
+                <div className="finder-preview-hero">
+                  <EntryIcon entry={singleRecording} size={44} />
+                  <strong>{singleRecording.name}</strong>
+                  <span>{t("filesKindRecording")} · {formatFileSize(singleRecording.size)}</span>
+                </div>
+                {recordingToolbar(singleRecording)}
+                {previewMode === "timeline" ? timelineBody : null}
+                {previewMode === "raw" ? (
+                  <>
+                    {loadingRaw ? <p className="finder-empty">{t("loadingPreview")}</p> : null}
+                    {recordingRaw ? csvTable(recordingRaw) : null}
+                  </>
+                ) : null}
+                {previewError ? <p className="notice error">{previewError}</p> : null}
+                {previewMeta ? <RecordingMetaSummary meta={previewMeta} className="finder-info" /> : null}
+                {!loadingPreview && preview?.kind === "recording" && !previewMeta ? <p className="finder-empty">{t("filesNoMeta")}</p> : null}
+                {preview?.kind === "recording" ? (
+                  <ul className="finder-preview-files">
+                    {preview.files.map((file) => (
+                      <li key={file.path}>
+                        <EntryIcon entry={file} size={14} />
+                        <span>{file.name}</span>
+                        <span className="finder-muted">{formatFileSize(file.size)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <button className="button finder-download" type="button" onClick={() => downloadEntries([singleRecording])}>
+                  <Download size={15} strokeWidth={2} aria-hidden="true" />
+                  {t("filesDownloadZip")}
+                </button>
+              </>
+            ) : null}
             {singleFile ? (
               <>
                 <div className="finder-preview-hero">
-                  <FileSpreadsheet size={40} strokeWidth={1.4} className="finder-icon file" aria-hidden="true" />
+                  <EntryIcon entry={singleFile} size={40} />
                   <strong>{singleFile.name}</strong>
-                  <span>{t("filesKindCsv")} · {formatFileSize(singleFile.size)}</span>
+                  <span>{kindLabel(singleFile, t)} · {formatFileSize(singleFile.size)}</span>
                 </div>
+                {singleIsSamples ? recordingToolbar(singleFile) : null}
+                {singleIsSamples && previewMode === "timeline" ? timelineBody : null}
+                {singleIsSamples && previewMode === "raw" && csvPreview ? csvTable(csvPreview) : null}
+                {previewMeta ? <RecordingMetaSummary meta={previewMeta} className="finder-info" /> : null}
                 <dl className="finder-info">
                   <dt>{t("filesColModified")}</dt>
                   <dd>{formatModified(singleFile.modified_ms, locale, t)}</dd>
-                  {preview ? (
+                  {csvPreview ? (
                     <>
                       <dt>{t("csvColumns")}</dt>
-                      <dd>{preview.columns}</dd>
+                      <dd>{csvPreview.columns}</dd>
                       <dt>{t("previewRows")}</dt>
-                      <dd>{preview.row_count_previewed}</dd>
+                      <dd>{csvPreview.row_count_previewed}</dd>
                       <dt>{t("headerDetected")}</dt>
-                      <dd>{preview.has_header ? t("yes") : t("no")}</dd>
+                      <dd>{csvPreview.has_header ? t("yes") : t("no")}</dd>
                     </>
                   ) : null}
                 </dl>
-                <button className="button primary finder-download" type="button" onClick={() => downloadEntries([singleFile])}>
+                <button className="button finder-download" type="button" onClick={() => downloadEntries([singleFile])}>
                   <Download size={15} strokeWidth={2} aria-hidden="true" />
                   {t("download")}
                 </button>
-                {loadingPreview ? <p className="finder-empty">{t("loadingPreview")}</p> : null}
+                {loadingPreview && !(singleIsSamples && previewMode === "timeline") ? <p className="finder-empty">{t("loadingPreview")}</p> : null}
                 {previewError ? <p className="notice error">{previewError}</p> : null}
-                {!loadingPreview && preview ? (
-                  <div className="csv-preview-table-wrap">
-                    <table className="csv-preview-table">
-                      {preview.header.length > 0 ? (
-                        <thead>
-                          <tr>
-                            {preview.header.map((cell, index) => (
-                              <th key={`${cell}-${index}`}>{cell}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                      ) : null}
-                      <tbody>
-                        {preview.rows.map((row, rowIndex) => (
-                          <tr key={`row-${rowIndex}`}>
-                            {row.map((cell, cellIndex) => (
-                              <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                {!loadingPreview && preview?.kind === "meta" && preview.meta ? (
+                  <pre className="finder-json">{JSON.stringify(preview.meta, null, 2)}</pre>
                 ) : null}
+                {!singleIsSamples && !loadingPreview && csvPreview ? csvTable(csvPreview) : null}
               </>
             ) : null}
           </aside>

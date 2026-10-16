@@ -193,10 +193,13 @@ class DatagramIngestMixin:
                 with self._lock:
                     self._recording_enabled.discard(device_uid)
                     self._csv_paths.pop(device_uid, None)
+                    finished = self._recording_meta.pop(device_uid, None)
                     self._recording_errors[device_uid] = error
                     if device_uid in self._devices:
                         self._devices[device_uid]["recording_enabled"] = False
                         self._devices[device_uid]["recording_error"] = error
+                if finished is not None:
+                    finished.stop("write_error: " + error)
                 self._emit_event({"type": "recording_update", "device_uid": device_uid, "enabled": False, "error": error})
         with self._lock:
             device_udp_fps = self._mark_visualization_received_locked(device_uid)

@@ -226,8 +226,12 @@ export type CsvExplorerEntry = {
   name: string;
   path: string;
   is_dir: boolean;
+  // A "recording" is a folder holding one recording's files (v0.27.0+),
+  // its size their total; "meta" is that recording's .meta.json.
   size: number;
-  kind: "directory" | "csv" | string;
+  kind: "directory" | "recording" | "csv" | "meta" | string;
+  // A recording folder's own files (samples, events, meta), listed with it.
+  children?: CsvExplorerEntry[];
   // Last modification, epoch ms (Desktop v0.25.0+ backends).
   modified_ms?: number;
 };
@@ -248,14 +252,60 @@ export type CsvDirectoryResponse = {
 };
 
 export type CsvPreviewResponse = {
+  kind?: "csv";
   path: string;
   name: string;
   size: number;
+  /** The recording's .meta.json (raw), when it has one (v0.27.0+). */
+  meta?: Record<string, unknown> | null;
   columns: number;
   row_count_previewed: number;
   has_header: boolean;
   header: string[];
   rows: string[][];
+};
+
+export type RecordingFolderPreviewResponse = {
+  kind: "recording";
+  path: string;
+  name: string;
+  size: number;
+  meta: Record<string, unknown> | null;
+  files: CsvExplorerEntry[];
+};
+
+export type MetaPreviewResponse = {
+  kind: "meta";
+  path: string;
+  name: string;
+  size: number;
+  meta: Record<string, unknown> | null;
+};
+
+export type FilesPreviewResponse = CsvPreviewResponse | RecordingFolderPreviewResponse | MetaPreviewResponse;
+
+// A recording boiled down to a small chart (backend recording_timeline.py):
+// the summed pressure of all sensors as [min, max] per time bucket.
+export type RecordingTimelineResponse = {
+  path: string;
+  name: string;
+  rows: number;
+  skipped_lines: number;
+  sensor_count: number;
+  start_ms: number;
+  end_ms: number;
+  duration_ms: number;
+  rate_hz: number;
+  median_interval_ms: number;
+  lost_frames: number;
+  restarts: number;
+  gaps: number;
+  series: "total";
+  bucket_ms: number;
+  buckets: ([number, number] | null)[];
+  max_value: number;
+  events: { at_ms: number; label: string }[];
+  events_total: number;
 };
 
 export type WikiDeviceEntry = {
@@ -511,7 +561,9 @@ export const api = {
   csvDirectory: (deviceUid: string, path = "") =>
     request<CsvDirectoryResponse>(`/files?device_uid=${encodeURIComponent(deviceUid)}&path=${encodeURIComponent(path)}`),
   previewCsv: (deviceUid: string, path: string) =>
-    request<CsvPreviewResponse>(`/files/preview?device_uid=${encodeURIComponent(deviceUid)}&path=${encodeURIComponent(path)}`),
+    request<FilesPreviewResponse>(`/files/preview?device_uid=${encodeURIComponent(deviceUid)}&path=${encodeURIComponent(path)}`),
+  recordingTimeline: (deviceUid: string, path: string) =>
+    request<RecordingTimelineResponse>(`/files/timeline?device_uid=${encodeURIComponent(deviceUid)}&path=${encodeURIComponent(path)}`),
   wikiDevices: () => request<{ items: WikiDeviceEntry[] }>("/wiki/devices"),
   wikiDirectory: (device: string, path = "", lang = "en") =>
     request<WikiDirectoryResponse>(`/wiki?device=${encodeURIComponent(device)}&path=${encodeURIComponent(path)}&lang=${encodeURIComponent(lang)}`),

@@ -96,6 +96,7 @@ class DeviceIdentityMixin:
             self._latest_result.pop(alias, None)
             self._latest_visualization.pop(alias, None)
             self._csv_paths.pop(alias, None)
+            self._recording_meta.pop(alias, None)
             self._pending_commands.pop(alias, None)
             self._recording_errors.pop(alias, None)
             self._recording_enabled.discard(alias)

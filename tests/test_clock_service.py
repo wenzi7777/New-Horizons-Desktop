@@ -9,6 +9,7 @@ timestamp came from.
 import csv
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -73,10 +74,18 @@ class CsvTimeRefTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        # Only the CSV writer's own state, not a whole running service.
+        # Only the CSV writer's own state, not a whole running service: the
+        # recording's files, and what its meta file reads about the device.
         self.service = object.__new__(NewHorizonsService)
+        self.service._lock = threading.RLock()
         self.service._csv_paths = {}
         self.service._csv_frame_clocks = {}
+        self.service._recording_meta = {}
+        self.service._devices = {}
+        self.service._latest_status = {}
+        self.service._gateways = {}
+        self.service._nicknames = {}
+        self.service._device_groups = {}
         self.service._data_root = Path(self._tmp.name)
 
     def rows(self):

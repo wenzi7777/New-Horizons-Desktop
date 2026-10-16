@@ -5,7 +5,9 @@ import json
 import re
 import secrets
 import shutil
+import tempfile
 import uuid
+import zipfile
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
@@ -17,6 +19,8 @@ from .auth import AuthManager, DEFAULT_TOKEN_EXPIRY_SEC, user_payload
 from .gateway_auth import gateway_expected_token
 from .pressure_cal_client import PressureCalError, PressureCalNotConfigured, get_client
 from .pressure_cal_settings import BUILTIN_PRESETS, load_settings, save_settings
+from .recording_meta import DATA_SUFFIX, EVENTS_SUFFIX, META_SUFFIX, is_recording_dir, read_meta
+from .recording_timeline import timeline_for
 from .service import DEVICE_BOOTING, DEVICE_CONTROL_UNAVAILABLE, GATEWAY_CONTROL_UNAVAILABLE, NewHorizonsService, command_error_message, get_service
 from .terminal import compile_terminal_command, terminal_help_items, validate_device_command_payload
 
@@ -181,31 +185,73 @@ def create_blueprint(
             return ""
         return target.relative_to(device_root).as_posix()
 
+    _RECORDING_FILE_ORDER = {"data": 0, "events": 1, "meta": 2}
+
+    def _recording_file_role(name: str) -> str:
+        lowered = name.lower()
+        if lowered.endswith(DATA_SUFFIX):
+            return "data"
+        if lowered.endswith(EVENTS_SUFFIX):
+            return "events"
+        if lowered.endswith(META_SUFFIX):
+            return "meta"
+        return ""
+
+    def _is_meta_file(path: Path) -> bool:
+        return path.name.lower().endswith(META_SUFFIX)
+
     def _csv_directory_item(device_root: Path, path: Path) -> dict[str, Any] | None:
         # modified_ms: the file browser's "Date Modified" column (and its sort).
+        # A recording (recording_meta.py: one folder per recording since
+        # v0.27.0) is a folder the browser shows as one item, with its size.
         if path.is_dir():
-            return {
+            recording = is_recording_dir(path)
+            item: dict[str, Any] = {
                 "name": path.name,
                 "path": _path_from_device_root(device_root, path),
                 "is_dir": True,
                 "size": 0,
-                "kind": "directory",
+                "kind": "recording" if recording else "directory",
                 "modified_ms": int(path.stat().st_mtime * 1000),
             }
-        if path.is_file() and path.suffix.lower() == ".csv":
+            if recording:
+                # Listed with the folder, so the browser can show and open a
+                # recording's files from the day folder without going in:
+                # samples, events, meta, then anything else.
+                children = [entry for entry in (_csv_directory_item(device_root, child) for child in path.iterdir() if child.is_file()) if entry]
+                children.sort(key=lambda entry: (_RECORDING_FILE_ORDER.get(_recording_file_role(entry["name"]), 9), entry["name"]))
+                item["children"] = children
+                item["size"] = sum(int(entry["size"]) for entry in children)
+            return item
+        if path.is_file() and (path.suffix.lower() == ".csv" or _is_meta_file(path)):
             stat = path.stat()
             return {
                 "name": path.name,
                 "path": _path_from_device_root(device_root, path),
                 "is_dir": False,
                 "size": stat.st_size,
-                "kind": "csv",
+                "kind": "meta" if _is_meta_file(path) else "csv",
                 "modified_ms": int(stat.st_mtime * 1000),
             }
         return None
 
+    def _recording_preview_payload(device_root: Path, target: Path) -> dict[str, Any]:
+        """A recording folder: its meta and its files."""
+        files = [item for item in (_csv_directory_item(device_root, child) for child in sorted(target.iterdir())) if item]
+        return {
+            "kind": "recording",
+            "path": _path_from_device_root(device_root, target),
+            "name": target.name,
+            "size": sum(int(item["size"]) for item in files),
+            "meta": read_meta(next((target / item["name"] for item in files if item["kind"] == "meta"), target / "_")),
+            "files": files,
+        }
+
     def _csv_preview_payload(device_root: Path, target: Path, preview_limit: int = 100) -> dict[str, Any]:
-        sample = target.read_text(encoding="utf-8", errors="replace")
+        # The sniffer only needs the start; reading a whole recording (tens
+        # of MB) to look at its first 100 rows made the preview slow.
+        with target.open("r", encoding="utf-8", errors="replace") as handle:
+            sample = handle.read(4096)
         has_header = False
         try:
             has_header = csv.Sniffer().has_header(sample[:4096]) if sample else False
@@ -228,9 +274,11 @@ def create_blueprint(
             max((len(row) for row in rows), default=0),
         )
         return {
+            "kind": "csv",
             "path": _path_from_device_root(device_root, target),
             "name": target.name,
             "size": target.stat().st_size,
+            "meta": read_meta(target),
             "columns": column_count,
             "row_count_previewed": len(rows),
             "has_header": has_header,
@@ -866,10 +914,52 @@ def create_blueprint(
         if not target.exists():
             return json_response({"error": "not_found"}), 404
         if target.is_dir():
+            if is_recording_dir(target):
+                return json_response(_recording_preview_payload(device_root, target))
             return json_response({"error": "preview_requires_file"}), 400
+        if _is_meta_file(target):
+            return json_response({
+                "kind": "meta",
+                "path": _path_from_device_root(device_root, target),
+                "name": target.name,
+                "size": target.stat().st_size,
+                "meta": read_meta(target),
+            })
         if target.suffix.lower() != ".csv":
             return json_response({"error": "unsupported_file_type"}), 400
         return json_response(_csv_preview_payload(device_root, target))
+
+    @bp.get("/api/files/timeline")
+    @auth
+    @_require_roles("admin")
+    def files_timeline() -> tuple[Response, int] | Response:
+        """A recording folder or a sample CSV, boiled down to a small chart
+        (recording_timeline.py)."""
+        device_uid = (request.args.get("device_uid") or "").strip()
+        if not device_uid:
+            return json_response({"error": "device_uid_required"}), 400
+        raw_path = (request.args.get("path") or "").strip()
+        if not raw_path:
+            return json_response({"error": "path_required"}), 400
+        try:
+            device_root, target = _resolve_device_path(device_uid, raw_path)
+        except PermissionError:
+            return json_response({"error": "forbidden"}), 403
+        if not target.exists():
+            return json_response({"error": "not_found"}), 404
+        if target.is_dir():
+            data = next((child for child in sorted(target.iterdir()) if child.name.lower().endswith(DATA_SUFFIX)), None)
+            if data is None:
+                return json_response({"error": "not_a_recording"}), 400
+            target = data
+        name = target.name.lower()
+        if not name.endswith(".csv") or name.endswith(EVENTS_SUFFIX):
+            return json_response({"error": "not_a_recording"}), 400
+        try:
+            timeline = timeline_for(target)
+        except OSError:
+            return json_response({"error": "read_failed"}), 500
+        return json_response({"path": _path_from_device_root(device_root, target), "name": target.name, **timeline})
 
     @bp.delete("/api/files")
     @auth
@@ -892,7 +982,7 @@ def create_blueprint(
             shutil.rmtree(target)
             deleted_kind = "directory"
         else:
-            if target.suffix.lower() != ".csv":
+            if target.suffix.lower() != ".csv" and not _is_meta_file(target):
                 return json_response({"error": "unsupported_file_type"}), 400
             target.unlink()
             deleted_kind = "file"
@@ -914,7 +1004,17 @@ def create_blueprint(
         if not target.exists():
             return json_response({"error": "not_found"}), 404
         if target.is_dir():
-            return json_response({"error": "download_requires_file"}), 400
+            # A folder -- one recording, or a whole day -- as a zip whose
+            # entries keep the folder's own name, so it unpacks into
+            # `<HHMMSS>/...` rather than loose files. Spooled to disk: a day
+            # of recordings can be hundreds of MB.
+            archive = tempfile.TemporaryFile()
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                for child in sorted(target.rglob("*")):
+                    if child.is_file() and not child.name.endswith(".tmp"):
+                        bundle.write(child, child.relative_to(target.parent).as_posix())
+            archive.seek(0)
+            return send_file(archive, mimetype="application/zip", as_attachment=True, download_name=f"{target.name}.zip")
         return send_file(target, as_attachment=True, download_name=target.name)
 
     @bp.get("/api/pressure-cal/settings")

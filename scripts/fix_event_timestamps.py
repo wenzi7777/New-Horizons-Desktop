@@ -11,7 +11,11 @@ time moves to uptime_ms, time_ref says which, and events from before the
 recording's first frame are dropped. The original is kept as
 `<recording>.events.csv.bak`.
 
-Usage: scripts/fix_event_timestamps.py [--dry-run] RECORDING.csv [...]
+Takes either layout (recording_meta.py): `<HHMMSS>/<HHMMSS>.data.csv` from
+v0.27.0 on, or the flat `<HHMMSS>.csv` from before -- or any file of a
+recording, its .events.csv included.
+
+Usage: scripts/fix_event_timestamps.py [--dry-run] RECORDING.data.csv|RECORDING.csv [...]
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from newhorizons_backend.app_event_log import EVENT_COLUMNS, FrameClock, event_row, sidecar_path_for  # noqa: E402
+from newhorizons_backend.recording_meta import sibling_paths  # noqa: E402
 
 
 def load_clock(sample_path: Path) -> tuple[FrameClock, bool]:
@@ -102,12 +107,11 @@ def fix(sample_path: Path, dry_run: bool) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--dry-run", action="store_true", help="print the rewritten rows, change nothing")
-    parser.add_argument("recordings", nargs="+", type=Path, help="sample CSV files (not .events.csv)")
+    parser.add_argument("recordings", nargs="+", type=Path, help="a recording's sample CSV (or any of its files)")
     args = parser.parse_args()
     status = 0
     for path in args.recordings:
-        if path.name.endswith(".events.csv"):
-            path = path.with_name(path.name[: -len(".events.csv")] + ".csv")
+        path = sibling_paths(path).data
         try:
             fix(path, args.dry_run)
         except (OSError, ValueError) as exc:

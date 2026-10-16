@@ -11,7 +11,7 @@ DEVICE_COMMAND_LIB = ROOT / "frontend" / "src" / "lib" / "deviceCommand.ts"
 APP_TSX = ROOT / "frontend" / "src" / "App.tsx"
 STYLES = ROOT / "frontend" / "src" / "styles.css"
 SERVICE = ROOT / "backend" / "newhorizons_backend" / "service.py"
-PRESSURE_PLUGIN = ROOT / "frontend" / "src" / "plugins" / "PressureControlPlugin.tsx"
+PRESSURE_PLUGIN = ROOT / "frontend" / "src" / "tools" / "PressureControlTool.tsx"
 API = ROOT / "backend" / "newhorizons_backend" / "api.py"
 
 

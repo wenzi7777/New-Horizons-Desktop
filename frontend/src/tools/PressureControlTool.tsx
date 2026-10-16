@@ -18,7 +18,7 @@ type PressurePhase =
   | "stopping" | "awaiting_compressor_off" | "testing_residual"
   | "residual_unsafe" | "safe_done";
 
-export function PressureControlPlugin() {
+export function PressureControlTool() {
   const { t } = useI18n();
 
   // API settings state

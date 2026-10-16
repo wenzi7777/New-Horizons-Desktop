@@ -25,6 +25,7 @@ from .device_commands import (
 )
 from .discovery import DiscoveryResponder
 from .hub_channel_watch import HubChannelWatcher
+from .recording_meta import RecordingMeta, build_device_meta, new_recording_paths, status_is_full
 from .result_chunks import ResultChunkReassembler
 from .service_constants import (  # noqa: F401  (re-exported for api.py / ws.py)
     DEVICE_BOOTING,
@@ -131,6 +132,8 @@ class NewHorizonsService(
         # When each frame of the current recording was sampled, so app events
         # (stamped with the device's boot time) get the sample CSV's time.
         self._csv_frame_clocks: dict[str, FrameClock] = {}
+        # The .meta.json of each recording in progress (recording_meta.py).
+        self._recording_meta: dict[str, RecordingMeta] = {}
         # Mock-mode file uploads in progress, keyed by (device_uid, scope, path).
         # The mock used to ack writes without storing anything, so an "uploaded"
         # file never appeared in file_list and nothing could be installed from it.
@@ -443,14 +446,18 @@ class NewHorizonsService(
         device_uid = self._resolve_known_device_uid(device_uid)
         if not device_uid:
             raise ValueError("device_uid_required")
+        finished: RecordingMeta | None = None
         with self._lock:
             if enabled:
                 self._recording_enabled.add(device_uid)
                 self._recording_errors.pop(device_uid, None)
+                needs_status = not status_is_full(self._latest_status.get(device_uid) or {})
             else:
                 self._recording_enabled.discard(device_uid)
                 self._csv_paths.pop(device_uid, None)
                 self._recording_errors.pop(device_uid, None)
+                finished = self._recording_meta.pop(device_uid, None)
+                needs_status = False
             self._csv_frame_clocks.pop(device_uid, None)
             self._reset_app_event_state(device_uid)
             if device_uid in self._devices:
@@ -460,10 +467,28 @@ class NewHorizonsService(
                 "device_uid": device_uid,
                 "enabled": enabled,
             }
+        if finished is not None:
+            finished.stop("user")
         if enabled:
             self._ensure_app_event_poller()
+        if needs_status:
+            # The meta's hardware model, matrix and calibration come from a
+            # full status; ask for one rather than wait for the next poll.
+            # On its own thread: a direct device answers over TCP, and the
+            # recording switch must not wait for that.
+            threading.Thread(
+                target=self._request_status_for_meta, args=(device_uid,), name="newhorizons-recmeta", daemon=True
+            ).start()
         self._emit_event({"type": "recording_update", **result})
         return result
+
+    def _request_status_for_meta(self, device_uid: str) -> None:
+        try:
+            self.publish_command(device_uid, {"command": "status", "quiet": True,
+                                              "request_id": "recmeta-" + uuid.uuid4().hex})
+        except Exception:
+            # Offline or booting: the meta fills in from the next status.
+            pass
 
     def recording_enabled(self, device_uid: str) -> bool:
         device_uid = self._resolve_known_device_uid(device_uid)
@@ -604,6 +629,14 @@ class NewHorizonsService(
         self._emit_event({"type": "device_update", "item": event_item})
         if purged_aliases:
             self._emit_event({"type": "device_snapshot", "items": self.list_devices()})
+        with self._lock:
+            recording_meta = self._recording_meta.get(device_uid)
+        if recording_meta is not None:
+            refreshed = self._recording_device_meta(device_uid)
+            # Taken from the first frame; a later status says nothing about
+            # the start.
+            refreshed.pop("battery_at_start", None)
+            recording_meta.refresh_device(refreshed)
         synthetic_result = self._pending_result_from_status(device_uid, payload)
         if synthetic_result is not None:
             self._record_result(device_uid, synthetic_result)
@@ -958,9 +991,22 @@ class NewHorizonsService(
         now = datetime.now(timezone.utc)
         path = self._csv_paths.get(device_uid)
         if path is None:
-            path = self._data_root / device_uid / now.strftime("%Y%m%d") / "{}.csv".format(now.strftime("%H%M%S"))
+            # A new recording: its own folder, the samples, and a meta file
+            # saying which device recorded them (recording_meta.py).
+            paths = new_recording_paths(self._data_root, device_uid, now)
+            path = paths.data
             self._csv_paths[device_uid] = path
             self._csv_frame_clocks[device_uid] = FrameClock()
+            meta = RecordingMeta(
+                paths,
+                self._recording_device_meta(device_uid, payload),
+                started_at=now,
+                first_frame_seq=int(payload.get("frame_id") or 0),
+                first_timestamp_ms=self._csv_timestamp_ms(payload, now),
+            )
+            with self._lock:
+                self._recording_meta[device_uid] = meta
+            meta.write()
         path.parent.mkdir(parents=True, exist_ok=True)
         is_new = not path.exists()
         imu = payload.get("imu") if isinstance(payload.get("imu"), dict) else {}
@@ -1001,6 +1047,34 @@ class NewHorizonsService(
         clock = self._csv_frame_clocks.get(device_uid)
         if clock is not None:
             clock.record(frame_seq, timestamp, time_ref)
+        meta = self._recording_meta.get(device_uid)
+        if meta is not None:
+            meta.on_frame(frame_seq, timestamp)
+
+    def _recording_device_meta(self, device_uid: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """What a recording's meta says about the device, from what is known
+        now; `payload` (the first frame) adds what only the stream carries."""
+        with self._lock:
+            device = dict(self._devices.get(device_uid) or {})
+            status = dict(self._latest_status.get(device_uid) or {})
+            gateway = dict(self._gateways.get(str(device.get("gateway_id") or "")) or {})
+            nickname = self._nicknames.get(device_uid, "")
+            group = self._device_groups.get(device_uid, "")
+        pressures = payload.get("p") if payload else None
+        raw_adc = payload.get("raw_adc") if payload else None
+        sensor_count = len(pressures) if isinstance(pressures, list) else None
+        return build_device_meta(
+            device_uid,
+            device,
+            status,
+            nickname=nickname,
+            group=group,
+            relay_client_type=str(gateway.get("client_type") or ""),
+            target_fps=self._extract_target_fps(status) or self._extract_target_fps(device),
+            sensor_count=sensor_count,
+            raw_adc_columns=(isinstance(raw_adc, list) and len(raw_adc) == sensor_count) if payload else None,
+            battery=payload.get("battery") if payload and isinstance(payload.get("battery"), dict) else None,
+        )
 
     @classmethod
     def _payload_is_live(cls, payload: dict[str, Any], kind: str) -> bool:

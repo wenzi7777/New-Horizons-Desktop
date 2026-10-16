@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useRef } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
 import packageJson from "../package.json";
 
 import { DeviceFilesPage } from "./pages/DeviceFilesPage";
@@ -11,7 +11,7 @@ import { LaunchpadPage } from "./pages/LaunchpadPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AppStorePage } from "./pages/AppStorePage";
 import { DeviceAppsPage } from "./pages/DeviceAppsPage";
-import { PluginsPage } from "./pages/PluginsPage";
+import { ToolsPage } from "./pages/ToolsPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { TerminalPage } from "./pages/TerminalPage";
 import { VisualizationPage } from "./pages/VisualizationPage";
@@ -35,11 +35,16 @@ const NAV_ITEMS = [
   { to: "/csv", labelKey: "csvExport", roles: ["admin"] as Role[] },
   { to: "/apps", labelKey: "navApps", roles: ["admin"] as Role[] },
   { to: "/studio", labelKey: "navSdk", roles: ["admin"] as Role[] },
-  { to: "/plugins", labelKey: "navPlugins", roles: ["admin"] as Role[] },
+  { to: "/tools", labelKey: "navTools", roles: ["admin"] as Role[] },
 ];
 
 function allowedRoles(roles: readonly string[], currentRole: string | undefined) {
   return Boolean(currentRole && roles.includes(currentRole));
+}
+
+function LegacyPluginRedirect() {
+  const { toolId } = useParams<{ toolId: string }>();
+  return <Navigate to={`/tools/${toolId ?? ""}`} replace />;
 }
 
 function RequireRole({ roles, children }: { roles: Role[]; children: JSX.Element }) {
@@ -228,21 +233,24 @@ function AuthenticatedApp() {
             }
           />
           <Route
-            path="/plugins"
+            path="/tools"
             element={
               <RequireRole roles={["admin"]}>
-                <PluginsPage />
+                <ToolsPage />
               </RequireRole>
             }
           />
           <Route
-            path="/plugins/:pluginId"
+            path="/tools/:toolId"
             element={
               <RequireRole roles={["admin"]}>
-                <PluginsPage />
+                <ToolsPage />
               </RequireRole>
             }
           />
+          {/* The tab was called Plugins before v0.27.0; keep old links working. */}
+          <Route path="/plugins" element={<Navigate to="/tools" replace />} />
+          <Route path="/plugins/:toolId" element={<LegacyPluginRedirect />} />
           <Route
             path="/apps"
             element={
