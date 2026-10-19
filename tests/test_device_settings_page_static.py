@@ -5,6 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS_PAGE = ROOT / "frontend" / "src" / "pages" / "DeviceSettingsPage.tsx"
+# The Diagnostics page's scan/stream card and the scan_health fields it reads.
+SCAN_HEALTH_CARD = ROOT / "frontend" / "src" / "components" / "ScanHealthCard.tsx"
+SCAN_HEALTH_LIB = ROOT / "frontend" / "src" / "lib" / "scanHealth.ts"
 DEVICE_LIB = ROOT / "frontend" / "src" / "lib" / "device.ts"
 CONNECTION_STATE_LIB = ROOT / "frontend" / "src" / "lib" / "connectionState.ts"
 DEVICE_COMMAND_LIB = ROOT / "frontend" / "src" / "lib" / "deviceCommand.ts"
@@ -25,13 +28,14 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
             't("gatewayTitle")',
             't("externalLedIndicators")',
             't("ssd1306Display")',
-            't("streamDiagnostics")',
             't("imuDiagnostics")',
             't("logSettings")',
             't("autoOtaOnBoot")',
         ):
             self.assertIn(key, source)
 
+        self.assertIn("<ScanHealthCard", source)
+        self.assertIn('t("scanHealthTitle")', SCAN_HEALTH_CARD.read_text(encoding="utf-8"))
         self.assertIn("scan-timing-row", source)
         self.assertIn("segmented-control", source)
         self.assertIn("metric-row", source)
@@ -96,16 +100,21 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
     def test_diagnostics_stream_backpressure_uses_arduino_scan_udp_health(self):
         source = SETTINGS_PAGE.read_text()
+        self.assertIn("scanHealthSource", source)
+        self.assertIn("<ScanHealthCard", source)
+        self.assertIn("scanHealth={scanHealth}", source)
+        scan_health = SCAN_HEALTH_LIB.read_text(encoding="utf-8")
 
         for field in (
-            "scanHealthSource",
             "actual_scan_fps",
             "overrun_frames",
             "udp_sent_frames",
             "udp_send_failures",
             "last_udp_send_us",
+            "adc_read_errors",
+            "adc_cal_digi",
         ):
-            self.assertIn(field, source)
+            self.assertIn(field, scan_health)
 
     def test_diagnostics_ram_monitor_is_manual_and_polling(self):
         source = SETTINGS_PAGE.read_text()
@@ -820,9 +829,10 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('command: "set_stream_buffer"', source)
         self.assertIn("streamBufferEnabled", source)
         self.assertIn("streamBufferMode", source)
-        self.assertIn("queue_capacity_frames", source)
-        self.assertIn("queue_dropped_frames", source)
-        self.assertIn("queue_max_occupied_frames", source)
+        scan_health = SCAN_HEALTH_LIB.read_text(encoding="utf-8")
+        self.assertIn("queue_capacity_frames", scan_health)
+        self.assertIn("queue_dropped_frames", scan_health)
+        self.assertIn("queue_max_occupied_frames", scan_health)
         self.assertIn("streamBufferDiagnostics", i18n)
         self.assertIn("streamBufferStandardMode", i18n)
         self.assertIn("streamBufferExtendedMode", i18n)

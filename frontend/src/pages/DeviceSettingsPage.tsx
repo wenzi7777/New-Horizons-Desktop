@@ -18,6 +18,7 @@ import { CalibrationWorkbench, type CalibrationRun } from "../components/calibra
 import { DeviceAppsPanel } from "../components/DeviceAppsPanel";
 import { DeviceClockCard } from "../components/DeviceClockCard";
 import { DeviceHealthCard } from "../components/DeviceHealthCard";
+import { ScanHealthCard } from "../components/ScanHealthCard";
 import { compareVersionCores, normalizeUpdateChannel, waitingForStableToCatchUp, type UpdateChannel } from "../lib/versioning";
 import { Battery, CircleOff, Lightbulb, Power, TriangleAlert } from "lucide-react";
 
@@ -1023,17 +1024,6 @@ export function DeviceSettingsPage() {
   const rawFindme = recordValue(normalized?.findme ?? status.findme ?? runtime.findme);
   const scanHealthSource = recordValue(status.scan_health ?? lastResult.scan_health ?? (lastResultCommand === "scan_health" ? lastResult : undefined));
   const scanHealth = scanHealthSource;
-  // Firmware v1.14.0+: how late scans START against their due time, which
-  // overrun_frames cannot see (ScanLateness.h).
-  const startLateness = recordValue(scanHealth.start_lateness);
-  const hasStartLateness = typeof startLateness.samples === "number";
-  const lateStartsLabel = (() => {
-    const samples = numberValue(startLateness.samples, 0);
-    const late = numberValue(startLateness.late, 0);
-    if (!samples) return "-";
-    return `${late} / ${samples} (${((late / samples) * 100).toFixed(2)}%)`;
-  })();
-  const latenessHistLabel = Array.isArray(startLateness.hist) ? (startLateness.hist as unknown[]).map(String).join(" / ") : "-";
   const scanTiming = recordValue(runtime.scan_timing);
   const streamBuffer = recordValue(status.stream_buffer ?? runtime.stream_buffer ?? (lastResultCommand === "set_stream_buffer" ? lastResult.stream_buffer : undefined));
   const confirmedScanTiming = recordValue(lastAppliedScanTiming ?? scanTiming);
@@ -2477,7 +2467,7 @@ export function DeviceSettingsPage() {
                 <p>{t("scanPerformanceCopy")}</p>
               </div>
               <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid || isControlUnavailable} onClick={() => void run("Scan health", { command: "scan_health" })}>
-                {isCommandBusy("scan_health") ? t("running") : "Health"}
+                {isCommandBusy("scan_health") ? t("running") : t("refresh")}
               </button>
             </div>
             <div className="scan-timing-row">
@@ -2622,40 +2612,17 @@ export function DeviceSettingsPage() {
             </div>
           </div>
           <DeviceHealthCard deviceUid={deviceUid} disabled={isControlUnavailable} run={run} espNow={isHubRelayed(device)} />
-          <div className="settings-card">
-            <div className="settings-detail-header">
-              <div>
-                <h4>{t("streamDiagnostics")}</h4>
-                <p>{t("streamDiagnosticsCopy")}</p>
-              </div>
-              <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid || isControlUnavailable} onClick={() => void run("Scan health", { command: "scan_health" })}>
-                {isCommandBusy("scan_health") ? t("running") : "Health"}
-              </button>
-            </div>
-            <div className="metric-row">
-              <Metric label={t("actualScanFps")} value={scanHealth.actual_scan_fps ?? "-"} />
-              <Metric label={t("scanBudgetUs")} value={scanHealth.budget_us ?? "-"} />
-              <Metric label={t("overrunFrames")} value={scanHealth.overrun_frames ?? "-"} />
-              {hasStartLateness ? (
-                <>
-                  <Metric label={t("scanLateStarts")} value={lateStartsLabel} small />
-                  <Metric label={t("scanLatenessMaxUs")} value={startLateness.max_us ?? "-"} />
-                  <Metric label={t("scanLatenessRecentMaxUs")} value={startLateness.recent_max_us ?? "-"} />
-                  <Metric label={t("scanLatenessHist")} value={latenessHistLabel} small />
-                  <Metric label={t("scanLatenessGaps")} value={startLateness.gaps ?? "-"} />
-                </>
-              ) : null}
-              <Metric label={t("udpSentFrames")} value={scanHealth.udp_sent_frames ?? "-"} />
-              <Metric label={t("udpSendFailures")} value={scanHealth.udp_send_failures ?? "-"} />
-              <Metric label={t("lastUdpSendUs")} value={scanHealth.last_udp_send_us ?? "-"} />
-              <Metric label={t("streamBufferQueueCapacity")} value={scanHealth.queue_capacity_frames ?? "-"} />
-              <Metric label={t("streamBufferQueueDropped")} value={scanHealth.queue_dropped_frames ?? "-"} />
-              <Metric label={t("streamBufferQueueMax")} value={scanHealth.queue_max_occupied_frames ?? "-"} />
-              <Metric label="Wi-Fi" value={boolString(wifi.connected)} />
-              <Metric label="IP" value={wifi.ip ?? "-"} small />
-              <Metric label="RSSI" value={wifi.rssi ?? "-"} />
-            </div>
-          </div>
+          <ScanHealthCard
+            scanHealth={scanHealth}
+            wifi={wifi}
+            analogPins={Array.isArray(matrixLayout.analog_pins ?? matrixLayout.active_rows)
+              ? ((matrixLayout.analog_pins ?? matrixLayout.active_rows) as unknown[]).map(Number).filter(Number.isFinite)
+              : []}
+            analogPinSlots={boardProfile.analogPinSlots}
+            busy={isCommandBusy("scan_health")}
+            disabled={!deviceUid || isControlUnavailable}
+            onRefresh={() => void run("Scan health", { command: "scan_health" })}
+          />
           <div className="settings-card">
             <div className="settings-detail-header">
               <div>
