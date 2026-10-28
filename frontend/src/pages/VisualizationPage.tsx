@@ -16,6 +16,9 @@ import { cssColorForValue, valueRatio } from "../lib/pressureColor";
 import { useI18n } from "../i18n";
 import { useWsState } from "../lib/wsClient";
 
+// Behind by this much, the recording card says so.
+const RECORDING_LAG_WARN_MS = 2000;
+
 const COP_OFFSET = 250;
 const VIEW_STORAGE_KEY = "newhorizons.visualization.views.v1";
 const DEFAULT_RANGE = { min: 300, max: 3150 };
@@ -1386,6 +1389,10 @@ export function VisualizationPage() {
           const values = matrix.points.map((point) => point.value);
           const maxPressure = values.length ? Math.max(...values) : 0;
           const isRecording = Boolean(recording[deviceUid] ?? device?.recording_enabled);
+          const isFinishing = !isRecording && Boolean(device?.recording_finishing);
+          // The server falling behind the stream: shown so a short recording
+          // is never a surprise (backend recording_session.py).
+          const recordingLagMs = isRecording ? Number(item?.recording_lag_ms ?? 0) : 0;
           const normalizedDevice = device ? normalizeDevice(device) : null;
           const cardStatus = recordValue(device?.last_status);
           const batteryReadout = deviceBatteryReadout({
@@ -1419,9 +1426,11 @@ export function VisualizationPage() {
                   <button
                     className={`button ${isRecording ? "danger" : "primary"}`}
                     type="button"
+                    disabled={isFinishing}
+                    title={isFinishing ? t("recordingFinishingHint") : undefined}
                     onClick={() => handleRecording(deviceUid, !isRecording)}
                   >
-                    {isRecording ? t("stopRecording") : t("record")}
+                    {isRecording ? t("stopRecording") : isFinishing ? t("recordingFinishing") : t("record")}
                   </button>
                   <button className="button danger" type="button" onClick={() => removeView(view.id)} aria-label={t("delete")}>
                     ×
@@ -1430,6 +1439,11 @@ export function VisualizationPage() {
               </div>
 
               <div className="device-uid">{deviceUid}</div>
+              {recordingLagMs >= RECORDING_LAG_WARN_MS ? (
+                <p className="notice warning recording-lag-notice">
+                  {t("recordingLagWarning").replace("{seconds}", (recordingLagMs / 1000).toFixed(1))}
+                </p>
+              ) : null}
               <div className="visualization-card-controls">
                 <div className="field compact-field">
                   <label>{t("matrixShape")}</label>

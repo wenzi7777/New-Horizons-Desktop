@@ -181,10 +181,13 @@ class DatagramIngestMixin:
         payload["device_uid"] = device_uid
         payload["device_id"] = device_uid
         with self._lock:
-            should_record = device_uid in self._recording_enabled
+            should_record = self._recording_active(device_uid)
         if should_record:
             try:
-                self._write_csv_sample(device_uid, payload)
+                lag_ms = self._write_csv_sample(device_uid, payload)
+                if lag_ms is not None:
+                    # Shown on the recording's card when it falls behind.
+                    payload["recording_lag_ms"] = round(lag_ms)
                 # After the sample, so the frame clock already has this frame.
                 if payload.get("app_events"):
                     self._capture_streamed_app_events(device_uid, payload["app_events"])
@@ -192,14 +195,13 @@ class DatagramIngestMixin:
                 error = str(exc)
                 with self._lock:
                     self._recording_enabled.discard(device_uid)
-                    self._csv_paths.pop(device_uid, None)
-                    finished = self._recording_meta.pop(device_uid, None)
+                    finished = self._pop_recording_locked(device_uid)
                     self._recording_errors[device_uid] = error
                     if device_uid in self._devices:
                         self._devices[device_uid]["recording_enabled"] = False
                         self._devices[device_uid]["recording_error"] = error
                 if finished is not None:
-                    finished.stop("write_error: " + error)
+                    finished.finish("write_error: " + error)
                 self._emit_event({"type": "recording_update", "device_uid": device_uid, "enabled": False, "error": error})
         with self._lock:
             device_udp_fps = self._mark_visualization_received_locked(device_uid)

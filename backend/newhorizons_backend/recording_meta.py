@@ -34,7 +34,8 @@ properly::
                         null = no full status yet (fields filled in later)
     recording {started_at, name_time_zone, server_time_zone,
                first_frame_seq, first_timestamp_ms, last_frame_seq,
-               last_timestamp_ms, rows, updated_at, stopped_at, stop_reason}
+               last_timestamp_ms, rows, lag_ms, max_lag_ms, updated_at,
+               stop_requested_at, stopped_at, stop_reason}
     changes [{at, frame_seq, field, from, to}]
 
 Anything unknown is null, never "unknown". The device fields are taken when
@@ -43,6 +44,11 @@ the TRACKED fields follow the device, each change logged in `changes` (a tare
 half way through a recording, say). `recording` is rewritten every
 WRITE_EVERY_SEC while frames arrive, so a recording the backend never got to
 stop -- a restart, a crash -- is the one with no `stopped_at`.
+
+`lag_ms` / `max_lag_ms` say how far behind real time the frames being written
+were (recording_session.py). When Stop is pressed with frames still queued,
+`stop_requested_at` is that moment and `stopped_at` comes once the queued
+frames up to it have been written.
 
 A failed write never interrupts the recording: the samples are the thing
 being measured, the meta only describes them.
@@ -315,7 +321,10 @@ class RecordingMeta:
                 "last_frame_seq": first_frame_seq or None,
                 "last_timestamp_ms": first_timestamp_ms,
                 "rows": 0,
+                "lag_ms": None,
+                "max_lag_ms": None,
                 "updated_at": _iso(started_at),
+                "stop_requested_at": None,
                 "stopped_at": None,
                 "stop_reason": None,
             },
@@ -327,13 +336,17 @@ class RecordingMeta:
         with self._lock:
             return copy.deepcopy(self._document)
 
-    def on_frame(self, frame_seq: int, timestamp_ms: int) -> None:
+    def on_frame(self, frame_seq: int, timestamp_ms: int, *, lag_ms: float | None = None, max_lag_ms: float | None = None) -> None:
         with self._lock:
             recording = self._document["recording"]
             recording["rows"] += 1
             if frame_seq:
                 recording["last_frame_seq"] = frame_seq
             recording["last_timestamp_ms"] = timestamp_ms
+            if lag_ms is not None:
+                recording["lag_ms"] = round(lag_ms)
+            if max_lag_ms is not None:
+                recording["max_lag_ms"] = round(max_lag_ms)
             due = self._monotonic() - self._written_at >= self.WRITE_EVERY_SEC
         if due:
             self.write()
@@ -371,6 +384,13 @@ class RecordingMeta:
                         changed = True
         if changed:
             self.write()
+
+    def request_stop(self) -> None:
+        with self._lock:
+            recording = self._document["recording"]
+            if recording["stop_requested_at"] is None:
+                recording["stop_requested_at"] = _iso(self._wall())
+        self.write()
 
     def stop(self, reason: str) -> None:
         with self._lock:

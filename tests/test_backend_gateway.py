@@ -946,6 +946,8 @@ class IndependentNewHorizonsTest(unittest.TestCase):
                     struct.pack_into("<IIH", packet, 10, frame_id + 1, 123456 + frame_id, 4)
                     struct.pack_into("<f", packet, 20, 315.0 + frame_id)
                     service.record_gateway_packet(bytes(packet))
+                # Rows are buffered in the open file; stopping writes them out.
+                service.set_recording_enabled(device_uid, False)
 
                 csv_files = list(Path(tmpdir).glob(f"{device_uid}/**/*.csv"))
                 self.assertEqual(len(csv_files), 1)

@@ -9644,6 +9644,19 @@ button.cal-matrix-cell:active {
   color: var(--text-dim);
 }
 
+/* On a plain folder's row, beside its name. */
+.finder-row-zip {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 7px;
+  font-size: 11px;
+}
+
+.recording-lag-notice {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
 .finder-list:focus-visible .finder-row.selected,
 .finder-list:focus .finder-row.selected {
   background: var(--accent);
@@ -9653,6 +9666,20 @@ button.cal-matrix-cell:active {
 .finder-list:focus .finder-row.selected .finder-muted,
 .finder-list:focus .finder-row.selected .finder-icon {
   color: rgba(255, 255, 255, 0.85);
+}
+
+/* The file buttons inside a selected row keep their own white face, so their
+   icons keep their own colours (white on white made them vanish). */
+.finder-list:focus .finder-row.selected .finder-chip .finder-icon.file {
+  color: var(--accent);
+}
+
+.finder-list:focus .finder-row.selected .finder-chip .finder-icon.meta {
+  color: #9c36b5;
+}
+
+.finder-list:focus .finder-row.selected .finder-chip .finder-icon.recording {
+  color: #3d8fe0;
 }
 
 .finder-cell {

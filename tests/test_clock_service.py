@@ -80,15 +80,19 @@ class CsvTimeRefTests(unittest.TestCase):
         self.service._lock = threading.RLock()
         self.service._csv_paths = {}
         self.service._csv_frame_clocks = {}
-        self.service._recording_meta = {}
+        self.service._recording_sessions = {}
+        self.service._recording_enabled = {"dev1"}
         self.service._devices = {}
         self.service._latest_status = {}
         self.service._gateways = {}
         self.service._nicknames = {}
         self.service._device_groups = {}
         self.service._data_root = Path(self._tmp.name)
+        self.addCleanup(lambda: [session.writer.close() for session in self.service._recording_sessions.values()])
 
     def rows(self):
+        # Rows are buffered in the open file until flushed (recording_session.py).
+        self.service._recording_sessions["dev1"].writer.flush()
         path = self.service._csv_paths["dev1"]
         with path.open(encoding="utf-8") as handle:
             return list(csv.reader(handle))

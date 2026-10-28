@@ -644,6 +644,22 @@ export function FilesPage() {
                     <span className="finder-cell finder-name">
                       <EntryIcon entry={entry} size={16} />
                       <span>{entry.name}</span>
+                      {entry.is_dir && entry.kind !== "recording" ? (
+                        // A day (or any) folder downloads whole, as one zip.
+                        <button
+                          type="button"
+                          className="finder-chip zip finder-row-zip"
+                          title={t("filesDownloadZipHint").replace("{name}", `${entry.name}.zip`)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            downloadEntries([entry]);
+                          }}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                        >
+                          <Download size={13} strokeWidth={2} aria-hidden="true" />
+                          <span>zip</span>
+                        </button>
+                      ) : null}
                     </span>
                     <span className="finder-cell finder-muted">{formatModified(entry.modified_ms, locale, t)}</span>
                     <span className="finder-cell finder-muted finder-size">{hasSize(entry) ? formatFileSize(entry.size) : "—"}</span>
@@ -704,11 +720,17 @@ export function FilesPage() {
               </div>
             ) : null}
             {selectedEntries.length === 1 && selectedEntries[0].is_dir && !singleRecording ? (
-              <div className="finder-preview-hero">
-                <Folder size={44} strokeWidth={1.4} className="finder-icon folder" aria-hidden="true" />
-                <strong>{selectedEntries[0].name}</strong>
-                <span>{t("filesKindFolder")} · {formatModified(selectedEntries[0].modified_ms, locale, t)}</span>
-              </div>
+              <>
+                <div className="finder-preview-hero">
+                  <Folder size={44} strokeWidth={1.4} className="finder-icon folder" aria-hidden="true" />
+                  <strong>{selectedEntries[0].name}</strong>
+                  <span>{t("filesKindFolder")} · {formatModified(selectedEntries[0].modified_ms, locale, t)}</span>
+                </div>
+                <button className="button finder-download" type="button" onClick={() => downloadEntries([selectedEntries[0]])}>
+                  <Download size={15} strokeWidth={2} aria-hidden="true" />
+                  {t("filesDownloadZip")}
+                </button>
+              </>
             ) : null}
             {singleRecording ? (
               <>

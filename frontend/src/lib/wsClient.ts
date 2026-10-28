@@ -279,7 +279,12 @@ function handleMessage(message: Record<string, unknown>) {
         recording: { ...state.recording, [deviceUid]: enabled },
         errorMessage: errorText || state.errorMessage,
       });
-      mergeDevice({ device_uid: deviceUid, recording_enabled: enabled, recording_error: errorText } as DeviceEntry);
+      mergeDevice({
+        device_uid: deviceUid,
+        recording_enabled: enabled,
+        recording_error: errorText,
+        recording_finishing: Boolean(message.finishing),
+      } as DeviceEntry);
     }
     return;
   }

@@ -588,7 +588,11 @@ export type RecordingMeta = {
   recording: {
     startedAt: string | null;
     rows: number | null;
+    /** How far behind real time the frames being written got (absent in older metas). */
+    maxLagMs: number | null;
     updatedAt: string | null;
+    /** When Stop was pressed, if queued frames were then written up to it. */
+    stopRequestedAt: string | null;
     stoppedAt: string | null;
     stopReason: string | null;
   };
@@ -645,7 +649,9 @@ export function parseRecordingMeta(value: unknown): RecordingMeta | null {
     recording: {
       startedAt: textOf(recording.started_at),
       rows: numberOf(recording.rows),
+      maxLagMs: numberOf(recording.max_lag_ms),
       updatedAt: textOf(recording.updated_at),
+      stopRequestedAt: textOf(recording.stop_requested_at),
       stoppedAt: textOf(recording.stopped_at),
       stopReason: textOf(recording.stop_reason),
     },

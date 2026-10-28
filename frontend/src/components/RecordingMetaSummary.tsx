@@ -26,7 +26,15 @@ export function RecordingMetaSummary({ meta, className }: { meta: RecordingMeta;
     if (end === "live") return t("metaEndLive");
     if (end === "cut_off") return t("metaEndCutOff");
     const reason = recording.stopReason ?? "";
-    const label = reason === "user" ? t("metaEndUser") : reason.startsWith("write_error") ? `${t("metaEndWriteError")} ${reason.slice("write_error:".length).trim()}` : reason;
+    const label = reason === "user"
+      ? t("metaEndUser")
+      : reason === "user_drain_timeout"
+        ? t("metaEndDrainTimeout")
+        : reason === "server_stopped"
+          ? t("metaEndServerStopped")
+          : reason.startsWith("write_error")
+            ? `${t("metaEndWriteError")} ${reason.slice("write_error:".length).trim()}`
+            : reason;
     return recording.stoppedAt ? `${label} · ${formatInstant(Date.parse(recording.stoppedAt), locale)}` : label;
   })();
 
@@ -49,6 +57,12 @@ export function RecordingMetaSummary({ meta, className }: { meta: RecordingMeta;
         <dd>{recording.startedAt ? formatInstant(Date.parse(recording.startedAt), locale) : unknown}</dd>
         <dt>{t("metaEnded")}</dt>
         <dd className={end === "cut_off" ? "meta-warn" : undefined}>{stopText}</dd>
+        {recording.maxLagMs !== null && recording.maxLagMs >= 1000 ? (
+          <>
+            <dt>{t("metaMaxLag")}</dt>
+            <dd className="meta-warn">{(recording.maxLagMs / 1000).toFixed(1)} s</dd>
+          </>
+        ) : null}
         {meta.changes.length ? (
           <>
             <dt>{t("metaChanges")}</dt>

@@ -115,7 +115,7 @@ class AppEventCaptureMixin:
 
     def _app_event_target(self, device_uid: str) -> tuple[Path, FrameClock] | None:
         with self._lock:
-            if device_uid not in self._recording_enabled:
+            if not self._recording_active(device_uid):
                 return None
             sample_path = self._csv_paths.get(device_uid)
             clock = self._csv_frame_clocks.get(device_uid)
@@ -187,7 +187,7 @@ class AppEventCaptureMixin:
     def _capture_app_events(self, device_uid: str, payload: dict[str, Any]) -> None:
         """Write an app_events result into the recording's sidecar."""
         with self._lock:
-            if device_uid not in self._recording_enabled:
+            if not self._recording_active(device_uid):
                 return
         target = self._app_event_target(device_uid)
         if target is None:

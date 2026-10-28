@@ -186,6 +186,8 @@ class CaptureTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.service = NewHorizonsService(mock_mode=False)
+        # Stopping the service closes any recording's open sample file.
+        self.addCleanup(self.service.stop)
         self.sample = Path(self._tmp.name) / "101500.csv"
         self.clock = FrameClock()
         for frame_seq in range(2138, 2200):
@@ -346,6 +348,8 @@ class FirmwarePacketEndToEndTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         service = NewHorizonsService(mock_mode=False)
         service._data_root = Path(tmp.name)
+        # Stopping the service closes the recording's open sample file.
+        self.addCleanup(service.stop)
         with service._lock:
             service._recording_enabled.add(uid)
         # The frame the events were raised on arrived first, as on a device.
@@ -374,7 +378,7 @@ class SampleAlignmentTests(unittest.TestCase):
         # written against an older export.
         source = (BACKEND_ROOT / "newhorizons_backend" / "service.py").read_text(encoding="utf-8")
         writer = source[source.index("def _write_csv_sample"):source.index("def _normalize_device_entry")]
-        header = writer[writer.index('["timestamp_ms"]'):writer.index("writer.writerow(\n                [timestamp]")]
+        header = writer[writer.index('["timestamp_ms"]'):writer.index("device_clock = ")]
         self.assertLess(header.index('"Acc_z"'), header.index('"frame_seq"'))
 
 
@@ -434,7 +438,9 @@ class PollerTests(unittest.TestCase):
     def test_capture_ignores_devices_that_are_not_recording(self):
         source = (BACKEND_ROOT / "newhorizons_backend" / "app_event_capture.py").read_text(encoding="utf-8")
         capture = source[source.index("def _capture_app_events"):source.index("def _app_event_hold_expired")]
-        self.assertIn("if device_uid not in self._recording_enabled:", capture)
+        # Recording, or stopped and still writing the frames queued before the
+        # stop (recording_session.py): events of those frames belong too.
+        self.assertIn("if not self._recording_active(device_uid):", capture)
 
 
 if __name__ == "__main__":

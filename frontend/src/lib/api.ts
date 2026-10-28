@@ -41,6 +41,9 @@ export type DeviceEntry = {
   latest_sample?: VisualizationEntry;
   recording_enabled?: boolean;
   recording_error?: string;
+  // Stop was pressed while frames were still queued: they are being written
+  // up to that moment (backend recording_session.py).
+  recording_finishing?: boolean;
 };
 
 export type BackendHealth = {
@@ -73,6 +76,8 @@ export type VisualizationEntry = {
   received_at_ms?: number;
   device_udp_fps?: number;
   target_fps?: number;
+  /** While recording: how far behind real time the frames being written are. */
+  recording_lag_ms?: number;
   mag?: number[] | null;
   acc?: number[] | null;
   gyro?: number[] | null;

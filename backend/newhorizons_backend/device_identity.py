@@ -96,7 +96,9 @@ class DeviceIdentityMixin:
             self._latest_result.pop(alias, None)
             self._latest_visualization.pop(alias, None)
             self._csv_paths.pop(alias, None)
-            self._recording_meta.pop(alias, None)
+            alias_session = self._recording_sessions.pop(alias, None)
+            if alias_session is not None:
+                alias_session.writer.close()
             self._pending_commands.pop(alias, None)
             self._recording_errors.pop(alias, None)
             self._recording_enabled.discard(alias)

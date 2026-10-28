@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import os
 import threading
 import time
@@ -26,6 +25,7 @@ from .device_commands import (
 from .discovery import DiscoveryResponder
 from .hub_channel_watch import HubChannelWatcher
 from .recording_meta import RecordingMeta, build_device_meta, new_recording_paths, status_is_full
+from .recording_session import RecordingSession
 from .result_chunks import ResultChunkReassembler
 from .service_constants import (  # noqa: F401  (re-exported for api.py / ws.py)
     DEVICE_BOOTING,
@@ -132,8 +132,10 @@ class NewHorizonsService(
         # When each frame of the current recording was sampled, so app events
         # (stamped with the device's boot time) get the sample CSV's time.
         self._csv_frame_clocks: dict[str, FrameClock] = {}
-        # The .meta.json of each recording in progress (recording_meta.py).
-        self._recording_meta: dict[str, RecordingMeta] = {}
+        # Each recording in progress: its open sample file, its .meta.json,
+        # how far behind it is, and whether Stop is waiting for queued frames
+        # (recording_session.py).
+        self._recording_sessions: dict[str, RecordingSession] = {}
         # Mock-mode file uploads in progress, keyed by (device_uid, scope, path).
         # The mock used to ack writes without storing anything, so an "uploaded"
         # file never appeared in file_list and nothing could be installed from it.
@@ -246,6 +248,13 @@ class NewHorizonsService(
         # The app-event poller parks only once recording stops; without this
         # it kept polling a device after the service itself was stopped.
         self._app_event_stop.set()
+        # Recordings end with the service: their buffered rows are written
+        # and their meta says why they stopped.
+        with self._lock:
+            recording_uids = list(self._recording_sessions)
+            self._recording_enabled.difference_update(recording_uids)
+        for device_uid in recording_uids:
+            self._finish_recording(device_uid, "server_stopped")
         if stale_timer is not None:
             stale_timer.cancel()
         if discovery is not None:
@@ -446,29 +455,51 @@ class NewHorizonsService(
         device_uid = self._resolve_known_device_uid(device_uid)
         if not device_uid:
             raise ValueError("device_uid_required")
-        finished: RecordingMeta | None = None
+        ended: list[RecordingSession] = []
+        drain_wait: float | None = None
         with self._lock:
+            session = self._recording_sessions.get(device_uid)
             if enabled:
+                if session is not None and session.draining:
+                    # Started again while the last recording was still writing
+                    # its queued frames: that one ends here, as it is.
+                    ended.append(self._pop_recording_locked(device_uid))
+                    session = None
+                if session is None:
+                    self._csv_frame_clocks.pop(device_uid, None)
+                    self._reset_app_event_state(device_uid)
                 self._recording_enabled.add(device_uid)
                 self._recording_errors.pop(device_uid, None)
                 needs_status = not status_is_full(self._latest_status.get(device_uid) or {})
             else:
                 self._recording_enabled.discard(device_uid)
-                self._csv_paths.pop(device_uid, None)
                 self._recording_errors.pop(device_uid, None)
-                finished = self._recording_meta.pop(device_uid, None)
                 needs_status = False
-            self._csv_frame_clocks.pop(device_uid, None)
-            self._reset_app_event_state(device_uid)
+                if session is not None and not session.draining:
+                    # Frames still queued behind the stream are written up to
+                    # the one scanned now, rather than dropped.
+                    drain_wait = session.begin_drain()
+                if drain_wait is None and session is not None and not session.draining:
+                    ended.append(self._pop_recording_locked(device_uid))
+                    self._reset_app_event_state(device_uid)
+            finishing = drain_wait is not None
             if device_uid in self._devices:
                 self._devices[device_uid]["recording_enabled"] = enabled
+                self._devices[device_uid]["recording_finishing"] = finishing
                 self._devices[device_uid].pop("recording_error", None)
             result = {
                 "device_uid": device_uid,
                 "enabled": enabled,
+                "finishing": finishing,
             }
-        if finished is not None:
-            finished.stop("user")
+        for done in ended:
+            done.finish("user")
+        if drain_wait is not None and session is not None:
+            # For a stream that stopped altogether: no frame would ever end
+            # the wait.
+            timer = threading.Timer(drain_wait + 0.5, self._finish_recording, args=(device_uid, "user_drain_timeout", session))
+            timer.daemon = True
+            timer.start()
         if enabled:
             self._ensure_app_event_poller()
         if needs_status:
@@ -481,6 +512,33 @@ class NewHorizonsService(
             ).start()
         self._emit_event({"type": "recording_update", **result})
         return result
+
+    def _recording_active(self, device_uid: str) -> bool:
+        """Frames are written: recording, or stopped with frames still being
+        written up to the stop. Call with the lock held."""
+        session = self._recording_sessions.get(device_uid)
+        return device_uid in self._recording_enabled or (session is not None and session.draining)
+
+    def _pop_recording_locked(self, device_uid: str) -> RecordingSession | None:
+        self._csv_paths.pop(device_uid, None)
+        self._csv_frame_clocks.pop(device_uid, None)
+        return self._recording_sessions.pop(device_uid, None)
+
+    def _finish_recording(self, device_uid: str, reason: str, expected: RecordingSession | None = None) -> None:
+        """Closes a recording's file and meta; `expected` guards against
+        ending a newer recording than the one asked about."""
+        with self._lock:
+            session = self._recording_sessions.get(device_uid)
+            if session is None or (expected is not None and session is not expected):
+                return
+            self._pop_recording_locked(device_uid)
+            if device_uid not in self._recording_enabled:
+                self._reset_app_event_state(device_uid)
+            if device_uid in self._devices:
+                self._devices[device_uid]["recording_finishing"] = False
+            enabled = device_uid in self._recording_enabled
+        session.finish(reason)
+        self._emit_event({"type": "recording_update", "device_uid": device_uid, "enabled": enabled, "finishing": False})
 
     def _request_status_for_meta(self, device_uid: str) -> None:
         try:
@@ -630,13 +688,13 @@ class NewHorizonsService(
         if purged_aliases:
             self._emit_event({"type": "device_snapshot", "items": self.list_devices()})
         with self._lock:
-            recording_meta = self._recording_meta.get(device_uid)
-        if recording_meta is not None:
+            session = self._recording_sessions.get(device_uid)
+        if session is not None:
             refreshed = self._recording_device_meta(device_uid)
             # Taken from the first frame; a later status says nothing about
             # the start.
             refreshed.pop("battery_at_start", None)
-            recording_meta.refresh_device(refreshed)
+            session.meta.refresh_device(refreshed)
         synthetic_result = self._pending_result_from_status(device_uid, payload)
         if synthetic_result is not None:
             self._record_result(device_uid, synthetic_result)
@@ -984,19 +1042,24 @@ class NewHorizonsService(
         relay delay. Mirrors _csv_timestamp_ms()'s choice."""
         return "device" if isinstance(payload.get("device_epoch_ms"), int) else "received"
 
-    def _write_csv_sample(self, device_uid: str, payload: dict[str, Any]) -> None:
+    def _write_csv_sample(self, device_uid: str, payload: dict[str, Any]) -> float | None:
+        """Appends a frame to the device's recording, starting one if needed.
+        Returns how far behind real time the recording is (ms), when the
+        frame carries the device's own clock."""
         pressures = payload.get("p")
         if not isinstance(pressures, list):
-            return
+            return None
         now = datetime.now(timezone.utc)
-        path = self._csv_paths.get(device_uid)
-        if path is None:
+        session = self._recording_sessions.get(device_uid)
+        if session is None:
+            with self._lock:
+                # A frame that was let through just as its recording ended
+                # must not start a new one.
+                if device_uid not in self._recording_enabled:
+                    return None
             # A new recording: its own folder, the samples, and a meta file
             # saying which device recorded them (recording_meta.py).
             paths = new_recording_paths(self._data_root, device_uid, now)
-            path = paths.data
-            self._csv_paths[device_uid] = path
-            self._csv_frame_clocks[device_uid] = FrameClock()
             meta = RecordingMeta(
                 paths,
                 self._recording_device_meta(device_uid, payload),
@@ -1004,11 +1067,12 @@ class NewHorizonsService(
                 first_frame_seq=int(payload.get("frame_id") or 0),
                 first_timestamp_ms=self._csv_timestamp_ms(payload, now),
             )
+            session = RecordingSession(paths, meta)
             with self._lock:
-                self._recording_meta[device_uid] = meta
+                self._recording_sessions[device_uid] = session
+                self._csv_paths[device_uid] = paths.data
+                self._csv_frame_clocks[device_uid] = FrameClock()
             meta.write()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        is_new = not path.exists()
         imu = payload.get("imu") if isinstance(payload.get("imu"), dict) else {}
         gyro = payload.get("gyro") or imu.get("gyro") or [0, 0, 0]
         acc = payload.get("acc") or imu.get("acc") or [0, 0, 0]
@@ -1018,38 +1082,43 @@ class NewHorizonsService(
         timestamp = self._csv_timestamp_ms(payload, now)
         time_ref = self._csv_time_ref(payload)
         frame_seq = int(payload.get("frame_id") or 0)
-        with path.open("a", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            if is_new:
-                writer.writerow(
-                    ["timestamp_ms"]
-                    + ["P{}".format(index + 1) for index in range(len(pressures))]
-                    + (["RawADC_{}".format(index + 1) for index in range(len(pressures))] if include_raw else [])
-                    + ["Mag_x", "Mag_y", "Mag_z", "Gyro_x", "Gyro_y", "Gyro_z", "Acc_x", "Acc_y", "Acc_z"]
-                    # Appended rather than inserted: a positional reader written
-                    # against an older export keeps working. This is the device's
-                    # own frame.seq, and app events carry the same number, so the
-                    # sample file and the .events.csv sidecar join on it.
-                    + ["frame_seq"]
-                    # Appended for the same reason: see _csv_time_ref().
-                    + ["time_ref"]
-                )
-            writer.writerow(
-                [timestamp]
-                + pressures
-                + (list(raw_adc) if include_raw else [])
-                + list(mag[:3])
-                + list(gyro[:3])
-                + list(acc[:3])
-                + [frame_seq]
-                + [time_ref]
+
+        def header() -> list[str]:
+            return (
+                ["timestamp_ms"]
+                + ["P{}".format(index + 1) for index in range(len(pressures))]
+                + (["RawADC_{}".format(index + 1) for index in range(len(pressures))] if include_raw else [])
+                + ["Mag_x", "Mag_y", "Mag_z", "Gyro_x", "Gyro_y", "Gyro_z", "Acc_x", "Acc_y", "Acc_z"]
+                # Appended rather than inserted: a positional reader written
+                # against an older export keeps working. This is the device's
+                # own frame.seq, and app events carry the same number, so the
+                # sample file and the .events.csv sidecar join on it.
+                + ["frame_seq"]
+                # Appended for the same reason: see _csv_time_ref().
+                + ["time_ref"]
             )
+
+        device_clock = time_ref == "device"
+        ended = session.write(
+            header,
+            [timestamp]
+            + pressures
+            + (list(raw_adc) if include_raw else [])
+            + list(mag[:3])
+            + list(gyro[:3])
+            + list(acc[:3])
+            + [frame_seq]
+            + [time_ref],
+            frame_seq,
+            timestamp,
+            device_clock,
+        )
         clock = self._csv_frame_clocks.get(device_uid)
         if clock is not None:
             clock.record(frame_seq, timestamp, time_ref)
-        meta = self._recording_meta.get(device_uid)
-        if meta is not None:
-            meta.on_frame(frame_seq, timestamp)
+        if ended:
+            self._finish_recording(device_uid, ended, session)
+        return session.lag.lag_ms if device_clock else None
 
     def _recording_device_meta(self, device_uid: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """What a recording's meta says about the device, from what is known
