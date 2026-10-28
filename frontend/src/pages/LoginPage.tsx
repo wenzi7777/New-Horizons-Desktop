@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 
 import { useI18n } from "../i18n";
 import { useAuth } from "../lib/auth";
+import { LAB_NAME } from "../components/AboutDialog";
 
 export function LoginPage() {
   const { t } = useI18n();
@@ -49,6 +50,9 @@ export function LoginPage() {
           <p className="login-help">{t("loginContactAdmin")}</p>
         </form>
       </section>
+      <p className="login-credit">
+        {LAB_NAME} · {t("aboutUniversity")}
+      </p>
     </main>
   );
 }

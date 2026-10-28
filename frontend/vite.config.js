@@ -13,6 +13,10 @@ export default defineConfig(function (_a) {
     return {
         base: basePath,
         plugins: [react()],
+        // The About dialog bundles the release notes from ../notes.
+        server: {
+            fs: { allow: [".", "../notes"] },
+        },
         build: {
             outDir: "dist",
             emptyOutDir: true,

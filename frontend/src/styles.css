@@ -102,10 +102,54 @@ button:disabled {
 
 .topbar-brand {
   min-width: 0;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 4px 10px 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  color: inherit;
+  text-align: left;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 
-.topbar h1 {
-  margin: 0;
+.topbar-brand:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.topbar-brand:active {
+  transform: scale(0.98);
+}
+
+.topbar-brand-text {
+  display: block;
+  min-width: 0;
+}
+
+.topbar-brand-icon {
+  flex: none;
+  color: var(--text-muted);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.topbar-brand:hover .topbar-brand-icon {
+  color: var(--accent);
+}
+
+.topbar-brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.topbar-title {
+  display: block;
   font-size: 17px;
   font-weight: 650;
   letter-spacing: -0.02em;
@@ -240,6 +284,7 @@ button:disabled {
 }
 
 .login-shell {
+  position: relative;
   min-height: 100vh;
   display: grid;
   place-items: center;
@@ -290,6 +335,18 @@ button:disabled {
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.login-credit {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 18px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  text-align: center;
 }
 
 .login-loading {
@@ -4284,6 +4341,112 @@ button:disabled {
   font-style: italic;
 }
 
+.about-panel {
+  width: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 28px 28px 20px;
+}
+
+.about-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.about-product {
+  display: grid;
+  gap: 4px;
+}
+
+.about-product h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.about-product small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.about-lab {
+  margin: 0;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  align-self: stretch;
+  font-family: "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+  font-style: italic;
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1.15;
+  color: var(--accent-strong);
+}
+
+.about-university {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.about-uaizu-logo {
+  width: 150px;
+  height: auto;
+  color: #008580;
+}
+
+.about-changelog {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+}
+
+.about-changelog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.about-changelog-head h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.about-changelog-body {
+  max-height: min(42vh, 420px);
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.about-changelog-loading {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.about-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.about-actions .button {
+  min-width: 100px;
+}
+
 .confirm-modal-panel {
   width: min(440px, 100%);
   max-height: unset;
@@ -6175,6 +6338,7 @@ button:disabled {
 
 .markdown ul,
 .markdown ol { padding-left: 22px; }
+.markdown li.md-nested { margin-left: 18px; list-style-type: circle; }
 
 .markdown h4,
 .markdown h5,

@@ -4,6 +4,8 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
+# The About dialog bundles the release notes (../notes from the frontend).
+COPY notes /app/notes
 RUN npm run build
 
 FROM python:3.12-slim

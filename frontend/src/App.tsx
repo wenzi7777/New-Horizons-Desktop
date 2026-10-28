@@ -1,5 +1,6 @@
-import { Suspense, lazy, useEffect, useRef } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { Info } from "lucide-react";
 import packageJson from "../package.json";
 
 import { DeviceFilesPage } from "./pages/DeviceFilesPage";
@@ -15,6 +16,7 @@ import { ToolsPage } from "./pages/ToolsPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { TerminalPage } from "./pages/TerminalPage";
 import { VisualizationPage } from "./pages/VisualizationPage";
+import { AboutDialog } from "./components/AboutDialog";
 import { useI18n, type Locale } from "./i18n";
 import { useAuth } from "./lib/auth";
 
@@ -94,13 +96,24 @@ function AuthenticatedApp() {
   const navItems = NAV_ITEMS.filter((item) => allowedRoles(item.roles, role));
 
   const topbarRef = useTopbarHeightVar();
+  const [aboutOpen, setAboutOpen] = useState(false);
   return (
     <div className="app-shell">
       <header className="topbar" ref={topbarRef}>
-        <div className="topbar-brand">
-          <h1>{t("appTitle")}</h1>
-          <small className="app-version">{APP_VERSION}</small>
-        </div>
+        {/* The brand doubles as the (deliberately low-key) way into About. */}
+        <button
+          className="topbar-brand"
+          type="button"
+          onClick={() => setAboutOpen(true)}
+          title={t("aboutOpen")}
+          aria-label={t("aboutOpen")}
+        >
+          <span className="topbar-brand-text">
+            <span className="topbar-title">{t("appTitle")}</span>
+            <small className="app-version">{APP_VERSION}</small>
+          </span>
+          <Info className="topbar-brand-icon" size={15} aria-hidden="true" />
+        </button>
         <nav className="topnav" aria-label={t("appTitle")}>
           {navItems.map((item) => (
             <NavLink
@@ -135,6 +148,7 @@ function AuthenticatedApp() {
           </button>
         </div>
       </header>
+      {aboutOpen ? <AboutDialog version={APP_VERSION} onClose={() => setAboutOpen(false)} /> : null}
       <main className="page-shell">
         <Routes>
           <Route path="/login" element={<Navigate to={role === "user" ? "/visualization" : "/"} replace />} />

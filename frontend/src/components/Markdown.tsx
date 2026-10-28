@@ -9,7 +9,8 @@ import { type ReactNode } from "react";
  * mean nothing here, so they render as plain text.
  *
  * Supported: #/##/### headings, paragraphs, - * and 1. lists, fenced code,
- * `code`, **bold**, *italic* and [text](url).
+ * `code`, **bold**, *italic* and [text](url). An indented list item is shown
+ * one level in (its nesting is not tracked beyond that).
  */
 
 const INLINE = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*|\[[^\]]+\]\([^)\s]+\))/g;
@@ -35,7 +36,7 @@ export function Markdown({ source }: { source: string }) {
   const blocks: ReactNode[] = [];
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   let paragraph: string[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
+  let list: { ordered: boolean; items: { text: string; nested: boolean }[] } | null = null;
 
   const flushParagraph = () => {
     if (paragraph.length) {
@@ -47,7 +48,9 @@ export function Markdown({ source }: { source: string }) {
   const flushList = () => {
     if (list) {
       const key = `l${blocks.length}`;
-      const items = list.items.map((item, index) => <li key={index}>{inline(item, `${key}-${index}`)}</li>);
+      const items = list.items.map((item, index) => (
+        <li key={index} className={item.nested ? "md-nested" : undefined}>{inline(item.text, `${key}-${index}`)}</li>
+      ));
       blocks.push(list.ordered ? <ol key={key}>{items}</ol> : <ul key={key}>{items}</ul>);
       list = null;
     }
@@ -74,15 +77,15 @@ export function Markdown({ source }: { source: string }) {
         : level === 2 ? <h5 key={key}>{content}</h5> : <h6 key={key}>{content}</h6>);
       continue;
     }
-    const item = /^\s*(?:([-*])|(\d+)\.)\s+(.*)$/.exec(line);
+    const item = /^(\s*)(?:([-*])|(\d+)\.)\s+(.*)$/.exec(line);
     if (item) {
       flushParagraph();
-      const ordered = Boolean(item[2]);
+      const ordered = Boolean(item[3]);
       if (!list || list.ordered !== ordered) {
         flushList();
         list = { ordered, items: [] };
       }
-      list.items.push(item[3]);
+      list.items.push({ text: item[4], nested: item[1].length >= 2 });
       continue;
     }
     if (!line.trim()) {
