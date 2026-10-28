@@ -1,8 +1,8 @@
 name: release
 
 # Every pushed version tag gets a GitHub Release, so the Releases page never
-# falls behind the tags. The body is releases/notes/<tag>.md (the tag's
-# annotation when there is none); this version's build artifacts are attached.
+# falls behind the tags. The body is releases/notes/<tag>.md, else
+# notes/<tag>.md (where Desktop keeps them), else the tag's annotation; this version's build artifacts are attached.
 # A vX.Y.Z-beta.N tag is a prerelease and never becomes "Latest".
 
 on:
@@ -26,6 +26,7 @@ jobs:
           PRODUCT: New Horizons Desktop
         run: |
           notes="releases/notes/${TAG}.md"
+          if [ ! -f "$notes" ]; then notes="notes/${TAG}.md"; fi
           if [ ! -f "$notes" ]; then
             git tag -l --format='%(contents)' "$TAG" > /tmp/notes.md
             notes=/tmp/notes.md
