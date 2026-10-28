@@ -9,12 +9,6 @@ import { batteryIndicatorState } from "../lib/batteryProfile";
 import { isHubRelayed, useDevicesPolling, type NormalizedDevice } from "../lib/device";
 import { deviceClassName, statusDot } from "../lib/deviceStatus";
 
-const GLOBAL_APPS = [
-  { to: "/visualization", icon: "VIS", titleKey: "visualization" },
-  { to: "/gateways", icon: "GW", titleKey: "navGateways" },
-  { to: "/profiles", icon: "PF", titleKey: "profileEditor" },
-  { to: "/csv", icon: "CSV", titleKey: "csvExport" },
-];
 const FOLDER_PREVIEW_MAX_ITEMS = 6;
 
 type LaunchpadFolder = {
@@ -182,7 +176,6 @@ export function LaunchpadPage() {
       {errorMessage ? <p className="notice error">{errorMessage}</p> : null}
 
       <section className="desktop-section launchpad-groups">
-        <h3>{t("discoveredDevices")}</h3>
         {normalized.length === 0 ? (
           <div className="panel empty-device-state">
             <div className="empty-device-visual" aria-hidden="true">
@@ -246,20 +239,6 @@ export function LaunchpadPage() {
                 </div>
               )}
             </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="desktop-section launchpad-apps">
-        <h3>{t("globalApps")}</h3>
-        <div className="launch-grid">
-          {GLOBAL_APPS.map((card) => (
-            <Link key={card.to} to={card.to} className="launch-card">
-              <div className="launch-icon">{card.icon}</div>
-              <div>
-                <h3>{t(card.titleKey)}</h3>
-              </div>
-            </Link>
           ))}
         </div>
       </section>

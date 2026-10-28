@@ -38,14 +38,16 @@ class AppAuthStaticTest(unittest.TestCase):
         self.assertIn("const API_BASE = appHref(\"api\")", api_source)
         self.assertIn("return wsHref(\"ws\")", ws_source)
 
-    def test_login_page_removes_app_subtitle_and_shows_contact_admin_copy(self):
+    def test_login_page_is_the_name_and_the_form_only(self):
         login_source = (ROOT / "frontend" / "src" / "pages" / "LoginPage.tsx").read_text(encoding="utf-8")
-        i18n_source = (ROOT / "frontend" / "src" / "i18n.tsx").read_text(encoding="utf-8")
 
         self.assertNotIn("appSubtitle", login_source)
-        self.assertIn("loginContactAdmin", login_source)
-        self.assertIn('loginContactAdmin: "Contact the administrator to obtain an account."', i18n_source)
-        self.assertIn('loginContactAdmin: "アカウントの発行は管理者へお問い合わせください。"', i18n_source)
+        # No explanatory copy: the green panel carries the name and the credit.
+        self.assertNotIn("loginCopy", login_source)
+        self.assertNotIn("loginContactAdmin", login_source)
+        self.assertIn("login-brand", login_source)
+        self.assertIn("{LAB_NAME}", login_source)
+        self.assertIn('t("aboutUniversity")', login_source)
 
     def test_gateways_page_supports_gateway_delete_action(self):
         gateways_source = (ROOT / "frontend" / "src" / "pages" / "GatewaysPage.tsx").read_text(encoding="utf-8")
@@ -91,7 +93,9 @@ class AppAuthStaticTest(unittest.TestCase):
         self.assertIn("folder-device-item", launchpad_source)
         self.assertIn("FOLDER_PREVIEW_MAX_ITEMS", launchpad_source)
         self.assertIn("disabled={folder.devices.length === 0}", launchpad_source)
-        self.assertIn("launchpad-apps", launchpad_source)
+        # Home is the device folders only: no Global Apps row, no section title.
+        self.assertNotIn("launchpad-apps", launchpad_source)
+        self.assertNotIn('<h3>{t("discoveredDevices")}</h3>', launchpad_source)
         self.assertIn("deviceMacSuffix", launchpad_source)
         self.assertIn('uid.slice(-4).toUpperCase()', launchpad_source)
         self.assertIn("device-code-mark", launchpad_source)

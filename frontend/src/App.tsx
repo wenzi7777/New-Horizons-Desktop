@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
-import { Info } from "lucide-react";
+import { BookOpen, Info } from "lucide-react";
 import packageJson from "../package.json";
 
 import { DeviceFilesPage } from "./pages/DeviceFilesPage";
@@ -17,6 +17,8 @@ import { ProfilesPage } from "./pages/ProfilesPage";
 import { TerminalPage } from "./pages/TerminalPage";
 import { VisualizationPage } from "./pages/VisualizationPage";
 import { AboutDialog } from "./components/AboutDialog";
+import { ManualPage } from "./pages/ManualPage";
+import { ThemeToggle } from "./components/ThemeToggle";
 import { useI18n, type Locale } from "./i18n";
 import { useAuth } from "./lib/auth";
 
@@ -33,7 +35,6 @@ const NAV_ITEMS = [
   { to: "/visualization", labelKey: "navVisualize", roles: ["admin", "user"] as Role[] },
   { to: "/gateways", labelKey: "navGateways", roles: ["admin"] as Role[] },
   { to: "/profiles", labelKey: "navProfile", roles: ["admin", "user"] as Role[] },
-  { to: "/wiki", labelKey: "navWiki", roles: ["admin", "user"] as Role[] },
   { to: "/csv", labelKey: "csvExport", roles: ["admin"] as Role[] },
   { to: "/apps", labelKey: "navApps", roles: ["admin"] as Role[] },
   { to: "/studio", labelKey: "navSdk", roles: ["admin"] as Role[] },
@@ -127,6 +128,15 @@ function AuthenticatedApp() {
           ))}
         </nav>
         <div className="topbar-session">
+          <ThemeToggle />
+          <NavLink
+            className={({ isActive }) => (isActive ? "button ghost icon-button topbar-icon-button active" : "button ghost icon-button topbar-icon-button")}
+            to="/manual"
+            title={t("navManual")}
+            aria-label={t("navManual")}
+          >
+            <BookOpen size={17} strokeWidth={1.8} />
+          </NavLink>
           <label className="language-select">
             <span className="sr-only">{t("language")}</span>
             <select
@@ -199,13 +209,14 @@ function AuthenticatedApp() {
             }
           />
           <Route
-            path="/wiki"
+            path="/manual"
             element={
               <RequireRole roles={["admin", "user"]}>
-                <DeviceWikiPage />
+                <ManualPage />
               </RequireRole>
             }
           />
+          <Route path="/wiki" element={<Navigate to="/manual?tab=wiki" replace />} />
           <Route
             path="/profiles"
             element={

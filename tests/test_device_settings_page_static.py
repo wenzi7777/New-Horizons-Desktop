@@ -24,7 +24,6 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
         for key in (
             't("scanPerformance")',
-            't("currentScanTiming")',
             't("gatewayTitle")',
             't("externalLedIndicators")',
             't("ssd1306Display")',
@@ -36,9 +35,10 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
         self.assertIn("<ScanHealthCard", source)
         self.assertIn('t("scanHealthTitle")', SCAN_HEALTH_CARD.read_text(encoding="utf-8"))
-        self.assertIn("scan-timing-row", source)
         self.assertIn("segmented-control", source)
-        self.assertIn("metric-row", source)
+        # Read-back values are a quiet list, and raw ones sit behind a disclosure.
+        self.assertIn("<FactList", source)
+        self.assertIn("<MoreDetails", source)
         self.assertIn("settings-shell", source)
         self.assertIn("settings-sidebar", source)
         self.assertIn("settings-detail", source)
@@ -65,7 +65,6 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn('| "io"', source)
         self.assertNotIn('| "about"', source)
         self.assertNotIn('| "gateway"', source)
-        self.assertNotIn('| "update"', source)
         self.assertNotIn('| "pins"', source)
         self.assertNotIn('| "indicators"', source)
         self.assertNotIn('| "flash"', source)
@@ -73,9 +72,9 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn("<span>{section.detail}</span>", source)
         self.assertNotIn('activeSection === "scan"', source)
         self.assertNotIn('activeSection === "io"', source)
-        for section in ("overview", "hardware", "runtime", "maintenance", "diagnostics", "files", "experimental"):
+        for section in ("overview", "maintenance", "apps", "hardware", "runtime", "update", "diagnostics", "files", "experimental"):
             self.assertIn(f'| "{section}"', source)
-            self.assertIn(f'activeSection === "{section}"', source)
+            self.assertIn(f'section === "{section}"', source)
             self.assertIn(f'{{ id: "{section}", label: t("settingsSection_{section}") }}', source)
         self.assertIn('t("scanPerformance")', source)
         self.assertIn('t("ioConfigOpen")', source)
@@ -291,7 +290,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         source = SETTINGS_PAGE.read_text()
 
         self.assertIn("pinStatusAutoRequestedRef", source)
-        self.assertIn('activeSection === "hardware"', source)
+        self.assertIn('activeSection !== "hardware"', source)
         self.assertIn('command: "status"', source)
         self.assertIn("busyCommand", source)
         self.assertIn("isCommandBusy", source)
@@ -317,9 +316,13 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('className="operation-toast-close"', source)
         self.assertIn('aria-label={t("closeToast")}', source)
         self.assertIn("setOperationToast(null)", source)
-        self.assertIn("left: 24px", styles)
-        self.assertIn("bottom: 24px", styles)
-        self.assertIn("transform: none", styles)
+        # Centred at the bottom, with a bar that runs down until it closes.
+        toast = styles.split(".operation-toast {", 1)[1].split("}", 1)[0]
+        self.assertIn("left: 50%", toast)
+        self.assertIn("bottom: 24px", toast)
+        self.assertIn("translateX(-50%)", toast)
+        self.assertIn('className="operation-toast-timer"', source)
+        self.assertIn("@keyframes operation-toast-timer", styles)
         self.assertIn('className="operation-log"', source)
         self.assertNotIn('{message ? <p className="notice success">{message}</p> : null}', source)
 
@@ -328,7 +331,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
         self.assertIn('| "files"', source)
         self.assertIn('{ id: "files", label: t("settingsSection_files") }', source)
-        self.assertIn('activeSection === "files"', source)
+        self.assertIn('section === "files"', source)
         self.assertIn('command: "storage_status"', source)
         self.assertIn("storageUsage", source)
         self.assertIn("storage-bar-track", source)
@@ -360,7 +363,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
 
         self.assertIn("statusDrivenSectionAutoRefreshKeyRef", source)
         self.assertIn("shouldAutoRefreshStatusForSection", source)
-        self.assertIn('const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["overview", "hardware", "action_button", "runtime", "diagnostics", "files", "experimental"]', source)
+        self.assertIn('const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["overview", "hardware", "runtime", "update", "diagnostics", "files", "experimental"]', source)
         self.assertIn('command: "status"', source)
 
     def test_offline_device_skips_auto_refresh_and_disables_live_queries(self):
@@ -624,7 +627,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
     def test_filter_ui_is_experimental_only(self):
         source = SETTINGS_PAGE.read_text()
 
-        self.assertIn('activeSection === "experimental"', source)
+        self.assertIn('section === "experimental"', source)
         self.assertIn("filterEnabled", source)
         self.assertIn("filterMedian", source)
         self.assertIn("filterAlpha", source)
@@ -635,11 +638,11 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("setFilterEnabled(filter.enabled === true)", source)
         self.assertNotIn("filter.enabled !== false", source)
 
-        runtime_start = source.index('activeSection === "runtime"')
-        maintenance_start = source.index('activeSection === "maintenance"')
-        diagnostics_start = source.index('activeSection === "diagnostics"')
-        files_start = source.index('activeSection === "files"')
-        experimental_start = source.index('activeSection === "experimental"')
+        runtime_start = source.index('section === "runtime"')
+        maintenance_start = source.index('section === "maintenance"')
+        diagnostics_start = source.index('section === "diagnostics"')
+        files_start = source.index('section === "files"')
+        experimental_start = source.index('section === "experimental"')
         runtime_block = source[runtime_start:maintenance_start]
         diagnostics_block = source[diagnostics_start:files_start]
         experimental_block = source[experimental_start:]

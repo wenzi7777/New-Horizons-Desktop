@@ -22,6 +22,13 @@ const RECORDING_LAG_WARN_MS = 2000;
 const COP_OFFSET = 250;
 const VIEW_STORAGE_KEY = "newhorizons.visualization.views.v1";
 const DEFAULT_RANGE = { min: 300, max: 3150 };
+// The first preset is the default. Anything else is "custom" and shows the
+// min/max inputs.
+const RANGE_PRESETS = [DEFAULT_RANGE, { min: 300, max: 4990 }];
+
+function presetIndexForRange(range: { min: number; max: number }) {
+  return RANGE_PRESETS.findIndex((preset) => preset.min === range.min && preset.max === range.max);
+}
 const SURFACE_INTERPOLATION_STEPS = 3;
 const VISUAL_SURFACE_MAX_INTERPOLATED_POINTS = 1800;
 const kVisualizationStaleMs = 1500;
@@ -991,6 +998,10 @@ export function VisualizationPage() {
   const [addFilter, setAddFilter] = useState("");
   const [showCop, setShowCop] = useState(true);
   const [range, setRange] = useState(DEFAULT_RANGE);
+  // Custom stays open while typing, even when the numbers happen to match a preset.
+  const [customRange, setCustomRange] = useState(false);
+  const rangePresetIndex = presetIndexForRange(range);
+  const rangeSelectValue = customRange || rangePresetIndex < 0 ? "custom" : String(rangePresetIndex);
   const [deviceFpsByDevice, setDeviceFpsByDevice] = useState<Record<string, number>>({});
   const [renderFpsByDevice, setRenderFpsByDevice] = useState<Record<string, number>>({});
   const [uiError, setUiError] = useState("");
@@ -1324,13 +1335,13 @@ export function VisualizationPage() {
 
       <section className="visualization-toolbar panel">
         <div className="visualization-toolbar-title">Pressure Heatmap</div>
-        <button className="button primary" type="button" onClick={() => setAddOpen(true)}>
+        <button className="button primary compact" type="button" onClick={() => setAddOpen(true)}>
           {t("addDeviceView")}
         </button>
-        <button className="button danger" type="button" disabled={selectedCount === 0} onClick={() => handleSelectedRecording(true)}>
+        <button className="button danger compact" type="button" disabled={selectedCount === 0} onClick={() => handleSelectedRecording(true)}>
           {t("recSelected")}
         </button>
-        <button className="button" type="button" disabled={selectedCount === 0} onClick={() => handleSelectedRecording(false)}>
+        <button className="button compact" type="button" disabled={selectedCount === 0} onClick={() => handleSelectedRecording(false)}>
           {t("stopSelected")}
         </button>
         <label className="switch-row">
@@ -1338,28 +1349,50 @@ export function VisualizationPage() {
           <span>{t("showCop")}</span>
         </label>
         <div className="range-controls">
-          <span>{t("range")}</span>
-          <label>
-            {t("min")}
-            <input
-              type="number"
-              value={range.min}
-              onChange={(event) => setRange((current) => ({ ...current, min: Number(event.target.value) }))}
-              onBlur={() => setRange((current) => ({ ...current, max: Math.max(current.max, current.min + 1) }))}
-            />
+          <label className="range-preset">
+            <span>{t("range")}</span>
+            <select
+              value={rangeSelectValue}
+              onChange={(event) => {
+                if (event.target.value === "custom") {
+                  setCustomRange(true);
+                  return;
+                }
+                setCustomRange(false);
+                setRange(RANGE_PRESETS[Number(event.target.value)] ?? DEFAULT_RANGE);
+              }}
+            >
+              {RANGE_PRESETS.map((preset, index) => (
+                <option key={index} value={index}>
+                  {preset.min} – {preset.max}
+                  {index === 0 ? ` (${t("rangeDefault")})` : ""}
+                </option>
+              ))}
+              <option value="custom">{t("rangeCustom")}</option>
+            </select>
           </label>
-          <label>
-            {t("max")}
-            <input
-              type="number"
-              value={range.max}
-              onChange={(event) => setRange((current) => ({ ...current, max: Number(event.target.value) }))}
-              onBlur={() => setRange((current) => ({ ...current, max: Math.max(current.max, current.min + 1) }))}
-            />
-          </label>
-          <button className="button" type="button" onClick={() => setRange(DEFAULT_RANGE)}>
-            {t("reset")}
-          </button>
+          {rangeSelectValue === "custom" ? (
+            <>
+              <label>
+                {t("min")}
+                <input
+                  type="number"
+                  value={range.min}
+                  onChange={(event) => setRange((current) => ({ ...current, min: Number(event.target.value) }))}
+                  onBlur={() => setRange((current) => ({ ...current, max: Math.max(current.max, current.min + 1) }))}
+                />
+              </label>
+              <label>
+                {t("max")}
+                <input
+                  type="number"
+                  value={range.max}
+                  onChange={(event) => setRange((current) => ({ ...current, max: Number(event.target.value) }))}
+                  onBlur={() => setRange((current) => ({ ...current, max: Math.max(current.max, current.min + 1) }))}
+                />
+              </label>
+            </>
+          ) : null}
         </div>
       </section>
 
@@ -1410,21 +1443,22 @@ export function VisualizationPage() {
               className={`panel visualization-device-card${focusedUid === normalizeUid(view.deviceUid) ? " is-focused" : ""}`}
               data-device-uid={normalizeUid(view.deviceUid)}
             >
-              <div className="visualization-card-header">
-                <label className="visualization-select-row">
+              <div className="viz-card-head">
+                <label className="viz-card-title">
                   <input
                     type="checkbox"
                     checked={view.selected}
                     onChange={(event) => updateView(view.id, { selected: event.target.checked })}
                   />
-                  <span>{title}</span>
+                  <span className="viz-card-name">{title}</span>
+                  {title !== deviceUid ? <span className="viz-card-uid">{deviceUid}</span> : null}
                 </label>
-                <div className="actions compact-actions">
-                  <div className={`status-pill ${badgeState}`}>{badgeLabel}</div>
+                <div className="viz-card-actions">
+                  <span className={`status-pill viz-card-status ${badgeState}`}>{badgeLabel}</span>
                   <DeviceBatteryChip readout={batteryReadout} t={t} />
                   {isHubRelayed(device) ? <span className="device-badge hub-relay">{t("deviceViaHub")}</span> : null}
                   <button
-                    className={`button ${isRecording ? "danger" : "primary"}`}
+                    className={`button compact ${isRecording ? "danger" : "primary"}`}
                     type="button"
                     disabled={isFinishing}
                     title={isFinishing ? t("recordingFinishingHint") : undefined}
@@ -1432,43 +1466,20 @@ export function VisualizationPage() {
                   >
                     {isRecording ? t("stopRecording") : isFinishing ? t("recordingFinishing") : t("record")}
                   </button>
-                  <button className="button danger" type="button" onClick={() => removeView(view.id)} aria-label={t("delete")}>
+                  <button className="button ghost compact viz-card-remove" type="button" onClick={() => removeView(view.id)} aria-label={t("delete")} title={t("delete")}>
                     ×
                   </button>
                 </div>
               </div>
 
-              <div className="device-uid">{deviceUid}</div>
               {recordingLagMs >= RECORDING_LAG_WARN_MS ? (
                 <p className="notice warning recording-lag-notice">
                   {t("recordingLagWarning").replace("{seconds}", (recordingLagMs / 1000).toFixed(1))}
                 </p>
               ) : null}
-              <div className="visualization-card-controls">
-                <div className="field compact-field">
-                  <label>{t("matrixShape")}</label>
-                  <div className="readonly-field">{matrix.rows} × {matrix.cols}</div>
-                </div>
-                <div className="field compact-field">
-                  <label>{t("profiles")}</label>
-                  <div className="profile-select-row">
-                    <select
-                      value={view.profileName ?? ""}
-                      onChange={(event) => void handleProfileChange(view, event.target.value)}
-                    >
-                      <option value="">{t("profileNoneStandard")}</option>
-                      {profiles.map((profileItem) => (
-                        <option key={profileItem.name} value={profileItem.name}>
-                          {profileItem.displayName || profileItem.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button className="button" type="button" onClick={() => void loadProfiles()}>
-                      ↻
-                    </button>
-                  </div>
-                </div>
-                <div className="segmented-control renderer-toggle">
+
+              <div className="viz-card-toolbar">
+                <div className="segmented-control viz-renderer-toggle">
                   <button
                     className={view.rendererMode === "3d" ? "active" : ""}
                     type="button"
@@ -1484,86 +1495,103 @@ export function VisualizationPage() {
                     {t("heatmap2d")}
                   </button>
                 </div>
-                {profile ? (
-                  <div className="field compact-field profile-dot-size-field">
-                    <label>{t("dotSize")}: {dotSize.toFixed(2)}×</label>
-                    <input
-                      type="range"
-                      min="0.5"
-                      max="4"
-                      step="0.25"
-                      value={dotSize}
-                      onChange={(event) => updateView(view.id, { dotSize: Number(event.target.value) || 1 })}
-                    />
-                  </div>
-                ) : null}
-                <div className="mirror-controls">
-                  <label className="switch-row">
-                    <input
-                      type="checkbox"
-                      checked={view.rowMirror}
-                      onChange={(event) => updateView(view.id, { rowMirror: event.target.checked })}
-                    />
-                    <span>{t("rowMirror")}</span>
-                  </label>
-                  <label className="switch-row">
-                    <input
-                      type="checkbox"
-                      checked={view.colMirror}
-                      onChange={(event) => updateView(view.id, { colMirror: event.target.checked })}
-                    />
-                    <span>{t("colMirror")}</span>
-                  </label>
+                <div className="viz-card-profile">
+                  <select
+                    value={view.profileName ?? ""}
+                    onChange={(event) => void handleProfileChange(view, event.target.value)}
+                    aria-label={t("profiles")}
+                    title={t("profiles")}
+                  >
+                    <option value="">{t("profileNoneStandard")}</option>
+                    {profiles.map((profileItem) => (
+                      <option key={profileItem.name} value={profileItem.name}>
+                        {profileItem.displayName || profileItem.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="button ghost compact" type="button" onClick={() => void loadProfiles()} aria-label={t("profiles")}>
+                    ↻
+                  </button>
                 </div>
-                {hasEnabledCalibration ? <p className="service-muted">{t("calibratedRangeHint")}</p> : null}
-                {!hasEnabledCalibration && hasCalibrationLevels ? <p className="service-muted">{t("calibrationAvailableOnDevice")}</p> : null}
+                <label className="switch-row">
+                  <input
+                    type="checkbox"
+                    checked={view.rowMirror}
+                    onChange={(event) => updateView(view.id, { rowMirror: event.target.checked })}
+                  />
+                  <span>{t("rowMirror")}</span>
+                </label>
+                <label className="switch-row">
+                  <input
+                    type="checkbox"
+                    checked={view.colMirror}
+                    onChange={(event) => updateView(view.id, { colMirror: event.target.checked })}
+                  />
+                  <span>{t("colMirror")}</span>
+                </label>
+                <span className="viz-card-shape" title={t("matrixShape")}>{matrix.rows} × {matrix.cols}</span>
               </div>
 
-              <div className="visualization-overview-grid compact-visualization-metrics">
-                <div className="metric visualization-metric">
-                  <div className="metric-label">{t("samples")}</div>
-                  <div className="metric-value">{item?.sn ?? "-"}</div>
+              {profile ? (
+                <label className="viz-card-dot-size">
+                  <span>{t("dotSize")}: {dotSize.toFixed(2)}×</span>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="4"
+                    step="0.25"
+                    value={dotSize}
+                    onChange={(event) => updateView(view.id, { dotSize: Number(event.target.value) || 1 })}
+                  />
+                </label>
+              ) : null}
+              {hasEnabledCalibration ? <p className="service-muted viz-card-hint">{t("calibratedRangeHint")}</p> : null}
+              {!hasEnabledCalibration && hasCalibrationLevels ? <p className="service-muted viz-card-hint">{t("calibrationAvailableOnDevice")}</p> : null}
+
+              <dl className="viz-card-stats">
+                <div>
+                  <dt>{t("samples")}</dt>
+                  <dd>{item?.sn ?? "-"}</dd>
                 </div>
-                <div className="metric visualization-metric">
-                  <div className="metric-label">Device FPS</div>
-                  <div className="metric-value">{(deviceFpsByDevice[deviceUid] ?? 0).toFixed(1)}</div>
+                <div>
+                  <dt>Device FPS</dt>
+                  <dd>{(deviceFpsByDevice[deviceUid] ?? 0).toFixed(1)}</dd>
                 </div>
-                <div className="metric visualization-metric">
-                  <div className="metric-label">Render FPS</div>
-                  <div className="metric-value">{(renderFpsByDevice[deviceUid] ?? 0).toFixed(1)}</div>
+                <div>
+                  <dt>Render FPS</dt>
+                  <dd>{(renderFpsByDevice[deviceUid] ?? 0).toFixed(1)}</dd>
                 </div>
-                <div className="metric visualization-metric">
-                  <div className="metric-label">{hasEnabledCalibration ? t("maxCalibratedLevel") : "Max P"}</div>
-                  <div className="metric-value">{maxPressure.toFixed(2)}</div>
+                <div>
+                  <dt>{hasEnabledCalibration ? t("maxCalibratedLevel") : "Max P"}</dt>
+                  <dd>{maxPressure.toFixed(2)}</dd>
                 </div>
-                <div className="metric visualization-metric visualization-vector-metric">
-                  <div className="metric-label">Gyro</div>
-                  <div className="metric-value small-value">{formatVector(item?.gyro ?? item?.imu?.gyro)}</div>
+                <div>
+                  <dt>Gyro</dt>
+                  <dd>{formatVector(item?.gyro ?? item?.imu?.gyro)}</dd>
                 </div>
-                <div className="metric visualization-metric visualization-vector-metric">
-                  <div className="metric-label">Acc</div>
-                  <div className="metric-value small-value">{formatVector(item?.acc ?? item?.imu?.acc)}</div>
+                <div>
+                  <dt>Acc</dt>
+                  <dd>{formatVector(item?.acc ?? item?.imu?.acc)}</dd>
                 </div>
                 {showCop ? (
-                  <div className={`cop-mini-card ${cop.hasData ? "has-data" : ""}`}>
-                    <div className="metric-label">COP</div>
-                    <div className="cop-mini-board">
-                      <div className="cop-mini-placeholder">--</div>
-                      <div
-                        className="cop-mini-dot"
-                        style={{
-                          left: `${cop.xRatio * 100}%`,
-                          top: `${cop.yRatio * 100}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="cop-mini-values">
-                      <span>X {cop.hasData ? cop.x.toFixed(2) : "--"}</span>
-                      <span>Y {cop.hasData ? cop.y.toFixed(2) : "--"}</span>
-                    </div>
+                  <div className={`viz-card-cop${cop.hasData ? " has-data" : ""}`}>
+                    <dt>COP</dt>
+                    <dd>
+                      <span className="cop-mini-board">
+                        <span className="cop-mini-placeholder">--</span>
+                        <span
+                          className="cop-mini-dot"
+                          style={{
+                            left: `${cop.xRatio * 100}%`,
+                            top: `${cop.yRatio * 100}%`,
+                          }}
+                        />
+                      </span>
+                      <span>X {cop.hasData ? cop.x.toFixed(2) : "--"} · Y {cop.hasData ? cop.y.toFixed(2) : "--"}</span>
+                    </dd>
                   </div>
                 ) : null}
-              </div>
+              </dl>
 
               <div className="visualization-renderer-frame">
                 {!item ? (

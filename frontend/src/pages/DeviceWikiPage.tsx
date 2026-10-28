@@ -8,7 +8,7 @@ import { normalizeDevice, useDevicesPolling } from "../lib/device";
 
 function inlineNodes(text: string) {
   const nodes: JSX.Element[] = [];
-  const pattern = /`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g;
+  const pattern = /`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
@@ -17,6 +17,8 @@ function inlineNodes(text: string) {
     }
     if (match[1]) {
       nodes.push(<code key={`code-${match.index}`}>{match[1]}</code>);
+    } else if (match[4]) {
+      nodes.push(<strong key={`strong-${match.index}`}>{match[4]}</strong>);
     } else {
       nodes.push(
         <a key={`link-${match.index}`} href={match[3]} target="_blank" rel="noreferrer">
@@ -136,6 +138,20 @@ export function renderMarkdown(content: string) {
       continue;
     }
 
+    if (/^\d+\.\s/.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\d+\.\s/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^\d+\.\s+/, ""));
+        index += 1;
+      }
+      nodes.push(
+        <ol key={`ol-${index}`}>
+          {items.map((item, itemIndex) => <li key={itemIndex}>{inlineNodes(item)}</li>)}
+        </ol>,
+      );
+      continue;
+    }
+
     nodes.push(<p key={`p-${index}`}>{inlineNodes(trimmed)}</p>);
     index += 1;
   }
@@ -143,7 +159,8 @@ export function renderMarkdown(content: string) {
   return nodes;
 }
 
-export function DeviceWikiPage() {
+// `embedded` drops the page header so the Manual page can host the wiki as a tab.
+export function DeviceWikiPage({ embedded = false }: { embedded?: boolean }) {
   const { t, locale } = useI18n();
   const { deviceUid } = useParams();
   const { devices } = useDevicesPolling();
@@ -234,21 +251,25 @@ export function DeviceWikiPage() {
     };
   }, [selectedDevice, selectedPath, locale]);
 
+  const sourceLink = document?.github_url ? (
+    <a className="button" href={document.github_url} target="_blank" rel="noreferrer">
+      {t("wikiSource")}
+    </a>
+  ) : null;
+
   return (
     <>
-      <section className="page-header">
-        <div>
-          <h2>{t("wikiTitle")}</h2>
-          <p className="page-copy">{t("wikiCopy")}</p>
-        </div>
-        <div className="page-header-actions">
-          {document?.github_url ? (
-            <a className="button" href={document.github_url} target="_blank" rel="noreferrer">
-              {t("wikiSource")}
-            </a>
-          ) : null}
-        </div>
-      </section>
+      {embedded ? (
+        sourceLink ? <div className="manual-wiki-actions">{sourceLink}</div> : null
+      ) : (
+        <section className="page-header">
+          <div>
+            <h2>{t("wikiTitle")}</h2>
+            <p className="page-copy">{t("wikiCopy")}</p>
+          </div>
+          <div className="page-header-actions">{sourceLink}</div>
+        </section>
+      )}
 
       {errorMessage ? <p className="notice error">{errorMessage}</p> : null}
 

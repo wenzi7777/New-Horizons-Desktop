@@ -39,18 +39,20 @@ type Props = {
   ariaLabel: string;
 };
 
+// Xcode's palette, light and dark: the colours are CSS variables (styles.css,
+// --syntax-*), so a theme switch recolours the editor without rebuilding it.
 const highlight = HighlightStyle.define([
-  { tag: tags.comment, color: "#8e8e93", fontStyle: "italic" },
-  { tag: tags.keyword, color: "#ad3da4", fontWeight: "600" },
-  { tag: tags.string, color: "#c41a16" },
-  { tag: tags.number, color: "#1c00cf" },
-  { tag: tags.atom, color: "#1c00cf" },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "#326d74" },
-  { tag: tags.definition(tags.variableName), color: "#1f6b54", fontWeight: "600" },
-  { tag: tags.variableName, color: "#1d1d1f" },
-  { tag: tags.operator, color: "#6e6e73" },
-  { tag: tags.propertyName, color: "#1f6b54" },
-  { tag: [tags.bool, tags.null], color: "#ad3da4" },
+  { tag: tags.comment, color: "var(--syntax-comment)", fontStyle: "italic" },
+  { tag: tags.keyword, color: "var(--syntax-keyword)", fontWeight: "600" },
+  { tag: tags.string, color: "var(--syntax-string)" },
+  { tag: tags.number, color: "var(--syntax-number)" },
+  { tag: tags.atom, color: "var(--syntax-number)" },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--syntax-function)" },
+  { tag: tags.definition(tags.variableName), color: "var(--syntax-definition)", fontWeight: "600" },
+  { tag: tags.variableName, color: "var(--text)" },
+  { tag: tags.operator, color: "var(--text-dim)" },
+  { tag: tags.propertyName, color: "var(--syntax-definition)" },
+  { tag: [tags.bool, tags.null], color: "var(--syntax-keyword)" },
 ]);
 
 const theme = EditorView.theme({
@@ -69,7 +71,7 @@ const theme = EditorView.theme({
     backgroundColor: "rgba(31, 107, 84, 0.18)",
   },
   ".cm-tooltip": { borderRadius: "8px", border: "1px solid var(--line-strong)", boxShadow: "var(--shadow-md)" },
-  ".cm-tooltip-autocomplete ul li[aria-selected]": { backgroundColor: "var(--accent)", color: "#fff" },
+  ".cm-tooltip-autocomplete ul li[aria-selected]": { backgroundColor: "var(--accent)", color: "var(--on-accent)" },
   ".cm-sdk-marked": { backgroundColor: "rgba(255, 204, 0, 0.18)" },
 });
 

@@ -97,7 +97,7 @@ class VisualizationPageStaticTest(unittest.TestCase):
         self.assertIn("supportsBatteryPercentageIndicator", source)
         # The reading rides in the card header, alongside the live/offline pill.
         self.assertIn("<DeviceBatteryChip readout={batteryReadout} t={t} />", source)
-        header = source.split('className="actions compact-actions"', 1)[1]
+        header = source.split('className="viz-card-actions"', 1)[1]
         self.assertLess(header.index("DeviceBatteryChip"), header.index("stopRecording"))
 
     def test_low_battery_alarm_survives_reduced_motion(self):

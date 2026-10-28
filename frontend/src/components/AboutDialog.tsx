@@ -57,8 +57,8 @@ export function AboutDialog({ version, onClose }: AboutDialogProps) {
       <div className="modal-panel about-panel" onClick={(e) => e.stopPropagation()}>
         <div className="about-identity">
           <div className="about-product">
-            <h3 id="about-title">New Horizons OS</h3>
-            <small>{t("appTitle")} {version}</small>
+            <h3 id="about-title">NH Console</h3>
+            <small>{version}</small>
           </div>
           <p className="about-lab">{LAB_NAME}</p>
           <div className="about-university">

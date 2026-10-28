@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NHOS Console</title>
+    <script>
+      // The theme last shown (src/lib/theme.tsx), set before the first paint.
+      try {
+        document.documentElement.dataset.theme = localStorage.getItem("nh-theme-last") === "dark" ? "dark" : "light";
+      } catch (error) {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

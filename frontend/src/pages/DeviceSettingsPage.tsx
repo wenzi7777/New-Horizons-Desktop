@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { api, type PressureCalReadings, type PressureCalServerPreset } from "../lib/api";
@@ -20,7 +20,7 @@ import { DeviceClockCard } from "../components/DeviceClockCard";
 import { DeviceHealthCard } from "../components/DeviceHealthCard";
 import { ScanHealthCard } from "../components/ScanHealthCard";
 import { compareVersionCores, normalizeUpdateChannel, waitingForStableToCatchUp, type UpdateChannel } from "../lib/versioning";
-import { Battery, CircleOff, Lightbulb, Power, TriangleAlert } from "lucide-react";
+import { Battery, Check, CircleOff, Lightbulb, Power, TriangleAlert, X } from "lucide-react";
 
 // Spike-validated (firmware/spikes/README.md's "PHY rate config" section,
 // 2026-08-06: raw ADC off + 40fps ran clean at 0% loss over ESP-NOW once
@@ -41,19 +41,23 @@ const EXTERNAL_LED_BRIGHTNESS_OPTIONS = [
   { value: 0.5, labelKey: "brightnessOption_50" },
   { value: 1, labelKey: "brightnessOption_100_danger" },
 ] as const;
-const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["overview", "hardware", "action_button", "runtime", "diagnostics", "files", "experimental"];
+const STATUS_DRIVEN_SECTIONS: SettingsSection[] = ["overview", "hardware", "runtime", "update", "diagnostics", "files", "experimental"];
 
 type SettingsSection =
   | "overview"
   | "hardware"
   | "action_button"
   | "runtime"
+  | "update"
   | "clock"
   | "maintenance"
   | "diagnostics"
   | "files"
   | "apps"
   | "experimental";
+
+// How long a result toast stays up; its bottom bar runs down over the same time.
+const TOAST_MS = 3200;
 
 type OperationLogEntry = {
   id: number;
@@ -63,6 +67,16 @@ type OperationLogEntry = {
   ok: boolean;
   time: string;
 };
+
+// The toast's second line. A result that only echoes the command or a bare
+// status word ("status", "ok") says nothing the icon does not, so it reads
+// "Done" instead; failures always show what came back.
+function toastDetail(entry: OperationLogEntry, t: (key: string) => string) {
+  const message = entry.message.trim();
+  const echo = [entry.command, entry.label, "ok", "success"].some((word) => word && message.toLowerCase() === word.toLowerCase());
+  if (entry.ok && (!message || echo)) return t("toastDone");
+  return message;
+}
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -161,12 +175,28 @@ function Metric({ label, value, small = false }: { label: string; value: unknown
   );
 }
 
-function DetailBox({ label, value }: { label: string; value: unknown }) {
+// Facts read from the device: label on the left, value on the right.
+function FactList({ items }: { items: [string, unknown][] }) {
   return (
-    <div>
-      <span>{label}</span>
-      <strong>{stringValue(value)}</strong>
-    </div>
+    <dl className="settings-facts">
+      {items.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{stringValue(value)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+// Raw readings and rarely changed settings, one click away so the main
+// controls stay readable.
+function MoreDetails({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <details className="settings-more">
+      <summary>{label}</summary>
+      <div className="settings-more-body">{children}</div>
+    </details>
   );
 }
 
@@ -1098,6 +1128,8 @@ export function DeviceSettingsPage() {
   const [manifestUrl, setManifestUrl] = useState(() => (otaChannelSupported ? "" : manifestUrlForHardwareModel(normalized?.hardwareModel)));
   const [showCustomManifest, setShowCustomManifest] = useState(false);
   const [confirmBetaChannel, setConfirmBetaChannel] = useState(false);
+  // Restart and Clear logs ask first; one dialog serves both.
+  const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; confirmLabel: string; action: () => void } | null>(null);
   const [autoOtaOnBoot, setAutoOtaOnBoot] = useState(otaConfig.auto_apply_on_boot === true);
   const [updateChangelogVisible, setUpdateChangelogVisible] = useState(false);
   const [updateChangelogBody, setUpdateChangelogBody] = useState("");
@@ -1203,20 +1235,19 @@ export function DeviceSettingsPage() {
   }
   const findme = recordValue(busyCommand && stringValue(lastAttachedFindmeRef.current.state, "") === "attached" ? lastAttachedFindmeRef.current : rawFindme);
 
-  const baseSections: { id: SettingsSection; label: string }[] = [
+  // Most used first. Action Button and Clock have no tab of their own: they
+  // are shown inside Hardware and Streaming (renderActiveSection).
+  const sections: { id: SettingsSection; label: string }[] = [
     { id: "overview", label: t("settingsSection_overview") },
+    { id: "maintenance", label: t("settingsSection_maintenance") },
+    { id: "apps", label: t("settingsSection_apps") },
     { id: "hardware", label: t("settingsSection_hardware") },
     { id: "runtime", label: t("settingsSection_runtime") },
-    { id: "clock", label: t("settingsSection_clock") },
-    { id: "maintenance", label: t("settingsSection_maintenance") },
+    { id: "update", label: t("settingsSection_update") },
     { id: "diagnostics", label: t("settingsSection_diagnostics") },
     { id: "files", label: t("settingsSection_files") },
-    { id: "apps", label: t("settingsSection_apps") },
     { id: "experimental", label: t("settingsSection_experimental") },
   ];
-  const sections = boardProfile.supportsActionButtonSettings
-    ? [...baseSections.slice(0, 2), { id: "action_button" as const, label: t("settingsSection_actionButton") }, ...baseSections.slice(2)]
-    : baseSections;
   const actionButtonDraftDirty = actionButtonShortPress !== (actionButton.shortPress ?? "none") ||
     actionButtonLongPress !== (actionButton.longPress ?? "soft_off");
 
@@ -1397,7 +1428,7 @@ export function DeviceSettingsPage() {
     toastTimerRef.current = window.setTimeout(() => {
       setOperationToast(null);
       toastTimerRef.current = 0;
-    }, 3200);
+    }, TOAST_MS);
   }
 
   function dismissOperationToast() {
@@ -1811,39 +1842,41 @@ export function DeviceSettingsPage() {
     await run(t("saveActionButton"), buildActionButtonCommand(actionButtonShortPress, actionButtonLongPress));
   }
 
-  function renderSection() {
-    if (activeSection === "overview") {
+  // Streaming also carries the clock, shown under it. (Hardware renders the
+  // v1.5.F Action Button itself, between power and the lights.)
+  function renderActiveSection() {
+    if (activeSection === "runtime") {
+      return (
+        <div className="settings-stack">
+          {renderSection("runtime")}
+          {renderSection("clock")}
+        </div>
+      );
+    }
+    return renderSection(activeSection);
+  }
+
+  function renderSection(section: SettingsSection) {
+    if (section === "overview") {
+      const connectionSummary = hubRelayed
+        ? t("deviceViaHubLong")
+        : device?.client_type === "gateway" || findme.gateway_id
+          ? t("deviceViaGatewayLong")
+          : t("offline");
+      const relayId = hubRelayed ? device?.gateway_id : findme.gateway_id;
       return (
         <div className="settings-stack">
           <div className="settings-detail-header">
             <div>
               <h3>{t("settingsSection_overview")}</h3>
-              <p>{normalized?.displayName ?? deviceUid}</p>
             </div>
-            <div className="actions compact">
-              <button className="button primary" type="button" disabled={isCommandBusy("status") || !deviceUid || isControlUnavailable} onClick={() => void run(t("refreshStatus"), { command: "status" })}>
-                {isCommandBusy("status") ? t("running") : t("refreshStatus")}
-              </button>
-              <button className="button danger" type="button" disabled={isCommandBusy("reboot") || !deviceUid} onClick={() => void run("Reboot", { command: "reboot" })}>
-                {isCommandBusy("reboot") ? t("running") : "Reboot"}
-              </button>
-              <button className="button danger" type="button" disabled={isCommandBusy("reboot_wifi_setup") || !deviceUid || isControlUnavailable} onClick={() => setShowWifiSetupRebootModal(true)}>
-                {isCommandBusy("reboot_wifi_setup") ? t("running") : t("rebootWifiSetup")}
-              </button>
-            </div>
+            <button className="button" type="button" disabled={isCommandBusy("status") || !deviceUid || isControlUnavailable} onClick={() => void run(t("refreshStatus"), { command: "status" })}>
+              {isCommandBusy("status") ? t("running") : t("refreshStatus")}
+            </button>
           </div>
-          <div className="settings-detail-grid">
-            <DetailBox label={t("deviceUid")} value={deviceUid} />
-            <DetailBox label={t("deviceName")} value={normalized?.displayName ?? "-"} />
-            <DetailBox label={t("mode")} value={connectionLabel} />
-            <DetailBox label={t("firmwareVersion")} value={normalized?.firmwareVersion ?? "-"} />
-            <DetailBox label={t("protocol")} value={normalized?.protocol ?? "-"} />
-            <DetailBox label={t("hardwareModel")} value={normalized?.hardwareModel ? displayHardwareModel(normalized.hardwareModel) : "-"} />
-            <DetailBox label={t("matrixShape")} value={normalized?.matrixShape ?? "-"} />
-            <DetailBox label={t("lastSeen")} value={normalized?.lastSeen ?? "-"} />
-          </div>
-          <div className="settings-card battery-overview-card">
-            <div className="battery-overview-reading">
+
+          <div className="settings-hero">
+            <div className="settings-hero-item">
               <div className="battery-overview-icon" aria-hidden={batteryIndicator ? undefined : true}>
                 {batteryIndicator ? (
                   <BatteryStatusIndicator
@@ -1853,163 +1886,300 @@ export function DeviceSettingsPage() {
                   />
                 ) : <Battery size={24} />}
               </div>
-              <div aria-hidden={batteryIndicator ? true : undefined}>
-                <span>{t("battery")}</span>
+              <div>
                 <strong>{battery.socPercent === null ? t("batteryUnknown") : `${Math.round(battery.socPercent)}%`}</strong>
+                <span>
+                  {batteryTimeEstimate.kind === "remaining" ? `${t("batteryEstimatedRemaining")} · ${durationLabel(batteryTimeEstimate.minutes)}` : null}
+                  {batteryTimeEstimate.kind === "until_full" ? `${t("batteryEstimatedUntilFull")} · ${durationLabel(batteryTimeEstimate.minutes)}` : null}
+                  {batteryTimeEstimate.kind === "full" ? t("batteryFull") : null}
+                  {batteryTimeEstimate.kind === "unavailable" ? t("battery") : null}
+                </span>
               </div>
             </div>
-            <div className="battery-overview-estimate">
-              {batteryTimeEstimate.kind === "remaining" ? `${t("batteryEstimatedRemaining")} · ${durationLabel(batteryTimeEstimate.minutes)}` : null}
-              {batteryTimeEstimate.kind === "until_full" ? `${t("batteryEstimatedUntilFull")} · ${durationLabel(batteryTimeEstimate.minutes)}` : null}
-              {batteryTimeEstimate.kind === "full" ? t("batteryFull") : null}
-              {batteryTimeEstimate.kind === "unavailable" ? t("batteryEstimateUnavailable") : null}
+            <div className="settings-hero-item">
+              <span className={`settings-status-dot${isControlUnavailable ? "" : " online"}`} aria-hidden="true" />
+              <div>
+                <strong>{connectionSummary}</strong>
+                <span>{relayId ? `${relayId} · ` : ""}{t("lastSeen")}: {normalized?.lastSeen ?? "-"}</span>
+              </div>
             </div>
           </div>
+
+          <FactList
+            items={[
+              [t("hardwareModel"), normalized?.hardwareModel ? displayHardwareModel(normalized.hardwareModel) : "-"],
+              [t("firmwareVersion"), normalized?.firmwareVersion ?? "-"],
+              [t("matrixShape"), normalized?.matrixShape ?? "-"],
+              [t("protocol"), normalized?.protocol ?? "-"],
+              [t("deviceUid"), deviceUid],
+            ]}
+          />
+
           <div className="settings-card">
-            <div className="settings-detail-header">
-              <div>
-                <h3>{t("deviceGrouping")}</h3>
-                <p>{t("deviceCustomGroup")}</p>
-              </div>
-            </div>
-            <div className="field-grid">
-              <div className="field">
-                <label>{t("deviceCustomGroup")}</label>
-                <input value={deviceGroupDraft} onChange={(event) => setDeviceGroupDraft(event.target.value)} placeholder={t("deviceCustomGroup")} />
-              </div>
-            </div>
-            <div className="settings-detail-grid compact">
-              <DetailBox label={t("deviceCustomGroup")} value={device?.device_group ?? "-"} />
-            </div>
-            <div className="actions compact">
-              <button className="button primary" type="button" disabled={!deviceUid || deviceGroupSaving} onClick={() => void persistDeviceGroup(deviceGroupDraft)}>
+            <h4>{t("deviceGrouping")}</h4>
+            <p>{t("deviceGroupingCopy")}</p>
+            <div className="settings-inline-form">
+              <input
+                value={deviceGroupDraft}
+                onChange={(event) => setDeviceGroupDraft(event.target.value)}
+                placeholder={t("deviceCustomGroup")}
+                aria-label={t("deviceCustomGroup")}
+              />
+              <button
+                className="button primary"
+                type="button"
+                disabled={!deviceUid || deviceGroupSaving || deviceGroupDraft.trim() === String(device?.device_group ?? "")}
+                onClick={() => void persistDeviceGroup(deviceGroupDraft)}
+              >
                 {deviceGroupSaving ? t("running") : t("saveDeviceGroup")}
               </button>
-              <button className="button" type="button" disabled={!deviceUid || deviceGroupSaving || (!device?.device_group && !deviceGroupDraft.trim())} onClick={() => void persistDeviceGroup("")}>
-                {t("clearDeviceGroup")}
-              </button>
+              {device?.device_group ? (
+                <button className="button ghost" type="button" disabled={!deviceUid || deviceGroupSaving} onClick={() => void persistDeviceGroup("")}>
+                  {t("clearDeviceGroup")}
+                </button>
+              ) : null}
             </div>
           </div>
-          {hubRelayed ? (
-          // ESP-NOW devices do not use FindMe; show the Hub link instead of
-          // FindMe fields that are always empty (or stale) in this mode.
+
           <div className="settings-card">
-            <div className="settings-detail-header">
-              <div>
-                <h3>{t("hubLinkTitle")}</h3>
+            {hubRelayed ? (
+              // ESP-NOW devices do not use FindMe; the Hub link replaces it.
+              <>
+                <h4>{t("hubLinkTitle")}</h4>
                 <p>{t("hubLinkCopy")}</p>
-              </div>
-            </div>
-            <div className="settings-detail-grid">
-              <DetailBox label={t("hubLinkHub")} value={device?.gateway_id || "-"} />
-              <DetailBox
-                label={t("hubLinkState")}
-                value={isControlUnavailable ? t("offline") : t("hubOnline")}
-              />
-              <DetailBox label={t("transport")} value="ESP-NOW" />
-              <DetailBox label={t("connectedVia")} value={t("deviceViaHubLong")} />
-              <DetailBox label={t("lastSeen")} value={normalized?.lastSeen ?? "-"} />
-            </div>
+                <FactList
+                  items={[
+                    [t("hubLinkHub"), device?.gateway_id || "-"],
+                    [t("hubLinkState"), isControlUnavailable ? t("offline") : t("hubOnline")],
+                    [t("transport"), "ESP-NOW"],
+                  ]}
+                />
+              </>
+            ) : (
+              <>
+                <div className="settings-detail-header">
+                  <div>
+                    <h4>{t("gatewayTitle")}</h4>
+                    <p>{t("gatewayCopy")}</p>
+                  </div>
+                  <button className="button" type="button" disabled={isCommandBusy("findme_discover") || !deviceUid || isControlUnavailable} onClick={() => void run("FindMe", { command: "findme_discover" }, 15000)}>
+                    {isCommandBusy("findme_discover") ? t("running") : t("rediscoverGateway")}
+                  </button>
+                </div>
+                <FactList
+                  items={[
+                    [t("gatewayId"), findme.gateway_id ?? "-"],
+                    [t("gatewayHost"), findme.host ? `${stringValue(findme.host)}${findme.udp_port ? `:${stringValue(findme.udp_port)}` : ""}` : "-"],
+                    [t("gatewaySource"), findme.state ?? "-"],
+                  ]}
+                />
+                {findme.last_error ? <p className="notice error">{stringValue(findme.last_error)}</p> : null}
+                <MoreDetails label={t("settingsDetails")}>
+                  <FactList
+                    items={[
+                      [t("transport"), device?.transport_path ?? status.transport_path ?? "-"],
+                      [t("heartbeat"), findme.last_heartbeat_at ?? device?.last_heartbeat_at ?? status.last_heartbeat_at ?? "-"],
+                      [t("heartbeatInterval"), findme.heartbeat_interval_ms ?? "-"],
+                      [t("gatewayLastSuccess"), findme.last_success_ms ?? "-"],
+                    ]}
+                  />
+                </MoreDetails>
+              </>
+            )}
           </div>
-          ) : (
-          <div className="settings-card">
-            <div className="settings-detail-header">
-              <div>
-              <h3>{t("gatewayTitle")}</h3>
-              <p>{t("gatewayCopy")}</p>
-              </div>
-              <button className="button primary" type="button" disabled={isCommandBusy("findme_discover") || !deviceUid || isControlUnavailable} onClick={() => void run("FindMe", { command: "findme_discover" }, 15000)}>
-                {isCommandBusy("findme_discover") ? t("running") : t("rediscoverGateway")}
+
+          <div className="settings-card settings-danger-zone">
+            <h4>{t("restartTitle")}</h4>
+            <p>{t("restartCopy")}</p>
+            <div className="actions compact">
+              <button
+                className="button"
+                type="button"
+                disabled={isCommandBusy("reboot") || !deviceUid}
+                onClick={() => setPendingConfirm({
+                  title: t("rebootConfirmTitle"),
+                  message: t("rebootConfirmMessage"),
+                  confirmLabel: t("rebootDevice"),
+                  action: () => void run(t("rebootDevice"), { command: "reboot" }).catch(() => undefined),
+                })}
+              >
+                {isCommandBusy("reboot") ? t("running") : t("rebootDevice")}
+              </button>
+              <button className="button" type="button" disabled={isCommandBusy("reboot_wifi_setup") || !deviceUid || isControlUnavailable} onClick={() => setShowWifiSetupRebootModal(true)}>
+                {isCommandBusy("reboot_wifi_setup") ? t("running") : t("rebootWifiSetup")}
               </button>
             </div>
-            <div className="settings-detail-grid">
-              <DetailBox label={t("gatewaySource")} value={findme.state ?? "-"} />
-              <DetailBox label={t("gatewayId")} value={findme.gateway_id ?? "-"} />
-              <DetailBox label={t("gatewayHost")} value={findme.host ?? "-"} />
-              <DetailBox label={t("gatewayUdpPort")} value={findme.udp_port ?? "-"} />
-              <DetailBox label={t("transport")} value={device?.transport_path ?? status.transport_path ?? "-"} />
-              <DetailBox
-                label={t("connectedVia")}
-                value={
-                  device?.client_type === "hub"
-                    ? t("deviceViaHubLong")
-                    : device?.client_type === "gateway"
-                      ? t("deviceViaGatewayLong")
-                      : "-"
-                }
-              />
-              <DetailBox label={t("heartbeat")} value={findme.last_heartbeat_at ?? device?.last_heartbeat_at ?? status.last_heartbeat_at ?? "-"} />
-              <DetailBox label={t("heartbeatInterval")} value={findme.heartbeat_interval_ms ?? "-"} />
-              <DetailBox label={t("gatewayLastSuccess")} value={findme.last_success_ms ?? "-"} />
-              <DetailBox label={t("gatewayLastError")} value={findme.last_error ?? "-"} />
-            </div>
           </div>
-          )}
         </div>
       );
     }
 
-    if (activeSection === "hardware") {
+    if (section === "hardware") {
       return (
         <div className="settings-stack">
           <div className="settings-detail-header">
             <div>
               <h3>{t("settingsSection_hardware")}</h3>
-              <p>{pinLayoutCopy} {t("matrixShape")}: {normalized?.matrixShape ?? "-"}</p>
-            </div>
-            <button className="button" type="button" onClick={() => setShowIoModal(true)}>
-              {t("ioConfigOpen")}
-            </button>
-          </div>
-          <div className="settings-card">
-            <h4>{t("settingsSection_pins")}</h4>
-            <div className="field-grid">
-              <div className="field">
-                <label>{t("analogPins")}</label>
-                <input value={analogPins} onChange={(event) => { setPinDraftDirty(true); setAnalogPins(event.target.value); }} />
-              </div>
-              <div className="field">
-                <label>{t("selectPins")}</label>
-                <input value={selectPins} onChange={(event) => { setPinDraftDirty(true); setSelectPins(event.target.value); }} />
-              </div>
-            </div>
-            <div className="actions">
-              <button className="button primary" type="button" disabled={isCommandBusy("set_matrix_layout") || !deviceUid} onClick={() => void applyPinLayout()}>
-                {isCommandBusy("set_matrix_layout") ? t("running") : t("applyPinLayout")}
-              </button>
             </div>
           </div>
+
+          {boardProfile.supportsChargeControl ? (
+            <div className="settings-card">
+              <h4>{t("batteryStatus")}</h4>
+              <FactList
+                items={[
+                  [t("batterySoc"), batteryGaugeSyncing ? t("batteryGaugeSyncing") : batteryGaugeSyncFailed ? t("batteryGaugeSyncFailed") : battery.socPercent === null ? t("batteryUnknown") : `${battery.socPercent}%`],
+                  [t("battery"), batteryStatus.state ?? t("batteryUnknown")],
+                  [t("batteryVoltageMv"), battery.vbatMv ?? t("batteryUnknown")],
+                  [t("chargerDetected"), boolString(batteryStatus.charger_detected ?? batteryStatus.detected)],
+                ]}
+              />
+              <div className="settings-subsection">
+                <div>
+                  <h5>{t("chargeProfile")}</h5>
+                  <p className="service-muted">{t("chargeProfileCopy")}</p>
+                </div>
+                <div className="settings-inline-form">
+                  <select value={chargeProfile} onChange={(event) => setChargeProfile(event.target.value)} aria-label={t("chargeProfile")}>
+                    <option value="ultra_slow">{t("ultraSlowChargingMode")}</option>
+                    <option value="slow">{t("slowChargingMode")}</option>
+                    <option value="balanced">{t("balancedChargingMode")}</option>
+                    <option value="fast">{t("fastChargingMode")}</option>
+                    <option value="extreme">{t("extremeChargingMode")}</option>
+                  </select>
+                  <button className="button primary" type="button" disabled={isCommandBusy("set_charge_profile") || !deviceUid || chargeProfile === batteryStatus.profile} onClick={() => void applyChargeProfile()}>
+                    {isCommandBusy("set_charge_profile") ? t("running") : t("saveChargeProfile")}
+                  </button>
+                </div>
+              </div>
+                {boardProfile.supportsBatteryPercentageIndicator ? (
+                  <div className="settings-subsection">
+                    <div>
+                      <h4>{t("batterySetup")}</h4>
+                      <p className="service-muted">{t("batterySetupCopy")}</p>
+                    </div>
+                    {batteryProfileSetupRequired(batteryStatus) ? <p className="notice">{t("batteryProfileSetupNotice")}</p> : null}
+                    <div className="field-grid">
+                      <div className="field"><label>{t("batteryCapacityMah")}</label><select value={batteryCapacityChoice} onChange={(event) => setBatteryCapacityChoice(event.target.value as "200" | "400" | "custom")}><option value="200">200mAh</option><option value="400">400mAh</option><option value="custom">{t("batteryCapacityCustom")}</option></select></div>
+                      {batteryCapacityChoice === "custom" ? <div className="field"><label>{t("batteryCapacityCustom")}</label><input type="number" min="1" value={customBatteryCapacity} onChange={(event) => setCustomBatteryCapacity(event.target.value)} /></div> : null}
+                      <div className="field"><label>{t("batteryMaxChargeCurrent")}</label><input type="number" min="100" max="350" step="10" value={maxBatteryChargeCurrent} onChange={(event) => setMaxBatteryChargeCurrent(event.target.value)} /></div>
+                    </div>
+                    {batteryProfileDraftError ? <p className="notice error">{t("batteryProfileInvalid")}</p> : null}
+                    <div className="actions compact">
+                      <button className="button primary" type="button" disabled={isCommandBusy("set_battery_profile") || !deviceUid || batteryProfileDraftError !== null} onClick={() => void applyBatteryProfile()}>{isCommandBusy("set_battery_profile") ? t("running") : t("saveBatteryProfile")}</button>
+                    </div>
+                  </div>
+                ) : null}
+                {batteryLedSupported ? (
+                  <div className="settings-subsection">
+                    <div>
+                      <h4>{t("batteryLedWarning")}</h4>
+                      <p className="service-muted">{t("batteryLedWarningCopy")}</p>
+                    </div>
+                    <div className="field-grid">
+                      <div className="field">
+                        <label>{t("batteryLedThreshold")}</label>
+                        <input type="number" min="0" max="25" step="1" value={lowBatteryThresholdPercent} onChange={(event) => setLowBatteryThresholdPercent(event.target.value)} />
+                      </div>
+                    </div>
+                    {batteryLedThresholdDraftError ? <p className="notice error">{t("batteryLedThresholdInvalid")}</p> : null}
+                    <div className="actions compact">
+                      <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid || batteryLedThresholdDraftError !== null} onClick={() => void applyBatteryLedThreshold()}>
+                        {isCommandBusy("set_indicators") ? t("running") : t("saveBatteryLedWarning")}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              {batteryGaugeSyncing ? <p className="notice">{t("batteryGaugeSyncing")}</p> : null}
+              {batteryGaugeSyncFailed ? <p className="notice error">{t("batteryGaugeSyncFailed")}</p> : null}
+              <MoreDetails label={t("settingsDetails")}>
+                <FactList
+                  items={[
+                    [t("batteryRate"), battery.ratePercentPerHour === null ? t("batteryUnknown") : `${battery.ratePercentPerHour}%/h`],
+                    [t("batteryPresent"), battery.batteryPresent === null ? t("batteryUnknown") : boolString(battery.batteryPresent)],
+                    [t("batteryGaugeSyncState"), battery.syncState ?? t("batteryUnknown")],
+                    ...(boardProfile.supportsBatteryPercentageIndicator
+                      ? [
+                        [t("batteryCapacityMah"), battery.profileResolved === false ? t("batteryNotSet") : battery.capacityMah ?? t("batteryUnknown")] as [string, unknown],
+                        [t("batteryMaxChargeCurrent"), battery.maxChargeCurrentMa ?? t("batteryUnknown")] as [string, unknown],
+                      ]
+                      : []),
+                    [t("batteryThermalBypass"), battery.thermalMonitoringBypassed === null ? t("batteryUnknown") : boolString(battery.thermalMonitoringBypassed)],
+                    [t("chargeProfile"), batteryStatus.profile ?? "-"],
+                    [t("chargeCurrentMa"), batteryStatus.charge_current_ma ?? "-"],
+                    [t("inputLimitMa"), batteryStatus.input_limit_ma ?? "-"],
+                    [t("vbatRegMv"), batteryStatus.vbat_reg_mv ?? "-"],
+                    [t("safetyTimerHours"), batteryStatus.safety_timer_hours ?? "-"],
+                    [t("configured"), boolString(batteryStatus.configured)],
+                  ]}
+                />
+                {boardProfile.supportsBatteryPercentageIndicator ? (
+                  <div className="actions compact">
+                    <button className="button" type="button" disabled={batteryGaugeSyncing || isCommandBusy("resync_battery_gauge") || !deviceUid} onClick={() => void resyncBatteryGauge()}>
+                      {batteryGaugeSyncing || isCommandBusy("resync_battery_gauge") ? t("batteryGaugeSyncing") : t("resyncBatteryGauge")}
+                    </button>
+                  </div>
+                ) : null}
+              </MoreDetails>
+            </div>
+          ) : null}
+
           <div className="settings-card">
-            <h4>{t("boardLedBrightnessLabel")}</h4>
-            <p>{t("boardLedBrightnessCopy")}</p>
-            <div className="field-grid">
-              <div className="field">
-                <label>{t("paramBrightness")}</label>
-                <select value={String(boardLedBrightness)} onChange={(event) => setBoardLedBrightness(boardLedBrightnessValue(event.target.value))}>
+            <div className="settings-detail-header">
+              <div>
+                <h4>{t("powerStatus")}</h4>
+                <p>{powerStatusCopy}</p>
+              </div>
+              <div className="actions compact">
+                {powerStatus.state && powerStatus.state !== "normal" ? (
+                  <button className="button" type="button" disabled={isCommandBusy("power_set_state") || !deviceUid} onClick={() => void applyPowerState("normal")}>
+                    {isCommandBusy("power_set_state") ? t("running") : t("resumeNormalMode")}
+                  </button>
+                ) : null}
+                <button className="button" type="button" disabled={isCommandBusy("power_set_state") || !deviceUid} onClick={() => void applyPowerState("soft_off_auto")}>
+                  {isCommandBusy("power_set_state") ? t("running") : t("softOffAuto")}
+                </button>
+              </div>
+            </div>
+            <FactList
+              items={[
+                [t("powerState"), powerStatus.state ?? "-"],
+                [t("wakeSource"), powerStatus.wake_source ?? "-"],
+                [t("chargeState"), powerStatus.charge_state ?? batteryStatus.charge_state ?? "-"],
+                [t("chargerPresent"), boolString(powerStatus.charger_present)],
+                ...(powerStatus.soft_off_reason ? [[t("softOffReason"), powerStatus.soft_off_reason] as [string, unknown]] : []),
+              ]}
+            />
+          </div>
+
+          {boardProfile.supportsActionButtonSettings ? renderSection("action_button") : null}
+
+          <div className="settings-card">
+            <h4>{t("lightsAndDisplay")}</h4>
+            <div className="settings-subsection">
+              <div>
+                <h5>{t("boardLedBrightnessLabel")}</h5>
+                <p className="service-muted">{t("boardLedBrightnessCopy")}</p>
+              </div>
+              <div className="settings-inline-form">
+                <select value={String(boardLedBrightness)} onChange={(event) => setBoardLedBrightness(boardLedBrightnessValue(event.target.value))} aria-label={t("paramBrightness")}>
                   {BOARD_LED_BRIGHTNESS_OPTIONS.map((option) => (
                     <option key={option} value={option}>
                       {option === DEFAULT_BOARD_LED_BRIGHTNESS ? t("boardLedBrightnessDefault") : `${Math.round(option * 100)}%`}
                     </option>
                   ))}
                 </select>
+                <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveBoardLedBrightness"), { command: "set_indicators", board_led: { brightness: boardLedBrightness } })}>
+                  {isCommandBusy("set_indicators") ? t("running") : t("saveBoardLedBrightness")}
+                </button>
               </div>
             </div>
-            <div className="actions">
-              <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveBoardLedBrightness"), { command: "set_indicators", board_led: { brightness: boardLedBrightness } })}>
-                {isCommandBusy("set_indicators") ? t("running") : t("saveBoardLedBrightness")}
-              </button>
-            </div>
-          </div>
-          <div className="settings-card">
-            <h4>{t("externalLedIndicators")}</h4>
-            {!boardProfile.supportsExternalLed ? (
-              <>
-                <p className="notice">{t("unsupportedOnThisBoard")}</p>
-                <p className="service-muted">{t("externalLedUnsupportedCopy")}</p>
-              </>
-            ) : (
-              <>
-                <p>{t("externalLedIndicatorsCopy")}</p>
+            {boardProfile.supportsExternalLed ? (
+              <div className="settings-subsection">
+                <div>
+                  <h5>{t("externalLedIndicators")}</h5>
+                  <p className="service-muted">{t("externalLedIndicatorsCopy")}</p>
+                </div>
                 <div className="field-grid">
                   <div className="field">
                     <label>{t("externalLedMode")}</label>
@@ -2058,15 +2228,8 @@ export function DeviceSettingsPage() {
                   ) : null}
                 </div>
                 {externalLed.active_preset === "app" ? <p className="notice">{t("externalLedAppActive")}</p> : null}
-                <div className="metric-row">
-                  <Metric label={t("externalLedPin")} value={externalLed.pin ?? "-"} />
-                  <Metric label={t("externalLedCount")} value={externalLed.count ?? "-"} />
-                  <Metric label={t("externalLedInitialized")} value={boolString(externalLed.initialized)} />
-                  <Metric label={t("activePreset")} value={externalLed.active_preset === "app" ? t("indicatorPreset_app") : externalLed.active_preset ?? "-"} />
-                  <Metric label={t("externalLedLastShow")} value={externalLed.last_show_ms ?? "-"} />
-                  <Metric label={t("externalLedLastError")} value={externalLed.last_error ?? "-"} />
-                </div>
-                <div className="actions">
+                {externalLed.last_error ? <p className="notice error">{stringValue(externalLed.last_error)}</p> : null}
+                <div className="actions compact">
                   <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveExternalLed"), { command: "set_indicators", external_led: { mode: externalLedMode, preset: externalPreset, brightness, color: externalColor } })}>
                     {isCommandBusy("set_indicators") ? t("running") : t("saveExternalLed")}
                   </button>
@@ -2074,24 +2237,28 @@ export function DeviceSettingsPage() {
                     {isCommandBusy("set_indicators") ? t("running") : t("testExternalLed")}
                   </button>
                 </div>
-              </>
-            )}
-          </div>
-          <div className="settings-card">
-            <h4>{t("ssd1306Display")}</h4>
-            {!boardProfile.supportsOled ? (
-              <>
-                <p className="notice">{t("unsupportedOnThisBoard")}</p>
-                <p className="service-muted">{t("oledUnsupportedCopy")}</p>
-              </>
-            ) : (
-              <>
-                <p>{oled.detected ? t("screenDetected") : t("noSsd1306Detected")}</p>
-                <div className="metric-row">
-                  <Metric label={t("detected")} value={boolString(oled.detected)} />
-                  <Metric label={t("oledAddress")} value={oled.addr ?? "-"} />
-                  <Metric label={t("oledLastError")} value={oled.last_error ?? "-"} />
+                <MoreDetails label={t("settingsDetails")}>
+                  <FactList
+                    items={[
+                      [t("externalLedPin"), externalLed.pin ?? "-"],
+                      [t("externalLedCount"), externalLed.count ?? "-"],
+                      [t("externalLedInitialized"), boolString(externalLed.initialized)],
+                      [t("activePreset"), externalLed.active_preset === "app" ? t("indicatorPreset_app") : externalLed.active_preset ?? "-"],
+                      [t("externalLedLastShow"), externalLed.last_show_ms ?? "-"],
+                    ]}
+                  />
+                </MoreDetails>
+              </div>
+            ) : null}
+            {boardProfile.supportsOled ? (
+              <div className="settings-subsection">
+                <div>
+                  <h5>{t("ssd1306Display")}</h5>
+                  <p className="service-muted">
+                    {oled.detected ? `${t("screenDetected")}${oled.addr ? ` · ${stringValue(oled.addr)}` : ""}` : t("noSsd1306Detected")}
+                  </p>
                 </div>
+                {oled.last_error ? <p className="notice error">{stringValue(oled.last_error)}</p> : null}
                 <div className="field-grid">
                   <div className="field">
                     <label>{t("paramOledMode")}</label>
@@ -2128,143 +2295,41 @@ export function DeviceSettingsPage() {
                     </select>
                   </div>
                 </div>
-                <div className="actions">
-                  <button className="button" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveScreen"), { command: "set_indicators", oled: { mode: oledMode, page: oledPage, update_hz: oledUpdateHz, contrast: oledContrast, rotation: oledRotation } })}>
+                <div className="actions compact">
+                  <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveScreen"), { command: "set_indicators", oled: { mode: oledMode, page: oledPage, update_hz: oledUpdateHz, contrast: oledContrast, rotation: oledRotation } })}>
                     {isCommandBusy("set_indicators") ? t("running") : t("saveScreen")}
                   </button>
                 </div>
-              </>
-            )}
-          </div>
-          <div className="settings-card">
-            <h4>{t("batteryStatus")}</h4>
-            {!boardProfile.supportsChargeControl ? (
-              <>
-                <p className="notice">{t("unsupportedOnThisBoard")}</p>
-                <p className="service-muted">{t("chargeControlUnsupportedCopy")}</p>
-              </>
-            ) : (
-              <>
-                <div className="settings-detail-header">
-                  <div>
-                    <p>{t("chargeProfileCopy")}</p>
-                  </div>
-                  <button className="button primary" type="button" disabled={isCommandBusy("set_charge_profile") || !deviceUid} onClick={() => void applyChargeProfile()}>
-                    {isCommandBusy("set_charge_profile") ? t("running") : t("saveChargeProfile")}
-                  </button>
-                </div>
-              <div className="field-grid">
-                <div className="field">
-                  <label>{t("chargeProfile")}</label>
-                  <select value={chargeProfile} onChange={(event) => setChargeProfile(event.target.value)}>
-                    <option value="ultra_slow">{t("ultraSlowChargingMode")}</option>
-                    <option value="slow">{t("slowChargingMode")}</option>
-                    <option value="balanced">{t("balancedChargingMode")}</option>
-                    <option value="fast">{t("fastChargingMode")}</option>
-                    <option value="extreme">{t("extremeChargingMode")}</option>
-                  </select>
-                </div>
-                </div>
-                <div className="metric-row">
-                  <Metric label={t("battery")} value={batteryStatus.state ?? t("batteryUnknown")} />
-                  <Metric label={t("batterySoc")} value={batteryGaugeSyncing ? t("batteryGaugeSyncing") : batteryGaugeSyncFailed ? t("batteryGaugeSyncFailed") : battery.socPercent === null ? t("batteryUnknown") : `${battery.socPercent}%`} />
-                  <Metric label={t("batteryVoltageMv")} value={battery.vbatMv ?? t("batteryUnknown")} />
-                  <Metric label={t("batteryRate")} value={battery.ratePercentPerHour === null ? t("batteryUnknown") : `${battery.ratePercentPerHour}%/h`} />
-                  <Metric label={t("batteryPresent")} value={battery.batteryPresent === null ? t("batteryUnknown") : boolString(battery.batteryPresent)} />
-                  <Metric label={t("batteryGaugeSyncState")} value={battery.syncState ?? t("batteryUnknown")} />
-                  {boardProfile.supportsBatteryPercentageIndicator ? (
-                    <>
-                      <Metric label={t("batteryCapacityMah")} value={battery.profileResolved === false ? t("batteryNotSet") : battery.capacityMah ?? t("batteryUnknown")} />
-                      <Metric label={t("batteryMaxChargeCurrent")} value={battery.maxChargeCurrentMa ?? t("batteryUnknown")} />
-                    </>
-                  ) : null}
-                  <Metric label={t("batteryThermalBypass")} value={battery.thermalMonitoringBypassed === null ? t("batteryUnknown") : boolString(battery.thermalMonitoringBypassed)} />
-                  <Metric label={t("chargeProfile")} value={batteryStatus.profile ?? "-"} />
-                  <Metric label={t("chargeCurrentMa")} value={batteryStatus.charge_current_ma ?? "-"} />
-                  <Metric label={t("inputLimitMa")} value={batteryStatus.input_limit_ma ?? "-"} />
-                  <Metric label={t("vbatRegMv")} value={batteryStatus.vbat_reg_mv ?? "-"} />
-                  <Metric label={t("safetyTimerHours")} value={batteryStatus.safety_timer_hours ?? "-"} />
-                  <Metric label={t("configured")} value={boolString(batteryStatus.configured)} />
-                  <Metric label={t("chargerDetected")} value={boolString(batteryStatus.charger_detected ?? batteryStatus.detected)} />
-                </div>
-                {batteryLedSupported ? (
-                  <div className="settings-subsection">
-                    <div>
-                      <h4>{t("batteryLedWarning")}</h4>
-                      <p className="service-muted">{t("batteryLedWarningCopy")}</p>
-                    </div>
-                    <div className="field-grid">
-                      <div className="field">
-                        <label>{t("batteryLedThreshold")}</label>
-                        <input type="number" min="0" max="25" step="1" value={lowBatteryThresholdPercent} onChange={(event) => setLowBatteryThresholdPercent(event.target.value)} />
-                      </div>
-                    </div>
-                    {batteryLedThresholdDraftError ? <p className="notice error">{t("batteryLedThresholdInvalid")}</p> : null}
-                    <div className="actions compact">
-                      <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid || batteryLedThresholdDraftError !== null} onClick={() => void applyBatteryLedThreshold()}>
-                        {isCommandBusy("set_indicators") ? t("running") : t("saveBatteryLedWarning")}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-                {boardProfile.supportsBatteryPercentageIndicator ? (
-                  <div className="actions compact">
-                    <button className="button" type="button" disabled={batteryGaugeSyncing || isCommandBusy("resync_battery_gauge") || !deviceUid} onClick={() => void resyncBatteryGauge()}>
-                      {batteryGaugeSyncing || isCommandBusy("resync_battery_gauge") ? t("batteryGaugeSyncing") : t("resyncBatteryGauge")}
-                    </button>
-                  </div>
-                ) : null}
-                {batteryGaugeSyncing ? <p className="notice">{t("batteryGaugeSyncing")}</p> : null}
-                {batteryGaugeSyncFailed ? <p className="notice error">{t("batteryGaugeSyncFailed")}</p> : null}
-                {boardProfile.supportsBatteryPercentageIndicator ? (
-                  <div className="settings-subsection">
-                    <div>
-                      <h4>{t("batterySetup")}</h4>
-                      <p className="service-muted">{t("batterySetupCopy")}</p>
-                    </div>
-                    {batteryProfileSetupRequired(batteryStatus) ? <p className="notice">{t("batteryProfileSetupNotice")}</p> : null}
-                    <div className="field-grid">
-                      <div className="field"><label>{t("batteryCapacityMah")}</label><select value={batteryCapacityChoice} onChange={(event) => setBatteryCapacityChoice(event.target.value as "200" | "400" | "custom")}><option value="200">200mAh</option><option value="400">400mAh</option><option value="custom">{t("batteryCapacityCustom")}</option></select></div>
-                      {batteryCapacityChoice === "custom" ? <div className="field"><label>{t("batteryCapacityCustom")}</label><input type="number" min="1" value={customBatteryCapacity} onChange={(event) => setCustomBatteryCapacity(event.target.value)} /></div> : null}
-                      <div className="field"><label>{t("batteryMaxChargeCurrent")}</label><input type="number" min="100" max="350" step="10" value={maxBatteryChargeCurrent} onChange={(event) => setMaxBatteryChargeCurrent(event.target.value)} /></div>
-                    </div>
-                    {batteryProfileDraftError ? <p className="notice error">{t("batteryProfileInvalid")}</p> : null}
-                    <div className="actions compact">
-                      <button className="button primary" type="button" disabled={isCommandBusy("set_battery_profile") || !deviceUid || batteryProfileDraftError !== null} onClick={() => void applyBatteryProfile()}>{isCommandBusy("set_battery_profile") ? t("running") : t("saveBatteryProfile")}</button>
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
-          <div className="settings-card">
-            <div className="settings-detail-header">
-              <div>
-                <h4>{t("powerStatus")}</h4>
-                <p>{powerStatusCopy}</p>
               </div>
-              <div className="actions compact">
-                <button className="button" type="button" disabled={isCommandBusy("power_set_state") || !deviceUid} onClick={() => void applyPowerState("normal")}>
-                  {isCommandBusy("power_set_state") ? t("running") : t("resumeNormalMode")}
-                </button>
-                <button className="button primary" type="button" disabled={isCommandBusy("power_set_state") || !deviceUid} onClick={() => void applyPowerState("soft_off_auto")}>
-                  {isCommandBusy("power_set_state") ? t("running") : t("softOffAuto")}
-                </button>
+            ) : null}
+          </div>
+
+          <MoreDetails label={`${t("settingsAdvanced")} · ${t("settingsSection_pins")}`}>
+            <p className="service-muted">{pinLayoutCopy}</p>
+            <div className="field-grid">
+              <div className="field">
+                <label>{t("analogPins")}</label>
+                <input value={analogPins} onChange={(event) => { setPinDraftDirty(true); setAnalogPins(event.target.value); }} />
+              </div>
+              <div className="field">
+                <label>{t("selectPins")}</label>
+                <input value={selectPins} onChange={(event) => { setPinDraftDirty(true); setSelectPins(event.target.value); }} />
               </div>
             </div>
-            <div className="metric-row">
-              <Metric label={t("powerState")} value={powerStatus.state ?? "-"} />
-              <Metric label={t("wakeSource")} value={powerStatus.wake_source ?? "-"} />
-              <Metric label={t("softOffReason")} value={powerStatus.soft_off_reason ?? "-"} small />
-              <Metric label={t("chargerPresent")} value={boolString(powerStatus.charger_present)} />
-              <Metric label={t("chargeState")} value={powerStatus.charge_state ?? batteryStatus.charge_state ?? "-"} />
+            <div className="actions compact">
+              <button className="button primary" type="button" disabled={isCommandBusy("set_matrix_layout") || !deviceUid} onClick={() => void applyPinLayout()}>
+                {isCommandBusy("set_matrix_layout") ? t("running") : t("applyPinLayout")}
+              </button>
+              <button className="button" type="button" onClick={() => setShowIoModal(true)}>
+                {t("ioConfigOpen")}
+              </button>
             </div>
-          </div>
+          </MoreDetails>
         </div>
       );
     }
 
-    if (activeSection === "action_button") {
+    if (section === "action_button") {
       const actionIcon = (action: ActionButtonAction) => {
         if (action === "soft_off") return <Power aria-hidden="true" size={20} />;
         if (action === "identify") return <Lightbulb aria-hidden="true" size={20} />;
@@ -2298,10 +2363,10 @@ export function DeviceSettingsPage() {
       );
 
       return (
-        <div className="settings-stack action-button-settings">
+        <div className="settings-card action-button-settings">
           <div className="settings-detail-header">
             <div>
-              <h3>{t("settingsSection_actionButton")}</h3>
+              <h4>{t("settingsSection_actionButton")}</h4>
               <p>{t("actionButtonPageCopy")}</p>
             </div>
           </div>
@@ -2347,7 +2412,11 @@ export function DeviceSettingsPage() {
       );
     }
 
-    if (activeSection === "runtime") {
+    if (section === "runtime") {
+      const deviceFps = numberValue(authoritativeScanTiming.target_fps ?? scanHealth.requested_target_fps, 0);
+      const deviceSettle = numberValue(authoritativeScanTiming.settle_us ?? scanHealth.settle_us, 0);
+      const deviceEvery = numberValue(authoritativeScanTiming.send_every_n_frames ?? scanHealth.send_every_n_frames, 0);
+      const scanDraftDiffers = deviceFps > 0 && (deviceFps !== targetFps || deviceSettle !== settleUs || deviceEvery !== sendEveryNFrames);
       return (
         <div className="settings-stack">
           <div className="settings-detail-header">
@@ -2357,83 +2426,153 @@ export function DeviceSettingsPage() {
             </div>
           </div>
           <div className="settings-card">
-            <div className="settings-detail-header">
-              <div>
-                <h4>{t("settingsSection_update")}</h4>
-                <p>{otaChannelSupported ? t("updateChannelCopy") : "Arduino whole-firmware OTA manifest."}</p>
-              </div>
-              <div className="actions compact">
-                <button className="button" type="button" disabled={isCommandBusy("check_update") || !deviceUid} onClick={() => void run("Check update", updateCommand("check_update"), 30000)}>
-                  {isCommandBusy("check_update") ? t("running") : "Check"}
+            <h4>{t("scanPerformance")}</h4>
+            <p>{t("scanPerformanceCopy")}</p>
+              <div className="segmented-control">
+                <button className={targetFps === 60 ? "active" : ""} type="button" onClick={() => applyScanPreset(60)}>
+                  {t("standardFps")}
                 </button>
-                <button className="button primary" type="button" disabled={isCommandBusy("apply_update") || !deviceUid} onClick={() => void run("Apply update", updateCommand("apply_update"), 90000)}>
-                  {isCommandBusy("apply_update") ? t("running") : "Apply"}
+                <button className={targetFps === 90 ? "active" : ""} type="button" onClick={() => applyScanPreset(90)}>
+                  {t("extendedFps")}
+                </button>
+                <button
+                  className={`${targetFps === DIRECT_STABILITY_FPS ? "active" : ""}${isHubRelayed(device) ? " recommended" : ""}`}
+                  type="button"
+                  onClick={() => void applyDirectStabilityPreset()}
+                >
+                  {t("directStabilityMode")}
+                  {isHubRelayed(device) ? <small>{t("directStabilityModeRecommended")}</small> : null}
                 </button>
               </div>
-            </div>
-            {otaChannelSupported ? (
-              <>
+            <p className="service-muted">
+              {t("effectiveSendFps")}: ≈ {Math.round(targetFps / Math.max(1, sendEveryNFrames))} fps
+              {scanDraftDiffers ? ` · ${t("scanDeviceUsing").replace("{fps}", String(deviceFps))}` : ""}
+            </p>
+            <MoreDetails label={t("settingsAdvanced")}>
+              <div className="field-grid">
                 <div className="field">
-                  <label>{t("updateChannel")}</label>
-                  <select
-                    value={deviceUpdateChannel}
-                    disabled={isCommandBusy("set_ota_config") || !deviceUid}
-                    onChange={(event) => {
-                      const next = normalizeUpdateChannel(event.target.value);
-                      if (next === "beta") setConfirmBetaChannel(true);
-                      else void setUpdateChannel("stable");
-                    }}
-                  >
-                    <option value="stable">{t("updateChannelStable")}</option>
-                    <option value="beta">{t("updateChannelBeta")}</option>
-                  </select>
+                  <label>{t("targetFps")}</label>
+                  <input type="number" value={targetFps} onChange={(event) => { setScanDraftDirty(true); setTargetFps(Number(event.target.value) || 60); }} />
                 </div>
-                {waitingForStableToCatchUp(deviceUpdateChannel, normalized?.firmwareVersion) ? (
-                  <p className="cal-hint">{t("updateChannelWaitingStable").replace("{version}", normalized?.firmwareVersion ?? "")}</p>
-                ) : null}
-                {deviceUpdateChannel === "beta" ? <p className="cal-hint">{t("updateChannelBetaActive")}</p> : null}
-                <label className="switch-row">
-                  <input type="checkbox" checked={showCustomManifest} onChange={(event) => setShowCustomManifest(event.target.checked)} />
-                  <span>{t("updateCustomManifest")}</span>
-                </label>
-                {showCustomManifest ? (
-                  <div className="field">
-                    <label>Manifest URL</label>
-                    <input
-                      value={manifestUrl}
-                      placeholder={stringValue(otaConfig.resolved_manifest_url, manifestUrlForHardwareModel(normalized?.hardwareModel, deviceUpdateChannel))}
-                      onChange={(event) => setManifestUrl(event.target.value)}
-                    />
-                    <p className="service-muted">{t("updateCustomManifestHint")}</p>
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <>
                 <div className="field">
-                  <label>Manifest URL</label>
-                  <input value={manifestUrl} onChange={(event) => setManifestUrl(event.target.value)} />
+                  <label>{t("settleUs")}</label>
+                  <input type="number" value={settleUs} onChange={(event) => { setScanDraftDirty(true); setSettleUs(Number(event.target.value) || 20); }} />
                 </div>
-                <p className="service-muted">{t("updateChannelNeedsFirmware")}</p>
-              </>
-            )}
-            <div className="control-row">
-              <label className="switch-row">
-                <input type="checkbox" checked={autoOtaOnBoot} onChange={(event) => setAutoOtaOnBoot(event.target.checked)} />
-                <span>{t("autoOtaOnBoot")}</span>
-              </label>
-              <button className="button" type="button" disabled={isCommandBusy("set_ota_config") || !deviceUid} onClick={() => void saveOtaConfig()}>
-                {isCommandBusy("set_ota_config") ? t("running") : t("saveUpdateSettings")}
+                <div className="field">
+                  <label>{t("sendEveryNFrames")}</label>
+                  <input type="number" value={sendEveryNFrames} onChange={(event) => { setScanDraftDirty(true); setSendEveryNFrames(Number(event.target.value) || 1); }} />
+                </div>
+              </div>
+            </MoreDetails>
+            <div className="actions compact">
+              <button className="button primary" type="button" disabled={isCommandBusy("set_scan_timing") || !deviceUid || (deviceFps > 0 && !scanDraftDiffers)} onClick={() => void applyScanTiming()}>
+                {isCommandBusy("set_scan_timing") ? t("running") : t("applyScanTiming")}
               </button>
             </div>
-            <div className="settings-detail-grid compact">
-              <DetailBox label="Phase" value={updateState.phase ?? "-"} />
-              {updateTransferProgress(updateState) ? (
-                <DetailBox label={t("updateProgress")} value={updateTransferProgress(updateState)} />
+          </div>
+          <div className="settings-card">
+            <div className="settings-row">
+              <div>
+                <h4>{t("imuDiagnostics")}</h4>
+                <p className="service-muted">
+                  {stringValue(imu.state ?? (imu.enabled === false ? "disabled" : "-"))}
+                  {imu.sample_rate_hz ? ` · ${stringValue(imu.sample_rate_hz)} Hz` : ""}
+                  {" · "}{t("imuSampleRateFollowsScan")}
+                </p>
+              </div>
+              <div className="settings-row-controls">
+                <label className="switch-row">
+                  <input type="checkbox" checked={imuEnabled} onChange={(event) => setImuEnabled(event.target.checked)} />
+                  <span>{t("paramEnabled")}</span>
+                </label>
+                <button className="button" type="button" disabled={isCommandBusy("set_imu") || !deviceUid} onClick={() => void run(t("saveImu"), { command: "set_imu", enabled: imuEnabled })}>
+                  {isCommandBusy("set_imu") ? t("running") : t("saveImu")}
+                </button>
+              </div>
+            </div>
+            {imu.last_error ? <p className="notice error">{stringValue(imu.last_error)}</p> : null}
+            <MoreDetails label={t("settingsDetails")}>
+              <FactList
+                items={[
+                  [t("imuHeapDelta"), numberValue(imu.heap_after, 0) - numberValue(imu.heap_before, 0)],
+                  [t("imuCacheAgeMs"), imu.cache_age_ms ?? "-"],
+                  [t("imuLastReadUs"), imu.last_read_duration_us ?? "-"],
+                ]}
+              />
+            </MoreDetails>
+          </div>
+          <div className="settings-card">
+            <div className="settings-row">
+              <div>
+                <h4>{t("streamBufferDiagnostics")}</h4>
+                <p className="service-muted">
+                  {streamBuffer.mode ? stringValue(streamBuffer.mode) : "-"}
+                  {streamBuffer.depth_frames !== undefined ? ` · ${t("streamBufferDepth")} ${stringValue(streamBuffer.depth_frames)}` : ""}
+                  {scanHealth.queue_occupied_frames !== undefined ? ` · ${t("streamBufferQueueOccupied")} ${stringValue(scanHealth.queue_occupied_frames)}` : ""}
+                </p>
+              </div>
+              <div className="settings-row-controls">
+                <label className="switch-row">
+                  <input type="checkbox" checked={streamBufferEnabled} onChange={(event) => setStreamBufferEnabled(event.target.checked)} />
+                  <span>{t("paramEnabled")}</span>
+                </label>
+                <select value={streamBufferMode} disabled={!streamBufferEnabled} onChange={(event) => setStreamBufferMode(event.target.value)} aria-label={t("streamBufferMode")}>
+                  <option value="standard">{t("streamBufferStandardMode")}</option>
+                  <option value="extended">{t("streamBufferExtendedMode")}</option>
+                </select>
+                <button className="button" type="button" disabled={isCommandBusy("set_stream_buffer") || !deviceUid || isControlUnavailable} onClick={() => void applyStreamBuffer()}>
+                  {isCommandBusy("set_stream_buffer") ? t("running") : t("saveStreamBuffer")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (section === "update") {
+      const phase = stringValue(updateState.phase, "");
+      const transfer = updateTransferProgress(updateState);
+      const updateBusy = isCommandBusy("check_update") || isCommandBusy("apply_update") || phase === "downloading";
+      const statusLine =
+        phase === "ready" ? t("updateAvailable")
+          : phase === "current" ? t("updateUpToDate")
+            : phase === "manifest" ? t("updateChecking")
+              : phase === "downloading" ? `${t("updateInstalling")}${transfer ? ` · ${transfer}` : ""}`
+                : phase === "applied" ? t("updateApplied")
+                  : phase === "error" ? t("updateFailed")
+                    : t("updateNotChecked");
+      return (
+        <div className="settings-stack">
+          <div className="settings-detail-header">
+            <div>
+              <h3>{t("settingsSection_update")}</h3>
+            </div>
+          </div>
+          <div className="settings-card update-hero" data-phase={phase || "idle"}>
+            <div className="update-hero-versions">
+              <span>{t("updateInstalledVersion")}</span>
+              <strong>{normalized?.firmwareVersion ?? "-"}</strong>
+              {phase === "ready" && updateState.version ? (
+                <>
+                  <span className="update-hero-arrow" aria-hidden="true">→</span>
+                  <strong className="update-hero-next">{stringValue(updateState.version)}</strong>
+                </>
               ) : null}
-              <DetailBox label="Version" value={updateState.version ?? "-"} />
-              <DetailBox label="URL" value={updateState.url ?? "-"} />
-              <DetailBox label="Error" value={updateState.last_error ?? updateState.error ?? "-"} />
+            </div>
+            <p className="update-hero-status">{statusLine}</p>
+            {phase === "error" && (updateState.last_error || updateState.error) ? (
+              <p className="notice error">{stringValue(updateState.last_error ?? updateState.error)}</p>
+            ) : null}
+            <div className="actions compact">
+              <button className={`button${phase === "ready" ? "" : " primary"}`} type="button" disabled={updateBusy || !deviceUid} onClick={() => void run(t("updateCheck"), updateCommand("check_update"), 30000)}>
+                {isCommandBusy("check_update") ? t("running") : t("updateCheck")}
+              </button>
+              {phase === "ready" ? (
+                <button className="button primary" type="button" disabled={updateBusy || !deviceUid} onClick={() => void run(t("updateInstall"), updateCommand("apply_update"), 90000)}>
+                  {isCommandBusy("apply_update") ? t("running") : t("updateInstall")}
+                </button>
+              ) : null}
             </div>
             <div className="actions compact">
               <button
@@ -2461,115 +2600,79 @@ export function DeviceSettingsPage() {
             ) : null}
           </div>
           <div className="settings-card">
-            <div className="settings-detail-header">
-              <div>
-                <h4>{t("scanPerformance")}</h4>
-                <p>{t("scanPerformanceCopy")}</p>
-              </div>
-              <button className="button" type="button" disabled={isCommandBusy("scan_health") || !deviceUid || isControlUnavailable} onClick={() => void run("Scan health", { command: "scan_health" })}>
-                {isCommandBusy("scan_health") ? t("running") : t("refresh")}
-              </button>
-            </div>
-            <div className="scan-timing-row">
-              <div className="segmented-control">
-                <button className={targetFps === 60 ? "active" : ""} type="button" onClick={() => applyScanPreset(60)}>
-                  {t("standardFps")}
+            {otaChannelSupported ? (
+              <>
+                <div className="field update-channel-field">
+                  <label>{t("updateChannel")}</label>
+                  <select
+                    value={deviceUpdateChannel}
+                    disabled={isCommandBusy("set_ota_config") || !deviceUid}
+                    onChange={(event) => {
+                      const next = normalizeUpdateChannel(event.target.value);
+                      if (next === "beta") setConfirmBetaChannel(true);
+                      else void setUpdateChannel("stable");
+                    }}
+                  >
+                    <option value="stable">{t("updateChannelStable")}</option>
+                    <option value="beta">{t("updateChannelBeta")}</option>
+                  </select>
+                </div>
+                {waitingForStableToCatchUp(deviceUpdateChannel, normalized?.firmwareVersion) ? (
+                  <p className="cal-hint">{t("updateChannelWaitingStable").replace("{version}", normalized?.firmwareVersion ?? "")}</p>
+                ) : null}
+                {deviceUpdateChannel === "beta" ? <p className="cal-hint">{t("updateChannelBetaActive")}</p> : null}
+              </>
+            ) : null}
+            <MoreDetails label={t("settingsAdvanced")}>
+              {otaChannelSupported ? (
+                <>
+                  <label className="switch-row">
+                    <input type="checkbox" checked={showCustomManifest} onChange={(event) => setShowCustomManifest(event.target.checked)} />
+                    <span>{t("updateCustomManifest")}</span>
+                  </label>
+                  {showCustomManifest ? (
+                    <div className="field">
+                      <label>Manifest URL</label>
+                      <input
+                        value={manifestUrl}
+                        placeholder={stringValue(otaConfig.resolved_manifest_url, manifestUrlForHardwareModel(normalized?.hardwareModel, deviceUpdateChannel))}
+                        onChange={(event) => setManifestUrl(event.target.value)}
+                      />
+                      <p className="service-muted">{t("updateCustomManifestHint")}</p>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div className="field">
+                    <label>Manifest URL</label>
+                    <input value={manifestUrl} onChange={(event) => setManifestUrl(event.target.value)} />
+                  </div>
+                  <p className="service-muted">{t("updateChannelNeedsFirmware")}</p>
+                </>
+              )}
+              <div className="control-row">
+                <label className="switch-row">
+                  <input type="checkbox" checked={autoOtaOnBoot} onChange={(event) => setAutoOtaOnBoot(event.target.checked)} />
+                  <span>{t("autoOtaOnBoot")}</span>
+                </label>
+                <button className="button" type="button" disabled={isCommandBusy("set_ota_config") || !deviceUid} onClick={() => void saveOtaConfig()}>
+                  {isCommandBusy("set_ota_config") ? t("running") : t("saveUpdateSettings")}
                 </button>
-                <button className={targetFps === 90 ? "active" : ""} type="button" onClick={() => applyScanPreset(90)}>
-                  {t("extendedFps")}
-                </button>
-                <button
-                  className={`${targetFps === DIRECT_STABILITY_FPS ? "active" : ""}${isHubRelayed(device) ? " recommended" : ""}`}
-                  type="button"
-                  onClick={() => void applyDirectStabilityPreset()}
-                >
-                  {t("directStabilityMode")}
-                  {isHubRelayed(device) ? <small>{t("directStabilityModeRecommended")}</small> : null}
-                </button>
               </div>
-              <div className="field-grid">
-                <div className="field">
-                  <label>{t("targetFps")}</label>
-                  <input type="number" value={targetFps} onChange={(event) => { setScanDraftDirty(true); setTargetFps(Number(event.target.value) || 60); }} />
-                </div>
-                <div className="field">
-                  <label>{t("settleUs")}</label>
-                  <input type="number" value={settleUs} onChange={(event) => { setScanDraftDirty(true); setSettleUs(Number(event.target.value) || 20); }} />
-                </div>
-                <div className="field">
-                  <label>{t("sendEveryNFrames")}</label>
-                  <input type="number" value={sendEveryNFrames} onChange={(event) => { setScanDraftDirty(true); setSendEveryNFrames(Number(event.target.value) || 1); }} />
-                  <small className="field-hint">
-                    {t("effectiveSendFps")}: ≈ {Math.round(targetFps / Math.max(1, sendEveryNFrames))} fps
-                  </small>
-                </div>
-                <div className="field settings-field-action">
-                  <label>{t("currentScanTiming")}</label>
-                  <button className="button primary" type="button" disabled={isCommandBusy("set_scan_timing") || !deviceUid} onClick={() => void applyScanTiming()}>
-                    {isCommandBusy("set_scan_timing") ? t("running") : t("applyScanTiming")}
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="settings-detail-grid compact">
-              <DetailBox label={t("targetFps")} value={authoritativeScanTiming.target_fps ?? scanHealth.requested_target_fps ?? "-"} />
-              <DetailBox label={t("settleUs")} value={authoritativeScanTiming.settle_us ?? scanHealth.settle_us ?? "-"} />
-              <DetailBox label={t("sendEveryNFrames")} value={authoritativeScanTiming.send_every_n_frames ?? scanHealth.send_every_n_frames ?? "-"} />
-              <DetailBox label="Produced" value={scanHealth.produced_frames ?? "-"} />
-            </div>
-          </div>
-          <div className="settings-card">
-            <h4>{t("streamBufferDiagnostics")}</h4>
-            <div className="field-grid">
-              <label className="switch-row">
-                <input type="checkbox" checked={streamBufferEnabled} onChange={(event) => setStreamBufferEnabled(event.target.checked)} />
-                <span>{t("paramEnabled")}</span>
-              </label>
-              <div className="field">
-                <label>{t("streamBufferMode")}</label>
-                <select value={streamBufferMode} disabled={!streamBufferEnabled} onChange={(event) => setStreamBufferMode(event.target.value)}>
-                  <option value="standard">{t("streamBufferStandardMode")}</option>
-                  <option value="extended">{t("streamBufferExtendedMode")}</option>
-                </select>
-              </div>
-            </div>
-            <div className="metric-row">
-              <Metric label={t("streamBufferMode")} value={streamBuffer.mode ?? "-"} />
-              <Metric label={t("streamBufferDepth")} value={streamBuffer.depth_frames ?? "-"} />
-              <Metric label={t("streamBufferQueueOccupied")} value={scanHealth.queue_occupied_frames ?? "-"} />
-            </div>
-            <div className="actions compact">
-              <button className="button" type="button" disabled={isCommandBusy("set_stream_buffer") || !deviceUid || isControlUnavailable} onClick={() => void applyStreamBuffer()}>
-                {isCommandBusy("set_stream_buffer") ? t("running") : t("saveStreamBuffer")}
-              </button>
-            </div>
-          </div>
-          <div className="settings-card">
-            <h4>{t("imuDiagnostics")}</h4>
-            <div className="metric-row">
-              <Metric label={t("imuState")} value={imu.state ?? (imu.enabled === false ? "disabled" : "-")} />
-              <Metric label={t("imuHeapDelta")} value={numberValue(imu.heap_after, 0) - numberValue(imu.heap_before, 0)} />
-              <Metric label={t("imuSampleRateHz")} value={imu.sample_rate_hz ?? "-"} />
-              <Metric label={t("imuCacheAgeMs")} value={imu.cache_age_ms ?? "-"} />
-              <Metric label={t("imuLastReadUs")} value={imu.last_read_duration_us ?? "-"} />
-              <Metric label={t("imuLastError")} value={imu.last_error ?? "-"} small />
-            </div>
-            <p className="service-muted">{t("imuSampleRateFollowsScan")}</p>
-            <div className="control-row">
-              <label className="switch-row">
-                <input type="checkbox" checked={imuEnabled} onChange={(event) => setImuEnabled(event.target.checked)} />
-                <span>{t("paramEnabled")}</span>
-              </label>
-              <button className="button" type="button" disabled={isCommandBusy("set_imu") || !deviceUid} onClick={() => void run(t("saveImu"), { command: "set_imu", enabled: imuEnabled })}>
-                {isCommandBusy("set_imu") ? t("running") : t("saveImu")}
-              </button>
-            </div>
+              <FactList
+                items={[
+                  [t("updatePhase"), phase || "-"],
+                  ["URL", updateState.url ?? "-"],
+                ]}
+              />
+            </MoreDetails>
           </div>
         </div>
       );
     }
 
-    if (activeSection === "clock") {
+    if (section === "clock") {
       // Not a STATUS_DRIVEN section: the card polls the small clock_status
       // instead, since a full status is paged (slow) through a Hub.
       return (
@@ -2585,7 +2688,7 @@ export function DeviceSettingsPage() {
       );
     }
 
-    if (activeSection === "maintenance") {
+    if (section === "maintenance") {
       return (
         <div className="settings-stack">
           <CalibrationWorkbench
@@ -2602,7 +2705,7 @@ export function DeviceSettingsPage() {
       );
     }
 
-    if (activeSection === "diagnostics") {
+    if (section === "diagnostics") {
       return (
         <div className="settings-stack">
           <div className="settings-detail-header">
@@ -2652,9 +2755,9 @@ export function DeviceSettingsPage() {
                   <span>{t("total")}: {ramTotal ? bytesLabel(ramTotal) : "-"}</span>
                 </div>
                 <div className="metric-row">
-                  <Metric label="Heap free" value={memory.heap_free ?? "-"} />
-                  <Metric label="Largest block" value={memory.heap_largest_free_block ?? "-"} />
-                  <Metric label="Min free" value={memory.heap_min_free ?? "-"} />
+                  <Metric label={t("heapFree")} value={memory.heap_free ?? "-"} />
+                  <Metric label={t("heapLargestBlock")} value={memory.heap_largest_free_block ?? "-"} />
+                  <Metric label={t("heapMinFree")} value={memory.heap_min_free ?? "-"} />
                   <Metric label={t("ramRefreshState")} value={ramRefreshInFlight ? t("refreshing") : t("idle")} />
                   <Metric label={t("ramLastUpdated")} value={ramLastUpdated || "-"} />
                 </div>
@@ -2664,14 +2767,14 @@ export function DeviceSettingsPage() {
             )}
           </div>
           <details className="terminal-json-details">
-            <summary>Last response</summary>
+            <summary>{t("lastResponse")}</summary>
             <pre>{pretty(lastResult)}</pre>
           </details>
         </div>
       );
     }
 
-    if (activeSection === "apps") {
+    if (section === "apps") {
       return (
         <div className="settings-stack">
           <div className="settings-detail-header">
@@ -2701,7 +2804,7 @@ export function DeviceSettingsPage() {
       );
     }
 
-    if (activeSection === "files") {
+    if (section === "files") {
       return (
         <div className="settings-stack">
           <div className="settings-detail-header">
@@ -2710,7 +2813,7 @@ export function DeviceSettingsPage() {
               <p>{t("flashDiagnosticsCopy")}</p>
             </div>
             <div className="actions compact">
-              <button className="button primary" type="button" disabled={isCommandBusy("storage_status") || !deviceUid || isControlUnavailable} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
+              <button className="button" type="button" disabled={isCommandBusy("storage_status") || !deviceUid || isControlUnavailable} onClick={() => void run(t("refreshFlashUsage"), { command: "storage_status" })}>
                 {isCommandBusy("storage_status") ? t("running") : t("refreshFlashUsage")}
               </button>
               <a className="button" href={appHref(`device/${encodeURIComponent(deviceUid)}/files`)} target="_blank" rel="noreferrer">
@@ -2753,54 +2856,55 @@ export function DeviceSettingsPage() {
             </div>
           </div>
           <div className="settings-card">
-            <h4>{t("logSettings")}</h4>
-            <div className="field-grid">
-              <label className="switch-row">
-                <input type="checkbox" checked={logEnabled} onChange={(event) => setLogEnabled(event.target.checked)} />
-                <span>{t("paramEnabled")}</span>
-              </label>
-              <div className="field">
-                <label>{t("logLevel")}</label>
-                <select value={logLevel} onChange={(event) => setLogLevel(event.target.value)}>
+            <div className="settings-row">
+              <div>
+                <h4>{t("logSettings")}</h4>
+                <p className="service-muted">
+                  {logging.bytes !== undefined ? bytesLabel(logging.bytes) : "-"}
+                  {logging.effective_total_bytes ? ` / ${bytesLabel(logging.effective_total_bytes)}` : ""}
+                </p>
+              </div>
+              <div className="settings-row-controls">
+                <label className="switch-row">
+                  <input type="checkbox" checked={logEnabled} onChange={(event) => setLogEnabled(event.target.checked)} />
+                  <span>{t("paramEnabled")}</span>
+                </label>
+                <select value={logLevel} onChange={(event) => setLogLevel(event.target.value)} aria-label={t("logLevel")}>
                   <option value="error">error</option>
                   <option value="warn">warn</option>
                   <option value="info">info</option>
                   <option value="debug">debug</option>
                 </select>
-              </div>
-              <div className="field">
-                <label>{t("logMode")}</label>
-                <select value={logMode} onChange={(event) => setLogMode(event.target.value)}>
+                <select value={logMode} onChange={(event) => setLogMode(event.target.value)} aria-label={t("logMode")}>
                   <option value="standard">{t("logModeStandard")}</option>
                   <option value="extended">{t("logModeExtended")}</option>
                 </select>
+                <button className="button primary" type="button" disabled={isCommandBusy("set_log") || !deviceUid} onClick={() => void saveLogSettings()}>
+                  {isCommandBusy("set_log") ? t("running") : t("saveLogSettings")}
+                </button>
               </div>
             </div>
             <div className="actions compact">
-              <button className="button primary" type="button" disabled={isCommandBusy("set_log") || !deviceUid} onClick={() => void saveLogSettings()}>
-                {isCommandBusy("set_log") ? t("running") : t("saveLogSettings")}
+              <button
+                className="button"
+                type="button"
+                disabled={isCommandBusy("log_clear") || !deviceUid}
+                onClick={() => setPendingConfirm({
+                  title: t("clearLogsConfirmTitle"),
+                  message: t("clearLogsConfirmMessage"),
+                  confirmLabel: t("clearLogs"),
+                  action: () => void run(t("clearLogs"), { command: "log_clear" }).catch(() => undefined),
+                })}
+              >
+                {isCommandBusy("log_clear") ? t("running") : t("clearLogs")}
               </button>
-              <a className="button" href={appHref(`device/${encodeURIComponent(deviceUid)}/files`)} target="_blank" rel="noreferrer">
-                {t("fileBrowser")}
-              </a>
-              <button className="button danger" type="button" disabled={isCommandBusy("log_clear") || !deviceUid} onClick={() => void run("Log clear", { command: "log_clear" })}>
-                {isCommandBusy("log_clear") ? t("running") : "Clear logs"}
-              </button>
-            </div>
-            <div className="settings-detail-grid compact">
-              <DetailBox label={t("paramEnabled")} value={boolString(logging.enabled)} />
-              <DetailBox label={t("logLevel")} value={logging.level ?? "-"} />
-              <DetailBox label={t("logMode")} value={logging.mode ?? "-"} />
-              <DetailBox label="Max bytes" value={logging.max_bytes ? bytesLabel(logging.max_bytes) : "-"} />
-              <DetailBox label={t("logFlashFootprint")} value={logging.effective_total_bytes ? bytesLabel(logging.effective_total_bytes) : "-"} />
-              <DetailBox label={t("logCurrentBytes")} value={logging.bytes !== undefined ? bytesLabel(logging.bytes) : "-"} />
             </div>
           </div>
         </div>
       );
     }
 
-    if (activeSection === "experimental") {
+    if (section === "experimental") {
       return (
         <div className="settings-stack">
           <div className="settings-detail-header">
@@ -2831,11 +2935,9 @@ export function DeviceSettingsPage() {
                   disabled={!filterEnabled} onChange={(event) => setFilterAlpha(Number(event.target.value))} />
               </div>
             </div>
-            <div className="metric-row">
-              <Metric label={t("filterEnabled")} value={boolString(filter.enabled)} />
-              <Metric label={t("filterMedian")} value={filter.median ?? "-"} />
-              <Metric label={t("filterAlpha")} value={filter.alpha ?? "-"} />
-            </div>
+            <p className="service-muted">
+              {t("onDevice")}: {filter.enabled === true ? `${t("filterEnabled")} · ${t("filterMedian")} ${stringValue(filter.median)} · ${t("filterAlpha")} ${stringValue(filter.alpha)}` : boolString(filter.enabled)}
+            </p>
             <div className="actions compact">
               <button className="button primary" type="button"
                 disabled={isCommandBusy("set_filter") || !deviceUid || isControlUnavailable}
@@ -2853,9 +2955,7 @@ export function DeviceSettingsPage() {
                 <span>{t("rawAdcEnabled")}</span>
               </label>
             </div>
-            <div className="metric-row">
-              <Metric label={t("rawAdcEnabled")} value={boolString(streamRawAdcEnabled)} />
-            </div>
+            <p className="service-muted">{t("onDevice")}: {boolString(streamRawAdcEnabled)}</p>
             <div className="actions compact">
               <button className="button primary" type="button"
                 disabled={isCommandBusy("set_raw_adc") || !deviceUid || isControlUnavailable}
@@ -2873,10 +2973,56 @@ export function DeviceSettingsPage() {
 
   return (
     <>
-      <section className="page-header">
-        <div>
-          <h2>{t("settingsApp")}</h2>
-          <p className="page-copy">{deviceUid}</p>
+      <section className="device-settings-head">
+        <div className="device-settings-title">
+          <h2>{normalized?.displayName ?? deviceUid}</h2>
+          <p>
+            <span className={`settings-status-dot${isControlUnavailable ? "" : " online"}`} aria-hidden="true" />
+            <span>{normalized?.connectionState === "online" ? t("hubOnline") : connectionLabel}</span>
+            {normalized?.hardwareModel ? <span>{displayHardwareModel(normalized.hardwareModel)}</span> : null}
+            {normalized?.firmwareVersion ? <span>{normalized.firmwareVersion}</span> : null}
+            <span>{hubRelayed ? "Hub" : "Gateway"}{(hubRelayed ? device?.gateway_id : findme.gateway_id) ? ` ${stringValue(hubRelayed ? device?.gateway_id : findme.gateway_id)}` : ""}</span>
+          </p>
+        </div>
+        <div className="device-settings-mode">
+          <span>{t("mode")}</span>
+          {isControlUnavailable || !currentMode ? (
+            <strong>{connectionLabel}</strong>
+          ) : (
+            <select
+              aria-label={t("mode")}
+              value={modeDraft}
+              disabled={busyCommand !== ""}
+              onChange={(event) => setModeDraft(event.target.value)}
+            >
+              <option value="normal">{t("modeOption_normal")}</option>
+              <option value="maintenance">{t("modeOption_maintenance")}</option>
+              {/* Entered by the firmware itself after repeated crashes, never chosen. */}
+              {currentMode === "safe_maintenance" ? (
+                <option value="safe_maintenance" disabled>{t("modeOption_safe_maintenance")}</option>
+              ) : null}
+              {!["normal", "maintenance", "safe_maintenance"].includes(currentMode) ? (
+                <option value={currentMode} disabled>{currentMode}</option>
+              ) : null}
+            </select>
+          )}
+          {!isControlUnavailable && currentMode && modeDraft !== currentMode ? (
+            <button
+              className="button compact primary"
+              type="button"
+              disabled={busyCommand !== "" || !deviceUid}
+              onClick={() =>
+                void run(
+                  modeDraft === "maintenance" ? t("enterMaintenance") : t("exitMaintenance"),
+                  modeDraft === "maintenance"
+                    ? { command: "enter_maintenance", reason: "manual" }
+                    : { command: "exit_maintenance" },
+                ).catch(() => setModeDraft(currentMode))
+              }
+            >
+              {busyCommand === "enter_maintenance" || busyCommand === "exit_maintenance" ? t("running") : t("modeApply")}
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -2896,6 +3042,22 @@ export function DeviceSettingsPage() {
         />
       ) : null}
 
+      {pendingConfirm ? (
+        <ConfirmModal
+          title={pendingConfirm.title}
+          message={pendingConfirm.message}
+          confirmLabel={pendingConfirm.confirmLabel}
+          cancelLabel={t("cancel")}
+          destructive
+          onConfirm={() => {
+            const { action } = pendingConfirm;
+            setPendingConfirm(null);
+            action();
+          }}
+          onCancel={() => setPendingConfirm(null)}
+        />
+      ) : null}
+
       {showWifiSetupRebootModal ? (
         <ConfirmModal
           title={t("rebootWifiSetupConfirmTitle")}
@@ -2911,75 +3073,6 @@ export function DeviceSettingsPage() {
         />
       ) : null}
 
-      <section className="settings-overview">
-        <div className="settings-overview-card">
-          <span>{t("mode")}</span>
-          {isControlUnavailable || !currentMode ? (
-            <strong>{connectionLabel}</strong>
-          ) : (
-            <select
-              className="settings-overview-select"
-              aria-label={t("mode")}
-              value={modeDraft}
-              disabled={busyCommand !== ""}
-              onChange={(event) => setModeDraft(event.target.value)}
-            >
-              <option value="normal">{t("modeOption_normal")}</option>
-              <option value="maintenance">{t("modeOption_maintenance")}</option>
-              {/* Entered by the firmware itself after repeated crashes, never chosen. */}
-              {currentMode === "safe_maintenance" ? (
-                <option value="safe_maintenance" disabled>{t("modeOption_safe_maintenance")}</option>
-              ) : null}
-              {!["normal", "maintenance", "safe_maintenance"].includes(currentMode) ? (
-                <option value={currentMode} disabled>{currentMode}</option>
-              ) : null}
-            </select>
-          )}
-          <small>{t("protocol")}: {normalized?.protocol ?? "-"}</small>
-          {!isControlUnavailable && currentMode && modeDraft !== currentMode ? (
-            <button
-              className="button tiny primary settings-overview-action"
-              type="button"
-              disabled={busyCommand !== "" || !deviceUid}
-              onClick={() =>
-                void run(
-                  modeDraft === "maintenance" ? t("enterMaintenance") : t("exitMaintenance"),
-                  modeDraft === "maintenance"
-                    ? { command: "enter_maintenance", reason: "manual" }
-                    : { command: "exit_maintenance" },
-                ).catch(() => setModeDraft(currentMode))
-              }
-            >
-              {busyCommand === "enter_maintenance" || busyCommand === "exit_maintenance" ? t("running") : t("modeApply")}
-            </button>
-          ) : null}
-        </div>
-        <div className="settings-overview-card">
-          <span>{t("firmwareVersion")}</span>
-          <strong>{normalized?.firmwareVersion ?? "-"}</strong>
-          <small>{t("hardwareModel")}: {normalized?.hardwareModel ? displayHardwareModel(normalized.hardwareModel) : "-"}</small>
-        </div>
-        <div className="settings-overview-card">
-          <span>{hubRelayed ? t("hubLinkTitle") : t("gatewayTitle")}</span>
-          {hubRelayed ? (
-            <>
-              <strong>{isControlUnavailable ? t("offline") : t("hubOnline")}</strong>
-              <small>{t("hubLinkHub")}: {device?.gateway_id || "-"}</small>
-            </>
-          ) : (
-            <>
-              <strong>{stringValue(findme.state)}</strong>
-              <small>{stringValue(findme.gateway_id)} {stringValue(findme.host)}</small>
-            </>
-          )}
-        </div>
-        <div className="settings-overview-card">
-          <span>{t("matrixShape")}</span>
-          <strong>{normalized?.matrixShape ?? "-"}</strong>
-          <small>{t("lastSeen")}: {normalized?.lastSeen ?? "-"}</small>
-        </div>
-      </section>
-
       <section className="settings-shell">
         <aside className="settings-sidebar" aria-label={t("settingsApp")}>
           {sections.map((section) => (
@@ -2994,7 +3087,7 @@ export function DeviceSettingsPage() {
           ))}
         </aside>
         <article className="panel settings-detail">
-          {renderSection()}
+          {renderActiveSection()}
         </article>
       </section>
 
@@ -3020,14 +3113,24 @@ export function DeviceSettingsPage() {
       ) : null}
 
       {operationToast ? (
-        <div className="operation-toast" data-state={operationToast.ok ? "success" : "error"} role="status">
-          <div className="operation-toast-header">
+        <div
+          key={operationToast.id}
+          className="operation-toast"
+          data-state={operationToast.ok ? "success" : "error"}
+          role="status"
+          style={{ "--toast-ms": `${TOAST_MS}ms` } as CSSProperties}
+        >
+          <span className="operation-toast-icon" aria-hidden="true">
+            {operationToast.ok ? <Check size={15} strokeWidth={2.4} /> : <X size={15} strokeWidth={2.4} />}
+          </span>
+          <div className="operation-toast-text">
             <strong>{operationToast.label}</strong>
-            <button className="operation-toast-close" type="button" aria-label={t("closeToast")} onClick={dismissOperationToast}>
-              x
-            </button>
+            <span>{toastDetail(operationToast, t)}</span>
           </div>
-          <span>{operationToast.message}</span>
+          <button className="operation-toast-close" type="button" aria-label={t("closeToast")} onClick={dismissOperationToast}>
+            <X size={14} />
+          </button>
+          <span className="operation-toast-timer" aria-hidden="true" />
         </div>
       ) : null}
 

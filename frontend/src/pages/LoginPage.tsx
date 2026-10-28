@@ -24,12 +24,16 @@ export function LoginPage() {
 
   return (
     <main className="login-shell">
-      <section className="login-panel">
-        <div className="login-copy">
-          <h1>{t("loginTitle")}</h1>
-          <p>{t("loginCopy")}</p>
+      <section className="login-panel login-split">
+        <div className="login-brand">
+          <strong>NH Console</strong>
+          <div className="login-brand-credit">
+            <span>{LAB_NAME}</span>
+            <span>{t("aboutUniversity")}</span>
+          </div>
         </div>
         <form className="login-form" onSubmit={handleSubmit}>
+          <h1>{t("loginTitle")}</h1>
           <label className="field">
             <span>{t("loginUsername")}</span>
             <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
@@ -47,12 +51,8 @@ export function LoginPage() {
           <button className="button primary" type="submit" disabled={submitting}>
             {submitting ? t("loggingIn") : t("loginAction")}
           </button>
-          <p className="login-help">{t("loginContactAdmin")}</p>
         </form>
       </section>
-      <p className="login-credit">
-        {LAB_NAME} · {t("aboutUniversity")}
-      </p>
     </main>
   );
 }

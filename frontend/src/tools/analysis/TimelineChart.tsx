@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+
+import { useTheme } from "../../lib/theme";
 import { bucketSeries, formatDuration, nearestIndex, niceTicks, timeTicks } from "../../lib/recordingAnalysis";
 
 export type ChartSeries = { key: string; label: string; color: string; value: (row: number) => number };
@@ -31,6 +33,16 @@ function cssVar(element: Element, name: string, fallback: string) {
   return getComputedStyle(element).getPropertyValue(name).trim() || fallback;
 }
 
+// Trace colours are picked for a white page; on the dark one, lift them a
+// third of the way to white so dark greens and greys stay visible.
+function traceColor(color: string, dark: boolean) {
+  const match = /^#([0-9a-f]{6})$/i.exec(color);
+  if (!dark || !match) return color;
+  const value = Number.parseInt(match[1], 16);
+  const lift = (channel: number) => Math.round(channel + (255 - channel) * 0.35);
+  return `rgb(${lift(value >> 16)}, ${lift((value >> 8) & 255)}, ${lift(value & 255)})`;
+}
+
 // One recording's trace against its own time (m:ss from the first row), drawn
 // on a canvas as min/max per pixel column so a long recording keeps its
 // spikes. The cursor, hover line and drag selection are DOM overlays: moving
@@ -45,6 +57,8 @@ export function TimelineChart({
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
   const [mouseX, setMouseX] = useState<number | null>(null);
   const yRangeRef = useRef({ min: 0, max: 1 });
+  // Colours come from CSS variables at draw time, so redraw on a theme switch.
+  const dark = useTheme().theme === "dark";
 
   const origin = time.length ? time[0] : 0;
   const last = Math.max(start, end - 1);
@@ -129,14 +143,14 @@ export function TimelineChart({
     for (const marker of markers) {
       if (marker.index < start || marker.index >= end) continue;
       const mx = Math.round(x(time[marker.index])) + 0.5;
-      context.strokeStyle = marker.color;
+      context.strokeStyle = traceColor(marker.color, dark);
       context.globalAlpha = 0.55;
       context.beginPath();
       context.moveTo(mx, PAD.top);
       context.lineTo(mx, PAD.top + plotHeight);
       context.stroke();
       context.globalAlpha = 1;
-      context.fillStyle = marker.color;
+      context.fillStyle = traceColor(marker.color, dark);
       context.beginPath();
       context.moveTo(mx - 3.5, PAD.top);
       context.lineTo(mx + 3.5, PAD.top);
@@ -151,7 +165,7 @@ export function TimelineChart({
     context.lineWidth = 1.4;
     context.lineJoin = "round";
     for (const { item, buckets } of traces) {
-      context.strokeStyle = item.color;
+      context.strokeStyle = traceColor(item.color, dark);
       context.beginPath();
       let started = false;
       buckets.forEach((bucket, column) => {
@@ -171,7 +185,7 @@ export function TimelineChart({
       context.stroke();
     }
     context.restore();
-  }, [time, start, end, series, markers, width, height, zeroBased, formatValue, t0, t1, origin, plotWidth, plotHeight]);
+  }, [time, start, end, series, markers, width, height, zeroBased, formatValue, t0, t1, origin, plotWidth, plotHeight, dark]);
 
   const toX = (row: number) => PAD.left + ((time[row] - t0) / (t1 - t0)) * plotWidth;
   const rowAt = (clientX: number) => {
