@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 
 import { useI18n } from "../i18n";
 import { useAuth } from "../lib/auth";
-import { LAB_NAME } from "../components/AboutDialog";
+import { LAB_NAME, LAB_URL, UNIVERSITY_URL } from "../components/AboutDialog";
 
 export function LoginPage() {
   const { t } = useI18n();
@@ -24,14 +24,6 @@ export function LoginPage() {
 
   return (
     <main className="login-shell">
-      {/* The lab and university, at the foot of the page. */}
-      <div className="login-backdrop" aria-hidden="true">
-        <span className="login-backdrop-credit">
-          {LAB_NAME}
-          <br />
-          {t("aboutUniversity")}
-        </span>
-      </div>
       <section className="login-panel">
         <form className="login-form" onSubmit={handleSubmit}>
           <div className="login-heading">
@@ -57,6 +49,11 @@ export function LoginPage() {
           </button>
         </form>
       </section>
+      <footer className="login-credit">
+        <a href={LAB_URL} target="_blank" rel="noreferrer">{LAB_NAME}</a>
+        <span aria-hidden="true">·</span>
+        <a href={UNIVERSITY_URL} target="_blank" rel="noreferrer">{t("aboutUniversity")}</a>
+      </footer>
     </main>
   );
 }

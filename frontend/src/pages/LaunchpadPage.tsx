@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Folder, X } from "lucide-react";
 
@@ -166,6 +166,15 @@ export function LaunchpadPage() {
 
   const activeFolderSnapshot = activeFolder ? folders.find((folder) => folder.id === activeFolder.id) ?? activeFolder : null;
 
+  useEffect(() => {
+    if (!activeFolder) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActiveFolder(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeFolder]);
+
   return (
     <>
       <section className="page-header desktop-header">
@@ -244,9 +253,16 @@ export function LaunchpadPage() {
       </section>
 
       {activeFolderSnapshot ? (
-        <div className="folder-overlay" role="dialog" aria-modal="true" aria-label={activeFolderSnapshot.label}>
-          <div className="folder-overlay-backdrop" onClick={() => setActiveFolder(null)} />
-          <div className="folder-overlay-panel">
+        // The same dimmed, blurred scrim and scale-in panel as every other
+        // dialog; clicking outside or Escape closes it.
+        <div className="modal-backdrop" role="presentation" onClick={() => setActiveFolder(null)}>
+          <div
+            className="modal-panel folder-overlay-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label={activeFolderSnapshot.label}
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="folder-overlay-header">
               <div>
                 <h3>{activeFolderSnapshot.label}</h3>

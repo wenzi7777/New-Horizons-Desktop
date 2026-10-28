@@ -400,26 +400,31 @@ button:disabled {
   gap: 12px;
 }
 
-/* Sign-in: one form card; the lab and university sit at the foot of the page. */
-.login-backdrop {
+/* Sign-in: one form card; the lab and university link at the foot of the page. */
+.login-credit {
   position: fixed;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  user-select: none;
-}
-
-.login-backdrop-credit {
-  position: absolute;
-  left: 50%;
-  bottom: 28px;
-  transform: translateX(-50%);
-  text-align: center;
-  white-space: nowrap;
+  left: 16px;
+  right: 16px;
+  bottom: 24px;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   color: var(--text-muted);
   font-size: 12px;
-  line-height: 1.6;
   letter-spacing: 0.01em;
+}
+
+.login-credit a {
+  color: inherit;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.login-credit a:hover,
+.login-credit a:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .login-shell .login-panel {
@@ -1236,8 +1241,9 @@ input:-webkit-autofill:focus {
   transition: background-color 0.15s ease;
 }
 
-.folder-preview-card:not(:disabled):hover .folder-device-item {
-  background: color-mix(in srgb, var(--panel-solid) 50%, transparent);
+/* The card opens the folder; the devices in it are a preview, not targets. */
+.folder-preview-card .folder-preview-devices {
+  pointer-events: none;
 }
 
 .folder-device-item.offline {
@@ -1331,34 +1337,13 @@ input:-webkit-autofill:focus {
   background: rgba(148, 163, 184, 0.22);
 }
 
-.folder-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-}
-
-.folder-overlay-backdrop {
-  position: absolute;
-  inset: 0;
-  background: color-mix(in srgb, var(--text) 24%, transparent);
-}
-
+/* A folder's devices, in the shared .modal-backdrop / .modal-panel dialog. */
 .folder-overlay-panel {
-  position: relative;
-  z-index: 1;
   display: grid;
+  align-content: start;
   gap: 14px;
-  width: min(980px, calc(100vw - 24px));
-  max-height: min(78vh, 840px);
-  overflow: auto;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--panel-solid) 98%, transparent);
-  padding: 18px;
-  box-shadow: 0 22px 72px rgba(17, 24, 39, 0.16);
+  width: min(980px, 100%);
+  max-height: min(80vh, 840px);
 }
 
 .folder-overlay-header {
@@ -4995,6 +4980,30 @@ input:-webkit-autofill:focus {
   letter-spacing: 0.02em;
 }
 
+/* Both credits link to their sites: they lift slightly on hover. */
+.about-lab,
+.about-university {
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+
+.about-lab:hover,
+.about-university:hover {
+  opacity: 0.8;
+}
+
+.about-lab:active,
+.about-university:active {
+  transform: scale(0.98);
+}
+
+.about-lab:focus-visible,
+.about-university:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
 .about-uaizu-logo {
   width: 110px;
   height: auto;
@@ -6191,12 +6200,7 @@ input:-webkit-autofill:focus {
     padding: 12px;
   }
 
-  .folder-overlay {
-    padding: 12px;
-  }
-
   .folder-overlay-panel {
-    width: min(100vw - 12px, 100%);
     max-height: min(82vh, 760px);
     padding: 14px;
   }

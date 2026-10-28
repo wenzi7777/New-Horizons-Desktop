@@ -7,6 +7,8 @@ import { UAizuLogo } from "./UAizuLogo";
 import { Select } from "./Select";
 
 export const LAB_NAME = "Human Intelligent Sensing Lab";
+export const LAB_URL = "https://isensing.u-aizu.ac.jp/";
+export const UNIVERSITY_URL = "https://u-aizu.ac.jp/";
 
 // Release notes are the repo's notes/vX.Y.Z.md, one lazy chunk each so the
 // changelog costs nothing until someone opens it.
@@ -79,11 +81,11 @@ export function AboutDialog({ version, onClose }: AboutDialogProps) {
           </section>
         ) : null}
         <div className="about-credits">
-          <p className="about-lab">{LAB_NAME}</p>
-          <div className="about-university">
-            <UAizuLogo className="about-uaizu-logo" />
+          <a className="about-lab" href={LAB_URL} target="_blank" rel="noreferrer">{LAB_NAME}</a>
+          <a className="about-university" href={UNIVERSITY_URL} target="_blank" rel="noreferrer">
+            <UAizuLogo className="about-uaizu-logo" title={t("aboutUniversity")} />
             <span>{t("aboutUniversity")}</span>
-          </div>
+          </a>
         </div>
         <div className="about-actions">
           <button className="button primary" type="button" onClick={onClose} autoFocus>

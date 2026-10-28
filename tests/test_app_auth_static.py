@@ -42,10 +42,16 @@ class AppAuthStaticTest(unittest.TestCase):
         login_source = (ROOT / "frontend" / "src" / "pages" / "LoginPage.tsx").read_text(encoding="utf-8")
 
         self.assertNotIn("appSubtitle", login_source)
-        # No explanatory copy: the name and the credit are the page behind the form.
+        # No explanatory copy: only the form, and the lab and university
+        # linked at the foot of the page.
         self.assertNotIn("loginCopy", login_source)
         self.assertNotIn("loginContactAdmin", login_source)
-        self.assertIn("login-backdrop", login_source)
+        self.assertIn("login-credit", login_source)
+        self.assertIn("href={LAB_URL}", login_source)
+        self.assertIn("href={UNIVERSITY_URL}", login_source)
+        about_source = (ROOT / "frontend" / "src" / "components" / "AboutDialog.tsx").read_text(encoding="utf-8")
+        self.assertIn('LAB_URL = "https://isensing.u-aizu.ac.jp/"', about_source)
+        self.assertIn('UNIVERSITY_URL = "https://u-aizu.ac.jp/"', about_source)
         self.assertIn("{LAB_NAME}", login_source)
         self.assertIn('t("aboutUniversity")', login_source)
 
