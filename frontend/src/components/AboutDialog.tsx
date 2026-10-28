@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import "@fontsource/cormorant-garamond/latin-600-italic.css";
 
 import { useI18n } from "../i18n";
 import { compareVersions } from "../lib/versioning";

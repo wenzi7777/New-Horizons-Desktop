@@ -4380,11 +4380,11 @@ button:disabled {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   align-self: stretch;
-  font-family: "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
-  font-style: italic;
-  font-weight: 600;
-  font-size: 28px;
-  line-height: 1.15;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
   color: var(--accent-strong);
 }
 
