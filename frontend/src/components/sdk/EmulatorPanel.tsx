@@ -50,6 +50,7 @@ import {
 import { ReadoutView } from "../ReadoutView";
 import { EmulatorHeatmap } from "./EmulatorHeatmap";
 import { LedDot, OledPanel, StripPixels } from "./IndicatorViews";
+import { Select } from "../Select";
 
 type Props = {
   analysis: Analysis;
@@ -405,9 +406,9 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines, deviceUid: 
             <>
               <label className="sdk-field">
                 <span>{t("sdkEmuRecordingsOf")}</span>
-                <select value={browseUid} onChange={(event) => { setBrowseUid(event.target.value); setDir(""); }}>
+                <Select value={browseUid} onChange={(event) => { setBrowseUid(event.target.value); setDir(""); }}>
                   {devices.map((item) => <option key={item.uid} value={item.uid}>{item.displayName}</option>)}
-                </select>
+                </Select>
               </label>
               <button type="button" className="button compact" onClick={() => upload.current?.click()}>
                 <Upload size={13} strokeWidth={2} />{t("sdkEmuUploadCsv")}
@@ -459,9 +460,9 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines, deviceUid: 
               {playing ? <Pause size={14} /> : <Play size={14} />}
             </button>
             <button type="button" className="button compact icon-button" onClick={() => setIndex(Math.min(frames.length - 1, index + 1))} aria-label={t("sdkEmuNext")}><ChevronRight size={14} /></button>
-            <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))} aria-label={t("sdkEmuSpeed")}>
+            <Select value={speed} onChange={(event) => setSpeed(Number(event.target.value))} aria-label={t("sdkEmuSpeed")}>
               {SPEEDS.map((value) => <option key={value} value={value}>{value}×</option>)}
-            </select>
+            </Select>
             <span className="sdk-hint sdk-mono">{index + 1} / {frames.length} · f{frame?.seq}</span>
             <LedDot rgb={shown?.led ?? [0, 0, 0]} />
           </div>
@@ -753,9 +754,9 @@ function GeneratedEmulator({ analysis, target, onMarkLines, virtual, onVirtualCh
         <div className="sdk-picker-row">
           <label className="sdk-field">
             <span>{t("sdkEmuPattern")}</span>
-            <select value={virtual.pattern} onChange={(event) => onVirtualChange({ ...virtual, pattern: event.target.value as SynthPattern })}>
+            <Select value={virtual.pattern} onChange={(event) => onVirtualChange({ ...virtual, pattern: event.target.value as SynthPattern })}>
               {SYNTH_PATTERNS.map((pattern) => <option key={pattern} value={pattern}>{t(PATTERN_LABELS[pattern])}</option>)}
-            </select>
+            </Select>
           </label>
           <label className="sdk-field">
             <span>{t("sdkEmuNoise")} <strong className="sdk-mono">{Math.round(virtual.noise * 100)}%</strong></span>
@@ -843,7 +844,7 @@ function VirtualSetup({ virtual, onChange }: { virtual: VirtualDevice; onChange:
       <div className="sdk-picker-row">
         <label className="sdk-field">
           <span>{t("sdkEmuBoard")}</span>
-          <select
+          <Select
             value={board.id}
             onChange={(event) => {
               const next = boardById(event.target.value);
@@ -852,7 +853,7 @@ function VirtualSetup({ virtual, onChange }: { virtual: VirtualDevice; onChange:
             }}
           >
             {BOARDS.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.rows} × {item.cols}</option>)}
-          </select>
+          </Select>
         </label>
         <label className="sdk-field sdk-field-shape">
           <span>{t("sdkEmuMatrix")}</span>
@@ -923,13 +924,13 @@ export function EmulatorPanel(props: Props) {
     <section className="sdk-section sdk-picker">
       <label className="sdk-field">
         <span>{t("sdkEmuDevice")}</span>
-        <select value={target.key} onChange={(event) => onSelectTarget(event.target.value)}>
+        <Select value={target.key} onChange={(event) => onSelectTarget(event.target.value)}>
           {targets.map((item) => {
             const state = devices.find((d) => `device:${d.uid}` === item.key)?.connectionState;
             return <option key={item.key} value={item.key}>{item.label}{state && state !== "online" ? ` (${state})` : ""}</option>;
           })}
           <option value={VIRTUAL_TARGET_KEY}>{t("sdkEmuVirtual")}</option>
-        </select>
+        </Select>
       </label>
       {deviceUid === null && analysis.kind !== "readout" ? <VirtualSetup virtual={virtual} onChange={onVirtualChange} /> : null}
     </section>

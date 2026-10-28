@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 
+import { ConfirmModal } from "../components/ConfirmModal";
 import { HubManageModal } from "../components/HubManageModal";
 import { useI18n } from "../i18n";
 import { api, type GatewayClaimEntry, type GatewayEntry, type HubEnvironmentEntry } from "../lib/api";
@@ -270,15 +271,19 @@ export function GatewaysPage() {
   const [noticeClass, setNoticeClass] = useState<"" | "success" | "error">("");
   const [deletingGatewayId, setDeletingGatewayId] = useState("");
   const [manageHubId, setManageHubId] = useState("");
+  // The relay waiting on the delete confirmation.
+  const [confirmDelete, setConfirmDelete] = useState<GatewayEntry | null>(null);
 
   useEffect(() => {
     requestGatewaySnapshot();
   }, []);
 
-  async function handleDelete(gateway: GatewayEntry) {
+  function handleDelete(gateway: GatewayEntry) {
+    if (String(gateway.gateway_id || "").trim()) setConfirmDelete(gateway);
+  }
+
+  async function deleteRelay(gateway: GatewayEntry) {
     const gatewayId = String(gateway.gateway_id || "").trim();
-    if (!gatewayId) return;
-    if (!window.confirm(`${t("deleteGatewayConfirm")} ${gatewayId}`)) return;
     setDeletingGatewayId(gatewayId);
     setNotice("");
     setNoticeClass("");
@@ -404,6 +409,21 @@ export function GatewaysPage() {
       </section>
 
       {manageHubId ? <HubManageModal gatewayId={manageHubId} onClose={() => setManageHubId("")} /> : null}
+      {confirmDelete ? (
+        <ConfirmModal
+          title={confirmDelete.client_type === "hub" ? t("deleteHubConfirm") : t("deleteGatewayConfirm")}
+          message={`${confirmDelete.gateway_name || confirmDelete.gateway_id} — ${confirmDelete.client_type === "hub" ? t("deleteHubCopy") : t("deleteGatewayCopy")}`}
+          confirmLabel={confirmDelete.client_type === "hub" ? t("deleteHub") : t("deleteGateway")}
+          cancelLabel={t("cancel")}
+          destructive
+          onConfirm={() => {
+            const gateway = confirmDelete;
+            setConfirmDelete(null);
+            void deleteRelay(gateway);
+          }}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      ) : null}
     </>
   );
 }

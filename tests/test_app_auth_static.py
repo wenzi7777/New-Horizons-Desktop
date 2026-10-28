@@ -42,10 +42,10 @@ class AppAuthStaticTest(unittest.TestCase):
         login_source = (ROOT / "frontend" / "src" / "pages" / "LoginPage.tsx").read_text(encoding="utf-8")
 
         self.assertNotIn("appSubtitle", login_source)
-        # No explanatory copy: the green panel carries the name and the credit.
+        # No explanatory copy: the name and the credit are the page behind the form.
         self.assertNotIn("loginCopy", login_source)
         self.assertNotIn("loginContactAdmin", login_source)
-        self.assertIn("login-brand", login_source)
+        self.assertIn("login-backdrop", login_source)
         self.assertIn("{LAB_NAME}", login_source)
         self.assertIn('t("aboutUniversity")', login_source)
 

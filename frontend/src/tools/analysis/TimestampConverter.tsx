@@ -7,6 +7,7 @@ import {
   timestampToEpochMs,
   type TimestampUnit,
 } from "../../lib/recordingAnalysis";
+import { Select } from "../../components/Select";
 
 const UNITS: TimestampUnit[] = ["s", "ms", "us", "ns"];
 const UNIT_KEYS: Record<TimestampUnit, string> = {
@@ -67,10 +68,10 @@ export function TimestampConverter({ recordingRange }: TimestampConverterProps) 
           </label>
           <label className="analysis-field">
             <span>{t("analysisConvertUnit")}</span>
-            <select value={unit} onChange={(event) => setUnit(event.target.value as TimestampUnit | "auto")}>
+            <Select value={unit} onChange={(event) => setUnit(event.target.value as TimestampUnit | "auto")}>
               <option value="auto">{t("analysisUnitAuto")}</option>
               {UNITS.map((item) => <option key={item} value={item}>{t(UNIT_KEYS[item])}</option>)}
-            </select>
+            </Select>
           </label>
           <button type="button" className="button compact" onClick={() => setValue(String(Date.now()))}>
             {t("analysisConvertNow")}

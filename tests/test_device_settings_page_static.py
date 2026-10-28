@@ -914,7 +914,9 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn("device.log", source)
         self.assertIn("device.log.1", source)
         self.assertIn("setPreviewOpen(false)", source)
-        self.assertIn("file-preview-panel", source)
+        # The CSV Export window: scope sidebar, file list, preview pane.
+        self.assertIn('className="finder-preview"', source)
+        self.assertIn("finder-sidebar", source)
         self.assertIn('t("preview")', source)
         self.assertIn("chunkResult.data", source)
         self.assertNotIn('String(chunk.result?.data ?? "")', source)
@@ -923,21 +925,14 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         source = (ROOT / "frontend" / "src" / "pages" / "DeviceFilesPage.tsx").read_text(encoding="utf-8")
 
         self.assertIn('command: "storage_status"', source)
-        self.assertIn("file-ops-toolbar", source)
-        self.assertIn("storage-card", source)
-        self.assertIn("storage-stat-grid", source)
-        self.assertIn("maintenance-strip", source)
-        self.assertIn("upload-inline-form", source)
-        self.assertIn("upload-submit", source)
+        self.assertIn("storage-bar-track", source)
         self.assertIn('t("deviceStorage")', source)
         self.assertIn('t("refreshFlashUsage")', source)
         self.assertIn('t("maintenanceModeLabel")', source)
         self.assertIn('command: "enter_maintenance"', source)
         self.assertIn('command: "exit_maintenance"', source)
         self.assertIn('t("fileWriteRequiresMaintenance")', source)
+        # Deleting a file on the device asks first.
+        self.assertIn("<ConfirmModal", source)
         self.assertNotIn('className="field-grid"', source)
         self.assertNotIn('className="upload-panel"', source)
-
-
-if __name__ == "__main__":
-    unittest.main()

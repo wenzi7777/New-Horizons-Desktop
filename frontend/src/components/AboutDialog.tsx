@@ -4,6 +4,7 @@ import { useI18n } from "../i18n";
 import { compareVersions } from "../lib/versioning";
 import { Markdown } from "./Markdown";
 import { UAizuLogo } from "./UAizuLogo";
+import { Select } from "./Select";
 
 export const LAB_NAME = "Human Intelligent Sensing Lab";
 
@@ -55,35 +56,35 @@ export function AboutDialog({ version, onClose }: AboutDialogProps) {
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="about-title" onClick={onClose}>
       <div className="modal-panel about-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="about-identity">
-          <div className="about-product">
-            <h3 id="about-title">NH Console</h3>
-            <small>{version}</small>
-          </div>
-          <p className="about-lab">{LAB_NAME}</p>
-          <div className="about-university">
-            <UAizuLogo className="about-uaizu-logo" />
-            <span>{t("aboutUniversity")}</span>
-          </div>
+        <div className="about-product">
+          <h3 id="about-title">NH Console</h3>
+          <small>{version}</small>
         </div>
         {NOTES.length > 0 ? (
           <section className="about-changelog" aria-labelledby="about-changelog-title">
             <div className="about-changelog-head">
               <h4 id="about-changelog-title">{t("aboutChangelog")}</h4>
-              <select value={selected} onChange={(e) => setSelected(e.target.value)} aria-label={t("aboutChangelogVersion")}>
+              <Select value={selected} onChange={(e) => setSelected(e.target.value)} aria-label={t("aboutChangelogVersion")}>
                 {NOTES.map((note) => (
                   <option key={note.version} value={note.version}>
                     {note.version}
                     {note.version === version ? ` (${t("aboutCurrentVersion")})` : ""}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="about-changelog-body">
               {notes === null ? <p className="about-changelog-loading">…</p> : <Markdown source={notes} />}
             </div>
           </section>
         ) : null}
+        <div className="about-credits">
+          <p className="about-lab">{LAB_NAME}</p>
+          <div className="about-university">
+            <UAizuLogo className="about-uaizu-logo" />
+            <span>{t("aboutUniversity")}</span>
+          </div>
+        </div>
         <div className="about-actions">
           <button className="button primary" type="button" onClick={onClose} autoFocus>
             {t("aboutClose")}

@@ -24,16 +24,21 @@ export function LoginPage() {
 
   return (
     <main className="login-shell">
-      <section className="login-panel login-split">
-        <div className="login-brand">
-          <strong>NH Console</strong>
-          <div className="login-brand-credit">
-            <span>{LAB_NAME}</span>
-            <span>{t("aboutUniversity")}</span>
-          </div>
-        </div>
+      {/* The name and credit sit behind the form as part of the page. */}
+      <div className="login-backdrop" aria-hidden="true">
+        <span className="login-backdrop-mark">NH Console</span>
+        <span className="login-backdrop-credit">
+          {LAB_NAME}
+          <br />
+          {t("aboutUniversity")}
+        </span>
+      </div>
+      <section className="login-panel">
         <form className="login-form" onSubmit={handleSubmit}>
-          <h1>{t("loginTitle")}</h1>
+          <div className="login-heading">
+            <span>NH Console</span>
+            <h1>{t("loginTitle")}</h1>
+          </div>
           <label className="field">
             <span>{t("loginUsername")}</span>
             <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />

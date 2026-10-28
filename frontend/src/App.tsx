@@ -21,6 +21,7 @@ import { ManualPage } from "./pages/ManualPage";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { useI18n, type Locale } from "./i18n";
 import { useAuth } from "./lib/auth";
+import { Select } from "./components/Select";
 
 // App Studio carries a code editor; loaded on first visit so it stays out of
 // the bundle everyone else downloads. (Its files keep the "Sdk" name: the
@@ -139,7 +140,7 @@ function AuthenticatedApp() {
           </NavLink>
           <label className="language-select">
             <span className="sr-only">{t("language")}</span>
-            <select
+            <Select
               value={locale}
               onChange={(event) => setLocale(event.target.value as Locale)}
               aria-label={t("language")}
@@ -147,7 +148,7 @@ function AuthenticatedApp() {
               <option value="en">English</option>
               <option value="ja">日本語</option>
               <option value="zh-CN">简体中文</option>
-            </select>
+            </Select>
           </label>
           <div className="session-chip">
             <span>{user?.username}</span>

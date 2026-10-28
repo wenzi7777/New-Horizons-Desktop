@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useParams } from "react-router-dom";
+import { Download, FileText, Gauge, PanelRight, RefreshCw, ScrollText, Trash2, Upload, UserRound, type LucideIcon } from "lucide-react";
 
 import { useI18n } from "../i18n";
 import { type DeviceFileEntry } from "../lib/api";
@@ -17,9 +18,12 @@ import {
   writeDeviceFile,
 } from "../lib/deviceFileTransfer";
 import { storageSnapshotFromResult } from "../lib/storageStatus";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 const SCOPES = ["user", "logs", "calibration"] as const;
 type FileScope = typeof SCOPES[number];
+
+const SCOPE_ICONS: Record<FileScope, LucideIcon> = { user: UserRound, logs: ScrollText, calibration: Gauge };
 
 // How much of the end of a log the preview shows.
 const LOG_PREVIEW_BYTES = 32768;
@@ -107,6 +111,9 @@ export function DeviceFilesPage() {
   const [uploadProgress, setUploadProgress] = useState<{ loaded: number; total: number; startTime: number } | null>(null);
   const uploadAbortRef = useRef(false);
   const [storage, setStorage] = useState<Record<string, unknown>>({});
+  const [confirmDelete, setConfirmDelete] = useState<DeviceFileEntry | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const previewRef = useRef<HTMLPreElement | null>(null);
 
   const items = useMemo(() => itemsByScope[activeScope], [activeScope, itemsByScope]);
   const storageSnapshot = useMemo(() => storageSnapshotFromResult(storage), [storage]);
@@ -116,7 +123,6 @@ export function DeviceFilesPage() {
   const storageUsage = storageSnapshot.categories;
   const hasStoragePayload = storageSnapshot.hasPayload;
   const isUserScope = activeScope === "user";
-  const maintenanceBadgeClass = maintenanceMode ? "maintenance" : "normal";
 
   async function refreshStorage() {
     const response = await queue({ command: "storage_status" });
@@ -140,24 +146,22 @@ export function DeviceFilesPage() {
   }, [activeScope, deviceUid]);
 
   useEffect(() => {
-    if (activeScope !== "logs") {
-      setSelectedFile(null);
-      setPreviewError("");
-      setPreviewText("");
-      return;
-    }
-    const nextSelected = items.find((item) => item.path === (selectedFile?.path ?? ""))
-      ?? items.find((item) => item.path === "device.log")
-      ?? items.find((item) => item.path === "device.log.1")
-      ?? items[0]
-      ?? null;
+    setPreviewError("");
+    // Logs open on the newest log; other scopes start with nothing selected.
+    const kept = items.find((item) => item.path === (selectedFile?.path ?? "") && item.scope === activeScope) ?? null;
+    const nextSelected = kept ?? (activeScope === "logs"
+      ? items.find((item) => item.path === "device.log")
+        ?? items.find((item) => item.path === "device.log.1")
+        ?? items[0]
+        ?? null
+      : null);
     if (nextSelected?.path !== selectedFile?.path) {
       setSelectedFile(nextSelected);
     }
   }, [activeScope, items, selectedFile?.path]);
 
   useEffect(() => {
-    if (activeScope !== "logs" || !previewOpen || !selectedFile) return;
+    if (!previewOpen || !selectedFile || selectedFile.scope !== "logs") return;
     let cancelled = false;
     const file = selectedFile;
 
@@ -348,196 +352,280 @@ export function DeviceFilesPage() {
     await refreshScope(activeScope);
   }
 
+  // A log is read from its end; show the newest lines first.
+  useEffect(() => {
+    const element = previewRef.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [previewText]);
+
+  function onListKey(event: KeyboardEvent<HTMLDivElement>) {
+    if (!items.length || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
+    event.preventDefault();
+    const index = items.findIndex((item) => item.path === selectedFile?.path);
+    const next = event.key === "ArrowDown" ? Math.min(items.length - 1, index + 1) : Math.max(0, index - 1);
+    setSelectedFile(items[next]);
+  }
+
+  const ScopeIcon = SCOPE_ICONS[activeScope];
+  const selectedSize = formatFileSize(Number(selectedFile?.size ?? 0));
+  const transfer = downloadProgress ?? uploadProgress;
+
   return (
     <>
       <section className="page-header">
         <div>
           <h2>{t("deviceFiles")}</h2>
-          <p className="page-copy">{deviceUid}</p>
+          <p className="page-copy">{normalized?.displayName && normalized.displayName !== deviceUid ? `${normalized.displayName} · ${deviceUid}` : deviceUid}</p>
         </div>
-        <Link className="button" to="/">{t("home")}</Link>
+        <Link className="button" to={`/device/${encodeURIComponent(deviceUid)}/settings`}>{t("settingsApp")}</Link>
       </section>
       {errorMessage ? <p className="notice error">{errorMessage}</p> : null}
-      <section className="panel-grid">
-        <aside className="panel span-4 file-scope-panel">
-          <h3>{t("fileScopes")}</h3>
-          {SCOPES.map((scope) => (
-            <button key={scope} type="button" className={activeScope === scope ? "active" : ""} onClick={() => setActiveScope(scope)}>
-              <span>{t(`fileScope_${scope}`)}</span>
-              <strong>{itemsByScope[scope].length}</strong>
+
+      <section className="finder-window device-finder" aria-label={t("deviceFiles")}>
+        <header className="finder-toolbar">
+          <div className="finder-nav">
+            <button
+              type="button"
+              className="finder-tool"
+              title={t("refresh")}
+              aria-label={t("refresh")}
+              disabled={running || !deviceUid}
+              onClick={() => { void refreshScope(); void refreshStorage(); }}
+            >
+              <RefreshCw size={15} strokeWidth={2} className={running ? "spinning" : undefined} />
             </button>
-          ))}
-          <button className="button primary" type="button" disabled={running || !deviceUid} onClick={() => { void refreshScope(); void refreshStorage(); }}>
-            {t("refresh")}
-          </button>
-        </aside>
-        <article className={`panel ${activeScope === "logs" && previewOpen ? "span-4" : "span-8"}`}>
-          <div className="file-ops-toolbar">
-            <div className="storage-card">
-              <div className="storage-card-header">
-                <div className="storage-card-header-copy">
-                  <span>{t("deviceStorage")}</span>
-                  <strong>{hasStoragePayload ? `${formatFileSize(storageUsed)} / ${formatFileSize(storageTotal)}` : t("flashUnavailable")}</strong>
-                </div>
-                <button className="button" type="button" disabled={running || !deviceUid} onClick={() => void refreshStorage()}>
-                  {t("refreshFlashUsage")}
+          </div>
+          <h3 className="finder-title">{t(`fileScope_${activeScope}`)}</h3>
+          <div className="finder-actions">
+            {isUserScope ? (
+              <button
+                type="button"
+                className="finder-tool"
+                title={maintenanceMode ? t("upload") : t("fileWriteRequiresMaintenance")}
+                aria-label={t("upload")}
+                disabled={running || !deviceUid || !maintenanceMode}
+                onClick={() => uploadInputRef.current?.click()}
+              >
+                <Upload size={16} strokeWidth={2} />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="finder-tool"
+              title={t("download")}
+              aria-label={t("download")}
+              disabled={running || !selectedFile}
+              onClick={() => selectedFile && void downloadFile(selectedFile)}
+            >
+              <Download size={16} strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              className="finder-tool danger"
+              title={maintenanceMode ? t("delete") : t("fileWriteRequiresMaintenance")}
+              aria-label={t("delete")}
+              disabled={running || !selectedFile || !maintenanceMode}
+              onClick={() => setConfirmDelete(selectedFile)}
+            >
+              <Trash2 size={16} strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              className={`finder-tool${previewOpen ? " active" : ""}`}
+              title={previewOpen ? t("hidePreview") : t("preview")}
+              aria-label={previewOpen ? t("hidePreview") : t("preview")}
+              aria-pressed={previewOpen}
+              onClick={() => (previewOpen ? setPreviewOpen(false) : setPreviewOpen(true))}
+            >
+              <PanelRight size={16} strokeWidth={2} />
+            </button>
+          </div>
+          <input
+            ref={uploadInputRef}
+            type="file"
+            hidden
+            onChange={(event) => {
+              setUploadFile(event.target.files?.[0] ?? null);
+              event.target.value = "";
+            }}
+          />
+        </header>
+
+        <div className={`finder-body${previewOpen ? "" : " no-preview"}`}>
+          <nav className="finder-sidebar" aria-label={t("fileScopes")}>
+            <h4>{t("fileScopes")}</h4>
+            {SCOPES.map((scope) => {
+              const Icon = SCOPE_ICONS[scope];
+              return (
+                <button
+                  key={scope}
+                  type="button"
+                  className={`finder-sidebar-item${activeScope === scope ? " selected" : ""}`}
+                  onClick={() => setActiveScope(scope)}
+                >
+                  <Icon size={14} strokeWidth={2} aria-hidden="true" />
+                  <span data-label={t(`fileScope_${scope}`)}>{t(`fileScope_${scope}`)}</span>
+                  <small className="device-finder-count">{itemsByScope[scope].length}</small>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="finder-list-pane device-finder-list">
+            {isUserScope ? (
+              <div className={`device-finder-banner${maintenanceMode ? " on" : ""}`}>
+                <span>
+                  <strong>{t("maintenanceModeLabel")}</strong>
+                  {" · "}
+                  {maintenanceMode ? t("enabledState") : t("fileWriteRequiresMaintenance")}
+                </span>
+                <button className="button compact" type="button" disabled={running || !deviceUid} onClick={() => void toggleMaintenance(!maintenanceMode)}>
+                  {maintenanceMode ? t("exitMaintenance") : t("enterMaintenance")}
                 </button>
               </div>
-              <div className="storage-bar-track" aria-label={t("deviceStorage")}>
-                {storageUsage.length > 0 ? storageUsage.map((item) => (
-                  <span
-                    key={item.scope}
-                    className={`storage-segment ${item.scope}`}
-                    style={{ width: `${percent(item.bytes, storageTotal)}%` }}
-                  />
-                )) : storageTotal > 0 ? (
-                  <span
-                    className="storage-segment other"
-                    style={{ width: `${percent(storageUsed, storageTotal)}%` }}
-                  />
-                ) : null}
-              </div>
-              <div className="storage-stat-grid">
-                <div>
-                  <span>{t("used")}</span>
-                  <strong>{formatFileSize(storageUsed)}</strong>
-                </div>
-                <div>
-                  <span>{t("free")}</span>
-                  <strong>{formatFileSize(storageFree)}</strong>
-                </div>
-                <div>
-                  <span>{t("total")}</span>
-                  <strong>{hasStoragePayload ? formatFileSize(storageTotal) : "-"}</strong>
-                </div>
-              </div>
-              <div className="storage-legend">
-                {!hasStoragePayload ? <span>{t("flashUnavailable")}</span> : null}
-                {storageUsage.map((item) => (
-                  <span key={item.scope}>
-                    <i className={`storage-dot ${item.scope}`} />
-                    {item.scope}: {formatFileSize(item.bytes)}
-                  </span>
-                ))}
-              </div>
-            </div>
-            {isUserScope ? (
-              <div className="maintenance-strip">
-                <div className="maintenance-strip-header">
-                  <div className="maintenance-strip-copy">
-                    <span>{t("maintenanceModeLabel")}</span>
-                    <strong className={`device-badge ${maintenanceBadgeClass}`}>
-                      {maintenanceMode ? t("enabledState") : t("disabledState")}
-                    </strong>
-                  </div>
-                  <div className="actions compact maintenance-strip-actions">
-                    <button className="button primary" type="button" disabled={running || !deviceUid || maintenanceMode} onClick={() => void toggleMaintenance(true)}>
-                      {t("enterMaintenance")}
-                    </button>
-                    <button className="button" type="button" disabled={running || !deviceUid || !maintenanceMode} onClick={() => void toggleMaintenance(false)}>
-                      {t("exitMaintenance")}
-                    </button>
-                  </div>
-                </div>
-                {!maintenanceMode ? <p className="field-note maintenance-hint">{t("fileWriteRequiresMaintenance")}</p> : null}
-                <div className="upload-inline-form">
-                  <div className="field upload-field">
-                    <label>{t("upload")}</label>
-                    <input type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
-                  </div>
-                  <div className="field upload-path-field">
-                    <label>{t("paramPath")}</label>
-                    <input value={uploadPath} onChange={(event) => setUploadPath(event.target.value)} placeholder={uploadFile?.name ?? "configs/profile.json"} />
-                  </div>
-                  <button className="button primary upload-submit" type="button" disabled={running || !uploadFile || !maintenanceMode} onClick={() => void uploadSelectedFile()}>
-                    {t("upload")}
-                  </button>
-                </div>
-                {uploadProgress ? (
-                  <div className="download-progress">
-                    <div className="download-progress-bar" style={{ width: `${uploadProgress.total > 0 ? Math.round((uploadProgress.loaded / uploadProgress.total) * 100) : 0}%` }} />
-                    <div className="upload-progress-row">
-                      {(() => {
-                        const elapsed = (Date.now() - uploadProgress.startTime) / 1000;
-                        const speed = elapsed > 0.5 ? uploadProgress.loaded / elapsed : 0;
-                        const speedStr = formatSpeed(speed);
-                        const eta = formatEta(uploadProgress.total - uploadProgress.loaded, speed);
-                        return <span>{formatFileSize(uploadProgress.loaded)} / {formatFileSize(uploadProgress.total)}{speedStr ? ` · ${speedStr}` : ""}{eta ? ` · ${eta}` : ""}</span>;
-                      })()}
-                      <button
-                        className="button danger upload-cancel-btn"
-                        type="button"
-                        onClick={() => { uploadAbortRef.current = true; }}
-                      >
-                        {t("cancel")}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
+            ) : null}
+            {uploadFile ? (
+              <div className="device-finder-upload">
+                <Upload size={14} strokeWidth={2} aria-hidden="true" />
+                <span className="device-finder-upload-name">{uploadFile.name}</span>
+                <label>
+                  {t("paramPath")}
+                  <input value={uploadPath} onChange={(event) => setUploadPath(event.target.value)} placeholder={uploadFile.name} />
+                </label>
+                <button className="button compact primary" type="button" disabled={running || !maintenanceMode || Boolean(uploadProgress)} onClick={() => void uploadSelectedFile()}>
+                  {t("upload")}
+                </button>
+                <button
+                  className="button compact ghost"
+                  type="button"
+                  onClick={() => {
+                    if (uploadProgress) uploadAbortRef.current = true;
+                    else setUploadFile(null);
+                  }}
+                >
+                  {t("cancel")}
+                </button>
               </div>
             ) : null}
+            <div className="finder-list-head" role="row">
+              <span className="finder-col">{t("filesColName")}</span>
+              <span className="finder-col finder-col-size">{t("filesColSize")}</span>
+            </div>
+            <div className="finder-list" role="listbox" aria-label={t(`fileScope_${activeScope}`)} tabIndex={0} onKeyDown={onListKey}>
+              {items.length === 0 ? <p className="finder-empty">{running ? t("loading") : t("emptyFiles")}</p> : null}
+              {items.map((file) => {
+                const selected = selectedFile?.path === file.path;
+                return (
+                  <div
+                    key={`${file.scope}:${file.path}`}
+                    role="option"
+                    aria-selected={selected}
+                    className={`finder-row${selected ? " selected" : ""}`}
+                    onClick={() => setSelectedFile(file)}
+                    onDoubleClick={() => {
+                      // A log opens in the preview; anything else downloads.
+                      if (file.scope === "logs") setPreviewOpen(true);
+                      else void downloadFile(file);
+                    }}
+                  >
+                    <span className="finder-cell finder-name">
+                      <FileText size={16} strokeWidth={1.8} className="finder-icon" aria-hidden="true" />
+                      <span>{file.name || file.path}</span>
+                    </span>
+                    <span className="finder-cell finder-muted finder-size">{formatFileSize(Number(file.size ?? 0))}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div className="list">
-            {items.length === 0 ? <div className="empty">{t("emptyFiles")}</div> : null}
-            {items.map((file) => (
-              <div key={`${file.scope}:${file.path}`} className={`list-item${selectedFile?.path === file.path ? " selected" : ""}`}>
-                <div className="list-item-copy">
-                  <strong>{file.name || file.path}</strong>
-                  <span>{file.scope} / {file.path} / {formatFileSize(Number(file.size ?? 0))}</span>
+
+          {previewOpen ? (
+            <aside className="finder-preview" aria-label={t("preview")}>
+              {!selectedFile ? (
+                <div className="finder-preview-hero">
+                  <ScopeIcon size={40} strokeWidth={1.4} aria-hidden="true" />
+                  <span>{items.length ? t("deviceFilesSelectHint") : t("emptyFiles")}</span>
                 </div>
-                <div className="actions compact">
-                  {file.scope === "logs" ? (
-                    <button className="button" disabled={running} type="button" onClick={() => { setSelectedFile(file); setPreviewOpen(true); }}>
-                      {t("preview")}
-                    </button>
-                  ) : null}
-                  <button className="button primary" disabled={running} type="button" onClick={() => void downloadFile(file)}>
+              ) : selectedFile.scope === "logs" ? (
+                <>
+                  <div className="device-finder-preview-head">
+                    <strong>{selectedFile.name || selectedFile.path}</strong>
+                    <span>{selectedSize} · {t("deviceFilesLogTail")}</span>
+                  </div>
+                  {previewLoading ? <p className="finder-empty">{t("loadingPreview")}</p> : null}
+                  {previewError ? <p className="notice error">{previewError}</p> : null}
+                  {!previewLoading && !previewError ? <pre ref={previewRef} className="file-preview-content">{previewText}</pre> : null}
+                </>
+              ) : (
+                <>
+                  <div className="finder-preview-hero">
+                    <FileText size={44} strokeWidth={1.4} aria-hidden="true" />
+                    <strong>{selectedFile.name || selectedFile.path}</strong>
+                    <span>{t(`fileScope_${selectedFile.scope}`)} · {selectedSize}</span>
+                  </div>
+                  <button className="button primary" type="button" disabled={running} onClick={() => void downloadFile(selectedFile)}>
+                    <Download size={15} strokeWidth={2} aria-hidden="true" />
                     {t("download")}
                   </button>
-                  <button className="button danger" disabled={running || !maintenanceMode} type="button" onClick={() => void deleteFile(file)}>
-                    {t("delete")}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-          {downloadProgress ? (
-            <div className="download-progress">
-              <div className="download-progress-bar" style={{ width: `${downloadProgress.total > 0 ? Math.round((downloadProgress.loaded / downloadProgress.total) * 100) : 0}%` }} />
-              {(() => {
-                const elapsed = (Date.now() - downloadProgress.startTime) / 1000;
-                const speed = elapsed > 0.5 ? downloadProgress.loaded / elapsed : 0;
-                const speedStr = formatSpeed(speed);
-                const eta = formatEta(downloadProgress.total - downloadProgress.loaded, speed);
-                return <span>{formatFileSize(downloadProgress.loaded)} / {formatFileSize(downloadProgress.total)}{speedStr ? ` · ${speedStr}` : ""}{eta ? ` · ${eta}` : ""}</span>;
-              })()}
-            </div>
+                </>
+              )}
+            </aside>
           ) : null}
-          {statusMessage ? <p className="notice success">{statusMessage}</p> : null}
-        </article>
-        {activeScope === "logs" && previewOpen && selectedFile ? (
-          <article className="panel span-4 file-preview-panel">
-            <div className="file-preview-header">
-              <div>
-                <h3>{t("preview")}</h3>
-                <p>{selectedFile.path}</p>
-              </div>
-              <button className="button" type="button" onClick={() => setPreviewOpen(false)}>
-                {t("hidePreview")}
-              </button>
+        </div>
+
+        <footer className="finder-footer">
+          <div className="device-finder-storage" title={storageUsage.map((item) => `${item.scope}: ${formatFileSize(item.bytes)}`).join(" · ")}>
+            <span>{t("deviceStorage")}</span>
+            <div className="storage-bar-track" aria-label={t("deviceStorage")}>
+              {storageUsage.length > 0 ? storageUsage.map((item) => (
+                <span key={item.scope} className={`storage-segment ${item.scope}`} style={{ width: `${percent(item.bytes, storageTotal)}%` }} />
+              )) : storageTotal > 0 ? (
+                <span className="storage-segment other" style={{ width: `${percent(storageUsed, storageTotal)}%` }} />
+              ) : null}
             </div>
-            <div className="csv-preview-summary">
-              <div>
-                <span>{t("logCurrentBytes")}</span>
-                <strong>{formatFileSize(Number(selectedFile?.size ?? 0))}</strong>
-              </div>
-            </div>
-            {previewLoading ? <p className="notice">{t("loadingPreview")}</p> : null}
-            {previewError ? <p className="notice error">{previewError}</p> : null}
-            {!previewLoading && !previewError ? <pre className="file-preview-content">{previewText}</pre> : null}
-          </article>
-        ) : null}
+            <span>
+              {hasStoragePayload
+                ? t("deviceFilesStorageUsed").replace("{used}", formatFileSize(storageUsed)).replace("{total}", formatFileSize(storageTotal)).replace("{free}", formatFileSize(storageFree))
+                : t("flashUnavailable")}
+            </span>
+            <button className="finder-tool" type="button" title={t("refreshFlashUsage")} aria-label={t("refreshFlashUsage")} disabled={running || !deviceUid} onClick={() => void refreshStorage()}>
+              <RefreshCw size={12} strokeWidth={2} />
+            </button>
+          </div>
+          <div className="finder-status">
+            {transfer ? (
+              <span className="device-finder-transfer">
+                <span className="device-finder-transfer-bar">
+                  <span style={{ width: `${transfer.total > 0 ? Math.round((transfer.loaded / transfer.total) * 100) : 0}%` }} />
+                </span>
+                {(() => {
+                  const elapsed = (Date.now() - transfer.startTime) / 1000;
+                  const speed = elapsed > 0.5 ? transfer.loaded / elapsed : 0;
+                  const speedStr = formatSpeed(speed);
+                  const eta = formatEta(transfer.total - transfer.loaded, speed);
+                  return `${formatFileSize(transfer.loaded)} / ${formatFileSize(transfer.total)}${speedStr ? ` · ${speedStr}` : ""}${eta ? ` · ${eta}` : ""}`;
+                })()}
+              </span>
+            ) : statusMessage}
+          </div>
+        </footer>
       </section>
+
+      {confirmDelete ? (
+        <ConfirmModal
+          title={t("deviceFilesDeleteTitle").replace("{name}", confirmDelete.name || confirmDelete.path)}
+          message={t("deviceFilesDeleteMessage")}
+          confirmLabel={t("delete")}
+          cancelLabel={t("cancel")}
+          destructive
+          onConfirm={() => {
+            const file = confirmDelete;
+            setConfirmDelete(null);
+            void deleteFile(file).catch(() => undefined);
+          }}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      ) : null}
     </>
   );
 }

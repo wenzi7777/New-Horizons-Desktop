@@ -9,6 +9,7 @@ import { streamSensorLabel } from "../lib/sensorLabel";
 import { fitProfileRect } from "../lib/profileLayout";
 import { valueToCsv } from "../lib/valueFormat";
 import { useWsState } from "../lib/wsClient";
+import { Select } from "../components/Select";
 
 type ProfileDisplayMode = "2d" | "3d";
 type ProfileTool = "add" | "select" | "move" | "delete";
@@ -998,7 +999,7 @@ export function ProfilesPage() {
 
           <section className="profile-inspector-group">
             <h3>{t("liveChannelMonitor")}</h3>
-            <select aria-label={t("deviceName")} value={monitorDeviceUid} onChange={(event) => setMonitorDeviceUid(event.target.value)}>
+            <Select aria-label={t("deviceName")} value={monitorDeviceUid} onChange={(event) => setMonitorDeviceUid(event.target.value)}>
               {devices.length === 0 ? <option value="">{t("noDevicesDiscovered")}</option> : null}
               {devices.map((device) => {
                 const deviceUid = normalizeUid(device.device_uid);
@@ -1008,7 +1009,7 @@ export function ProfilesPage() {
                   </option>
                 );
               })}
-            </select>
+            </Select>
             <div className="profile-channel-list">
               {monitorValues.length === 0 ? <p className="field-note">{t("noData")}</p> : null}
               {monitorValues.map((value, index) => {

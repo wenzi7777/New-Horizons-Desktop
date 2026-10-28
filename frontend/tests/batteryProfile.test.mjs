@@ -133,6 +133,20 @@ test("creates a dynamic battery indicator only for a board that declares support
   });
 });
 
+test("a battery preset sets its own charge current; only custom takes a typed one", () => {
+  const expected = { 200: 100, 400: 200, 500: 350, 600: 350, 700: 350 };
+  for (const [capacity, current] of Object.entries(expected)) {
+    assert.deepEqual(buildBatteryProfileCommand(capacity, "", "120"), {
+      command: "set_battery_profile",
+      capacity_mah: Number(capacity),
+      max_charge_current_ma: current,
+    });
+  }
+  assert.equal(batteryProfileModule.batteryCapacityChoiceFor(500, 350), "500");
+  // A preset capacity saved with another current is shown as custom, as it is.
+  assert.equal(batteryProfileModule.batteryCapacityChoiceFor(400, 100), "custom");
+});
+
 test("reports an inline validation error before an invalid manual profile can be dispatched", () => {
   assert.equal(batteryProfileValidationError("custom", "", "230"), "invalid_battery_profile");
   assert.equal(batteryProfileValidationError("400", "", "230"), null);

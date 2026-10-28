@@ -41,6 +41,7 @@ import type { WorkerReply, WorkerRequest } from "./recordingWorker";
 import { SensorHeatmap } from "./SensorHeatmap";
 import { TimelineChart, type ChartMarker, type ChartSeries } from "./TimelineChart";
 import { TimestampConverter } from "./TimestampConverter";
+import { Select } from "../../components/Select";
 
 // A recording's files: the samples, and its events and meta when it has them.
 type Source =
@@ -567,24 +568,24 @@ export default function RecordingAnalysisTool() {
         <div className="analysis-source-row">
           <label className="analysis-field">
             <span>{t("analysisDevice")}</span>
-            <select value={deviceUid} onChange={(event) => setDeviceUid(event.target.value)} disabled={devices.length === 0}>
+            <Select value={deviceUid} onChange={(event) => setDeviceUid(event.target.value)} disabled={devices.length === 0}>
               {devices.length === 0 ? <option value="">{t("noDevicesDiscovered")}</option> : null}
               {devices.map((item) => (
                 <option key={item.device_uid} value={item.device_uid}>
                   {item.display_name && item.display_name !== item.device_uid ? `${item.display_name} (${item.device_uid})` : item.device_uid}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="analysis-field">
             <span>{t("analysisDate")}</span>
-            <select value={date} onChange={(event) => setDate(event.target.value)} disabled={dates.length === 0}>
+            <Select value={date} onChange={(event) => setDate(event.target.value)} disabled={dates.length === 0}>
               {dates.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
+            </Select>
           </label>
           <label className="analysis-field grow">
             <span>{t("analysisRecording")}</span>
-            <select value={filePath} onChange={(event) => setFilePath(event.target.value)} disabled={recordings.length === 0}>
+            <Select value={filePath} onChange={(event) => setFilePath(event.target.value)} disabled={recordings.length === 0}>
               {recordings.length === 0 ? <option value="">{t("emptyFolder")}</option> : null}
               {recordings.map((item) => (
                 <option key={item.path} value={item.path}>
@@ -592,7 +593,7 @@ export default function RecordingAnalysisTool() {
                   {item.kind !== "recording" ? ` · ${t("analysisLegacyFile")}` : ""}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <button
             type="button"
@@ -660,9 +661,9 @@ export default function RecordingAnalysisTool() {
                 {playing ? <Pause size={14} strokeWidth={2} /> : <Play size={14} strokeWidth={2} />}
                 {playing ? t("analysisPause") : t("analysisPlay")}
               </button>
-              <select className="analysis-speed" value={speed} onChange={(event) => setSpeed(Number(event.target.value))} aria-label={t("analysisSpeed")}>
+              <Select className="analysis-speed" value={speed} onChange={(event) => setSpeed(Number(event.target.value))} aria-label={t("analysisSpeed")}>
                 {PLAY_SPEEDS.map((item) => <option key={item} value={item}>{item}×</option>)}
-              </select>
+              </Select>
               <span className="analysis-range-text">
                 {t("analysisRange")} <strong>{formatDuration(viewFrom)} – {formatDuration(viewTo)}</strong>
                 {" "}({formatDuration(viewTo - viewFrom)} · {(view.end - view.start).toLocaleString(locale)} {t("analysisRows")})

@@ -4,6 +4,7 @@ import type { PressureCalImadaReading, PressureCalServerPreset } from "../lib/ap
 import { useI18n } from "../i18n";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { TriangleAlert } from "lucide-react";
+import { Select } from "../components/Select";
 
 const PRESSURE_MAX_KPA = 28;
 const PRESSURE_BASELINE_KPA = 0.5;
@@ -259,7 +260,7 @@ export function PressureControlTool() {
         <div className="field-grid">
           <div className="field">
             <label>{t("pressureCalServer")}</label>
-            <select
+            <Select
               value={selectedPreset}
               onChange={(e) => setSelectedPreset(e.target.value)}
               disabled={isRunning}
@@ -268,7 +269,7 @@ export function PressureControlTool() {
                 <option key={p.id} value={p.id}>{p.label}</option>
               ))}
               <option value="custom">{t("pressureCalServerCustom")}</option>
-            </select>
+            </Select>
           </div>
           {selectedPreset !== "custom" && serverPresets.find((p) => p.id === selectedPreset) && (
             <div className="field">

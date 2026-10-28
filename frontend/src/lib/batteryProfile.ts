@@ -104,20 +104,48 @@ export function batteryProfileSetupRequired(status: BatteryProfileStatus): boole
   return battery.profileRequired === true || battery.profileResolved === false;
 }
 
+// The lab's batteries. Choosing one also sets how fast it may be charged;
+// only "custom" takes a typed current.
+export const BATTERY_PRESETS = [
+  { capacityMah: 200, maxChargeCurrentMa: 100 },
+  { capacityMah: 400, maxChargeCurrentMa: 200 },
+  { capacityMah: 500, maxChargeCurrentMa: 350 },
+  { capacityMah: 600, maxChargeCurrentMa: 350 },
+  { capacityMah: 700, maxChargeCurrentMa: 350 },
+] as const;
+
+export type BatteryCapacityChoice = `${(typeof BATTERY_PRESETS)[number]["capacityMah"]}` | "custom";
+
+export function batteryPresetFor(choice: BatteryCapacityChoice) {
+  return BATTERY_PRESETS.find((preset) => String(preset.capacityMah) === choice) ?? null;
+}
+
+/** The form's choice for a capacity the device reports: its preset, else custom. */
+export function batteryCapacityChoiceFor(capacityMah: number, maxChargeCurrentMa: number): BatteryCapacityChoice {
+  const preset = BATTERY_PRESETS.find((item) => item.capacityMah === capacityMah && item.maxChargeCurrentMa === maxChargeCurrentMa);
+  return preset ? (String(preset.capacityMah) as BatteryCapacityChoice) : "custom";
+}
+
+function batteryProfileValues(capacityChoice: BatteryCapacityChoice, customCapacity: string, maxChargeCurrent: string) {
+  const preset = batteryPresetFor(capacityChoice);
+  return preset
+    ? { capacityMah: preset.capacityMah as number, maxChargeCurrentMa: preset.maxChargeCurrentMa as number }
+    : { capacityMah: Number(customCapacity), maxChargeCurrentMa: Number(maxChargeCurrent) };
+}
+
 export function batteryProfileValidationError(
-  capacityChoice: "200" | "400" | "custom",
+  capacityChoice: BatteryCapacityChoice,
   customCapacity: string,
   maxChargeCurrent: string,
 ): "invalid_battery_profile" | null {
-  const capacityMah = capacityChoice === "custom" ? Number(customCapacity) : Number(capacityChoice);
-  const maxChargeCurrentMa = Number(maxChargeCurrent);
+  const { capacityMah, maxChargeCurrentMa } = batteryProfileValues(capacityChoice, customCapacity, maxChargeCurrent);
   return !Number.isInteger(capacityMah) || capacityMah <= 0 || !Number.isInteger(maxChargeCurrentMa) || maxChargeCurrentMa < 100 || maxChargeCurrentMa > 350 || maxChargeCurrentMa % 10 !== 0
     ? "invalid_battery_profile"
     : null;
 }
 
 export function buildBatteryProfileCommand(
-  capacityChoice: "200" | "400" | "custom",
+  capacityChoice: BatteryCapacityChoice,
   customCapacity: string,
   maxChargeCurrent: string,
 ) {
@@ -125,9 +153,8 @@ export function buildBatteryProfileCommand(
   if (validationError) {
     throw new Error(validationError);
   }
-  const capacity_mah = capacityChoice === "custom" ? Number(customCapacity) : Number(capacityChoice);
-  const max_charge_current_ma = Number(maxChargeCurrent);
-  return { command: "set_battery_profile" as const, capacity_mah, max_charge_current_ma };
+  const { capacityMah, maxChargeCurrentMa } = batteryProfileValues(capacityChoice, customCapacity, maxChargeCurrent);
+  return { command: "set_battery_profile" as const, capacity_mah: capacityMah, max_charge_current_ma: maxChargeCurrentMa };
 }
 
 export function buildBatteryGaugeResyncCommand() {

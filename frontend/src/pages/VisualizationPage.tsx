@@ -15,6 +15,7 @@ import { fitProfileRect, profilePointToScreen, profilePointToWorld, type FittedP
 import { cssColorForValue, valueRatio } from "../lib/pressureColor";
 import { useI18n } from "../i18n";
 import { useWsState } from "../lib/wsClient";
+import { Select } from "../components/Select";
 
 // Behind by this much, the recording card says so.
 const RECORDING_LAG_WARN_MS = 2000;
@@ -1351,7 +1352,7 @@ export function VisualizationPage() {
         <div className="range-controls">
           <label className="range-preset">
             <span>{t("range")}</span>
-            <select
+            <Select
               value={rangeSelectValue}
               onChange={(event) => {
                 if (event.target.value === "custom") {
@@ -1369,7 +1370,7 @@ export function VisualizationPage() {
                 </option>
               ))}
               <option value="custom">{t("rangeCustom")}</option>
-            </select>
+            </Select>
           </label>
           {rangeSelectValue === "custom" ? (
             <>
@@ -1496,7 +1497,7 @@ export function VisualizationPage() {
                   </button>
                 </div>
                 <div className="viz-card-profile">
-                  <select
+                  <Select
                     value={view.profileName ?? ""}
                     onChange={(event) => void handleProfileChange(view, event.target.value)}
                     aria-label={t("profiles")}
@@ -1508,7 +1509,7 @@ export function VisualizationPage() {
                         {profileItem.displayName || profileItem.name}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                   <button className="button ghost compact" type="button" onClick={() => void loadProfiles()} aria-label={t("profiles")}>
                     ↻
                   </button>

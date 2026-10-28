@@ -6,7 +6,7 @@ import { api, type PressureCalReadings, type PressureCalServerPreset } from "../
 import { useI18n } from "../i18n";
 import { V15F_HARDWARE_MODEL, boardProfileForHardwareModel, displayHardwareModel, manifestUrlForHardwareModel } from "../lib/boardProfile";
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
-import { batteryIndicatorState, batteryLedThresholdValidationError, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
+import { BATTERY_PRESETS, batteryCapacityChoiceFor, batteryIndicatorState, batteryLedThresholdValidationError, batteryPresetFor, type BatteryCapacityChoice, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
 import { isHubRelayed, normalizeDevice, updateTransferProgress, useDevicesPolling } from "../lib/device";
 import { pollDeviceCommand, quietCommand, useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
@@ -21,6 +21,8 @@ import { DeviceHealthCard } from "../components/DeviceHealthCard";
 import { ScanHealthCard } from "../components/ScanHealthCard";
 import { compareVersionCores, normalizeUpdateChannel, waitingForStableToCatchUp, type UpdateChannel } from "../lib/versioning";
 import { Battery, Check, CircleOff, Lightbulb, Power, TriangleAlert, X } from "lucide-react";
+import { Markdown } from "../components/Markdown";
+import { Select, type SelectChangeEvent } from "../components/Select";
 
 // Spike-validated (firmware/spikes/README.md's "PHY rate config" section,
 // 2026-08-06: raw ADC off + 40fps ran clean at 0% loss over ESP-NOW once
@@ -387,7 +389,7 @@ function PressureCalibrationPanel({ t, deviceUid, run }: { t: (key: string) => s
     }
   }
 
-  function handlePresetChange(e: React.ChangeEvent<HTMLSelectElement>) {
+  function handlePresetChange(e: SelectChangeEvent) {
     const key = e.target.value;
     setPresetKey(key);
     if (key in PRESSURE_CAL_PRESETS) setPoints(PRESSURE_CAL_PRESETS[key]);
@@ -800,12 +802,12 @@ function PressureCalibrationPanel({ t, deviceUid, run }: { t: (key: string) => s
         <div className="field-grid">
           <div className="field">
             <label>{t("pressureCalServer")}</label>
-            <select value={selectedPreset} onChange={(e) => setSelectedPreset(e.target.value)} disabled={isRunning}>
+            <Select value={selectedPreset} onChange={(e) => setSelectedPreset(e.target.value)} disabled={isRunning}>
               {serverPresets.map((p) => (
                 <option key={p.id} value={p.id}>{p.label}</option>
               ))}
               <option value="custom">{t("pressureCalServerCustom")}</option>
-            </select>
+            </Select>
           </div>
           {selectedPreset !== "custom" && serverPresets.find((p) => p.id === selectedPreset) && (
             <div className="field">
@@ -869,14 +871,14 @@ function PressureCalibrationPanel({ t, deviceUid, run }: { t: (key: string) => s
           </div>
           <div className="field">
             <label>{t("pressureCalPointsPreset")}</label>
-            <select value={presetKey} onChange={handlePresetChange} disabled={isRunning}>
+            <Select value={presetKey} onChange={handlePresetChange} disabled={isRunning}>
               {Object.keys(PRESSURE_CAL_PRESETS).map((key) => (
                 <option key={key} value={key}>
                   {t(`pressureCalPreset${key.charAt(0).toUpperCase()}${key.slice(1)}`)}
                 </option>
               ))}
               <option value="custom">{t("pressureCalPresetCustom")}</option>
-            </select>
+            </Select>
           </div>
         </div>
         <div className="calibration-level-list">
@@ -1147,7 +1149,7 @@ export function DeviceSettingsPage() {
   const [streamBufferEnabled, setStreamBufferEnabled] = useState(streamBuffer.enabled !== false);
   const [streamBufferMode, setStreamBufferMode] = useState(stringValue(streamBuffer.mode, "standard"));
   const [chargeProfile, setChargeProfile] = useState(stringValue(batteryStatus.profile, "balanced"));
-  const [batteryCapacityChoice, setBatteryCapacityChoice] = useState<"200" | "400" | "custom">("400");
+  const [batteryCapacityChoice, setBatteryCapacityChoice] = useState<BatteryCapacityChoice>("400");
   const [customBatteryCapacity, setCustomBatteryCapacity] = useState("");
   const [maxBatteryChargeCurrent, setMaxBatteryChargeCurrent] = useState("100");
   const batteryProfileDraftError = batteryProfileValidationError(batteryCapacityChoice, customBatteryCapacity, maxBatteryChargeCurrent);
@@ -1158,13 +1160,9 @@ export function DeviceSettingsPage() {
     if (!deviceUid || batteryDraftSeededForRef.current === deviceUid) return;
     if (battery.profileResolved !== true || battery.capacityMah === null || battery.maxChargeCurrentMa === null) return;
     batteryDraftSeededForRef.current = deviceUid;
-    const capacity = String(battery.capacityMah);
-    if (capacity === "200" || capacity === "400") {
-      setBatteryCapacityChoice(capacity);
-    } else {
-      setBatteryCapacityChoice("custom");
-      setCustomBatteryCapacity(capacity);
-    }
+    const choice = batteryCapacityChoiceFor(battery.capacityMah, battery.maxChargeCurrentMa);
+    setBatteryCapacityChoice(choice);
+    if (choice === "custom") setCustomBatteryCapacity(String(battery.capacityMah));
     setMaxBatteryChargeCurrent(String(battery.maxChargeCurrentMa));
   }, [battery.capacityMah, battery.maxChargeCurrentMa, battery.profileResolved, deviceUid]);
   const [lowBatteryThresholdPercent, setLowBatteryThresholdPercent] = useState(stringValue(batteryLed.low_battery_threshold_percent, "10"));
@@ -2040,13 +2038,13 @@ export function DeviceSettingsPage() {
                   <p className="service-muted">{t("chargeProfileCopy")}</p>
                 </div>
                 <div className="settings-inline-form">
-                  <select value={chargeProfile} onChange={(event) => setChargeProfile(event.target.value)} aria-label={t("chargeProfile")}>
+                  <Select value={chargeProfile} onChange={(event) => setChargeProfile(event.target.value)} aria-label={t("chargeProfile")}>
                     <option value="ultra_slow">{t("ultraSlowChargingMode")}</option>
                     <option value="slow">{t("slowChargingMode")}</option>
                     <option value="balanced">{t("balancedChargingMode")}</option>
                     <option value="fast">{t("fastChargingMode")}</option>
                     <option value="extreme">{t("extremeChargingMode")}</option>
-                  </select>
+                  </Select>
                   <button className="button primary" type="button" disabled={isCommandBusy("set_charge_profile") || !deviceUid || chargeProfile === batteryStatus.profile} onClick={() => void applyChargeProfile()}>
                     {isCommandBusy("set_charge_profile") ? t("running") : t("saveChargeProfile")}
                   </button>
@@ -2060,9 +2058,25 @@ export function DeviceSettingsPage() {
                     </div>
                     {batteryProfileSetupRequired(batteryStatus) ? <p className="notice">{t("batteryProfileSetupNotice")}</p> : null}
                     <div className="field-grid">
-                      <div className="field"><label>{t("batteryCapacityMah")}</label><select value={batteryCapacityChoice} onChange={(event) => setBatteryCapacityChoice(event.target.value as "200" | "400" | "custom")}><option value="200">200mAh</option><option value="400">400mAh</option><option value="custom">{t("batteryCapacityCustom")}</option></select></div>
-                      {batteryCapacityChoice === "custom" ? <div className="field"><label>{t("batteryCapacityCustom")}</label><input type="number" min="1" value={customBatteryCapacity} onChange={(event) => setCustomBatteryCapacity(event.target.value)} /></div> : null}
-                      <div className="field"><label>{t("batteryMaxChargeCurrent")}</label><input type="number" min="100" max="350" step="10" value={maxBatteryChargeCurrent} onChange={(event) => setMaxBatteryChargeCurrent(event.target.value)} /></div>
+                      <div className="field">
+                        <label>{t("batteryCapacityMah")}</label>
+                        <Select value={batteryCapacityChoice} onChange={(event) => setBatteryCapacityChoice(event.target.value as BatteryCapacityChoice)}>
+                          {BATTERY_PRESETS.map((preset) => (
+                            <option key={preset.capacityMah} value={preset.capacityMah}>
+                              {preset.capacityMah}mAh · {preset.maxChargeCurrentMa}mA
+                            </option>
+                          ))}
+                          <option value="custom">{t("batteryCapacityCustom")}</option>
+                        </Select>
+                      </div>
+                      {batteryCapacityChoice === "custom" ? (
+                        <>
+                          <div className="field"><label>{t("batteryCapacityCustom")}</label><input type="number" min="1" value={customBatteryCapacity} onChange={(event) => setCustomBatteryCapacity(event.target.value)} /></div>
+                          <div className="field"><label>{t("batteryMaxChargeCurrent")}</label><input type="number" min="100" max="350" step="10" value={maxBatteryChargeCurrent} onChange={(event) => setMaxBatteryChargeCurrent(event.target.value)} /></div>
+                        </>
+                      ) : (
+                        <p className="service-muted">{t("batteryMaxChargeCurrent")}: {batteryPresetFor(batteryCapacityChoice)?.maxChargeCurrentMa} mA</p>
+                      )}
                     </div>
                     {batteryProfileDraftError ? <p className="notice error">{t("batteryProfileInvalid")}</p> : null}
                     <div className="actions compact">
@@ -2162,13 +2176,13 @@ export function DeviceSettingsPage() {
                 <p className="service-muted">{t("boardLedBrightnessCopy")}</p>
               </div>
               <div className="settings-inline-form">
-                <select value={String(boardLedBrightness)} onChange={(event) => setBoardLedBrightness(boardLedBrightnessValue(event.target.value))} aria-label={t("paramBrightness")}>
+                <Select value={String(boardLedBrightness)} onChange={(event) => setBoardLedBrightness(boardLedBrightnessValue(event.target.value))} aria-label={t("paramBrightness")}>
                   {BOARD_LED_BRIGHTNESS_OPTIONS.map((option) => (
                     <option key={option} value={option}>
                       {option === DEFAULT_BOARD_LED_BRIGHTNESS ? t("boardLedBrightnessDefault") : `${Math.round(option * 100)}%`}
                     </option>
                   ))}
-                </select>
+                </Select>
                 <button className="button primary" type="button" disabled={isCommandBusy("set_indicators") || !deviceUid} onClick={() => void run(t("saveBoardLedBrightness"), { command: "set_indicators", board_led: { brightness: boardLedBrightness } })}>
                   {isCommandBusy("set_indicators") ? t("running") : t("saveBoardLedBrightness")}
                 </button>
@@ -2183,14 +2197,14 @@ export function DeviceSettingsPage() {
                 <div className="field-grid">
                   <div className="field">
                     <label>{t("externalLedMode")}</label>
-                    <select value={externalLedMode} onChange={(event) => setExternalLedMode(event.target.value)}>
+                    <Select value={externalLedMode} onChange={(event) => setExternalLedMode(event.target.value)}>
                       <option value="off">{t("indicatorMode_off")}</option>
                       <option value="enabled">{t("indicatorMode_enabled")}</option>
-                    </select>
+                    </Select>
                   </div>
                   <div className="field">
                     <label>{t("externalLedPreset")}</label>
-                    <select value={externalPreset} onChange={(event) => setExternalPreset(event.target.value)}>
+                    <Select value={externalPreset} onChange={(event) => setExternalPreset(event.target.value)}>
                       <option value="system_status">{t("indicatorPreset_system_status")}</option>
                       <option value="connectivity">{t("indicatorPreset_connectivity")}</option>
                       <option value="pressure_meter">{t("indicatorPreset_pressure_meter")}</option>
@@ -2199,23 +2213,23 @@ export function DeviceSettingsPage() {
                       <option value="solid_marker">{t("indicatorPreset_solid_marker")}</option>
                       <option value="identify">{t("indicatorPreset_identify")}</option>
                       <option value="off">{t("indicatorPreset_off")}</option>
-                    </select>
+                    </Select>
                     <p className="service-muted">{t("externalLedAppPriority")}</p>
                   </div>
                   <div className="field">
                     <label>{t("paramBrightness")}</label>
-                    <select value={String(brightness)} onChange={(event) => setBrightness(Number(event.target.value) || DEFAULT_EXTERNAL_LED_BRIGHTNESS)}>
+                    <Select value={String(brightness)} onChange={(event) => setBrightness(Number(event.target.value) || DEFAULT_EXTERNAL_LED_BRIGHTNESS)}>
                       {EXTERNAL_LED_BRIGHTNESS_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
                           {t(option.labelKey)}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                   {externalPreset === "solid_marker" ? (
                     <div className="field">
                       <label>{t("externalLedColor")}</label>
-                      <select value={externalColor} onChange={(event) => setExternalColor(event.target.value)}>
+                      <Select value={externalColor} onChange={(event) => setExternalColor(event.target.value)}>
                         <option value="teal">{t("indicatorColor_teal")}</option>
                         <option value="green">{t("indicatorColor_green")}</option>
                         <option value="blue">{t("indicatorColor_blue")}</option>
@@ -2223,7 +2237,7 @@ export function DeviceSettingsPage() {
                         <option value="amber">{t("indicatorColor_amber")}</option>
                         <option value="red">{t("indicatorColor_red")}</option>
                         <option value="white">{t("indicatorColor_white")}</option>
-                      </select>
+                      </Select>
                     </div>
                   ) : null}
                 </div>
@@ -2262,20 +2276,20 @@ export function DeviceSettingsPage() {
                 <div className="field-grid">
                   <div className="field">
                     <label>{t("paramOledMode")}</label>
-                    <select value={oledMode} onChange={(event) => setOledMode(event.target.value)}>
+                    <Select value={oledMode} onChange={(event) => setOledMode(event.target.value)}>
                       <option value="off">{t("indicatorMode_off")}</option>
                       <option value="auto">{t("indicatorMode_auto")}</option>
                       <option value="enabled">{t("indicatorMode_enabled")}</option>
-                    </select>
+                    </Select>
                   </div>
                   <div className="field">
                     <label>{t("oledPage")}</label>
-                    <select value={oledPage} onChange={(event) => setOledPage(event.target.value)}>
+                    <Select value={oledPage} onChange={(event) => setOledPage(event.target.value)}>
                       <option value="live_status">{t("oledPage_live_status")}</option>
                       <option value="sensor_snapshot">{t("oledPage_sensor_snapshot")}</option>
                       <option value="recording_status">{t("oledPage_recording_status")}</option>
                       <option value="app">{t("oledPage_app")}</option>
-                    </select>
+                    </Select>
                   </div>
                   <div className="field">
                     <label>{t("oledUpdateHz")}</label>
@@ -2287,12 +2301,12 @@ export function DeviceSettingsPage() {
                   </div>
                   <div className="field">
                     <label>{t("oledRotation")}</label>
-                    <select value={oledRotation} onChange={(event) => setOledRotation(Number(event.target.value))}>
+                    <Select value={oledRotation} onChange={(event) => setOledRotation(Number(event.target.value))}>
                       <option value={0}>{t("oledRotation_0")}</option>
                       <option value={1}>{t("oledRotation_90")}</option>
                       <option value={2}>{t("oledRotation_180")}</option>
                       <option value={3}>{t("oledRotation_270")}</option>
-                    </select>
+                    </Select>
                   </div>
                 </div>
                 <div className="actions compact">
@@ -2516,10 +2530,10 @@ export function DeviceSettingsPage() {
                   <input type="checkbox" checked={streamBufferEnabled} onChange={(event) => setStreamBufferEnabled(event.target.checked)} />
                   <span>{t("paramEnabled")}</span>
                 </label>
-                <select value={streamBufferMode} disabled={!streamBufferEnabled} onChange={(event) => setStreamBufferMode(event.target.value)} aria-label={t("streamBufferMode")}>
+                <Select value={streamBufferMode} disabled={!streamBufferEnabled} onChange={(event) => setStreamBufferMode(event.target.value)} aria-label={t("streamBufferMode")}>
                   <option value="standard">{t("streamBufferStandardMode")}</option>
                   <option value="extended">{t("streamBufferExtendedMode")}</option>
-                </select>
+                </Select>
                 <button className="button" type="button" disabled={isCommandBusy("set_stream_buffer") || !deviceUid || isControlUnavailable} onClick={() => void applyStreamBuffer()}>
                   {isCommandBusy("set_stream_buffer") ? t("running") : t("saveStreamBuffer")}
                 </button>
@@ -2594,7 +2608,7 @@ export function DeviceSettingsPage() {
               <div className="changelog-panel">
                 {updateChangelogLoading ? <p className="service-muted">{t("loading")}</p> : null}
                 {updateChangelogError ? <p className="service-muted">{updateChangelogError || t("changelogUnavailable")}</p> : null}
-                {updateChangelogBody ? <pre>{updateChangelogBody}</pre> : null}
+                {updateChangelogBody ? <Markdown source={updateChangelogBody} /> : null}
                 {!updateChangelogLoading && !updateChangelogBody && !updateChangelogError ? <p className="service-muted">{t("changelogUnavailable")}</p> : null}
               </div>
             ) : null}
@@ -2604,7 +2618,7 @@ export function DeviceSettingsPage() {
               <>
                 <div className="field update-channel-field">
                   <label>{t("updateChannel")}</label>
-                  <select
+                  <Select
                     value={deviceUpdateChannel}
                     disabled={isCommandBusy("set_ota_config") || !deviceUid}
                     onChange={(event) => {
@@ -2615,7 +2629,7 @@ export function DeviceSettingsPage() {
                   >
                     <option value="stable">{t("updateChannelStable")}</option>
                     <option value="beta">{t("updateChannelBeta")}</option>
-                  </select>
+                  </Select>
                 </div>
                 {waitingForStableToCatchUp(deviceUpdateChannel, normalized?.firmwareVersion) ? (
                   <p className="cal-hint">{t("updateChannelWaitingStable").replace("{version}", normalized?.firmwareVersion ?? "")}</p>
@@ -2869,16 +2883,16 @@ export function DeviceSettingsPage() {
                   <input type="checkbox" checked={logEnabled} onChange={(event) => setLogEnabled(event.target.checked)} />
                   <span>{t("paramEnabled")}</span>
                 </label>
-                <select value={logLevel} onChange={(event) => setLogLevel(event.target.value)} aria-label={t("logLevel")}>
+                <Select value={logLevel} onChange={(event) => setLogLevel(event.target.value)} aria-label={t("logLevel")}>
                   <option value="error">error</option>
                   <option value="warn">warn</option>
                   <option value="info">info</option>
                   <option value="debug">debug</option>
-                </select>
-                <select value={logMode} onChange={(event) => setLogMode(event.target.value)} aria-label={t("logMode")}>
+                </Select>
+                <Select value={logMode} onChange={(event) => setLogMode(event.target.value)} aria-label={t("logMode")}>
                   <option value="standard">{t("logModeStandard")}</option>
                   <option value="extended">{t("logModeExtended")}</option>
-                </select>
+                </Select>
                 <button className="button primary" type="button" disabled={isCommandBusy("set_log") || !deviceUid} onClick={() => void saveLogSettings()}>
                   {isCommandBusy("set_log") ? t("running") : t("saveLogSettings")}
                 </button>
@@ -2923,11 +2937,11 @@ export function DeviceSettingsPage() {
               </label>
               <div className="field">
                 <label>{t("filterMedian")}</label>
-                <select value={filterMedian} disabled={!filterEnabled} onChange={(event) => setFilterMedian(Number(event.target.value))}>
+                <Select value={filterMedian} disabled={!filterEnabled} onChange={(event) => setFilterMedian(Number(event.target.value))}>
                   <option value={1}>1 ({t("filterMedianOff")})</option>
                   <option value={3}>3</option>
                   <option value={5}>5</option>
-                </select>
+                </Select>
               </div>
               <div className="field">
                 <label>{t("filterAlpha")}</label>
@@ -2989,7 +3003,7 @@ export function DeviceSettingsPage() {
           {isControlUnavailable || !currentMode ? (
             <strong>{connectionLabel}</strong>
           ) : (
-            <select
+            <Select
               aria-label={t("mode")}
               value={modeDraft}
               disabled={busyCommand !== ""}
@@ -3004,7 +3018,7 @@ export function DeviceSettingsPage() {
               {!["normal", "maintenance", "safe_maintenance"].includes(currentMode) ? (
                 <option value={currentMode} disabled>{currentMode}</option>
               ) : null}
-            </select>
+            </Select>
           )}
           {!isControlUnavailable && currentMode && modeDraft !== currentMode ? (
             <button

@@ -23,6 +23,7 @@ import {
 import { valueToCsv } from "../lib/valueFormat";
 import { updateStateOf } from "../lib/device";
 import { appliedFileCount, isAppliedComplete, progressOf, totalUnits, type UpdateState } from "../lib/updateProgress";
+import { Select } from "../components/Select";
 
 
 type TerminalLogEntry =
@@ -800,14 +801,14 @@ export function TerminalPage() {
           <div className="field-grid">
             <div className="field">
               <label>{t("deviceUid")}</label>
-              <select value={selectedDevice} onChange={(event) => setSelectedDevice(event.target.value)}>
+              <Select value={selectedDevice} onChange={(event) => setSelectedDevice(event.target.value)}>
                 <option value="">{t("selectDevice")}</option>
                 {devices.map((device) => (
                   <option key={device.device_uid} value={device.device_uid}>
                     {device.device_uid}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
           <div className="field terminal-paste">
@@ -882,7 +883,7 @@ export function TerminalPage() {
                             <em>{param.required ? t("required") : t("optional")}</em>
                           </div>
                           {param.type === "select" ? (
-                            <select
+                            <Select
                               value={paramValues[param.key] ?? ""}
                               onChange={(event) => updateParam(param.key, event.target.value)}
                             >
@@ -892,7 +893,7 @@ export function TerminalPage() {
                                   {t(option.labelKey)}
                                 </option>
                               ))}
-                            </select>
+                            </Select>
                           ) : (
                             <input
                               type={param.type === "number" ? "number" : "text"}

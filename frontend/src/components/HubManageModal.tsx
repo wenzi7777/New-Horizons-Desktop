@@ -1,11 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 
+import { ChangelogPanel } from "./ChangelogPanel";
 import { ConfirmModal } from "./ConfirmModal";
 import { useI18n } from "../i18n";
 import { api, type GatewayEntry, type HubLanDeviceEntry } from "../lib/api";
 import { normalizeUpdateChannel, waitingForStableToCatchUp, type UpdateChannel } from "../lib/versioning";
 import { requestGatewaySnapshot, sendGatewayCommand, useWsState } from "../lib/wsClient";
+import { Select } from "./Select";
 
 // A Hub's management dialog, laid out like a device's settings page
 // (overview cards, section sidebar) but kept as an overlay on the Relays
@@ -333,11 +335,11 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
               </div>
               <div className="field">
                 <label htmlFor="hub-target-mode">{t("gatewayTarget")}</label>
-                <select id="hub-target-mode" value={targetMode} onChange={(event) => setTargetMode(event.target.value)}>
+                <Select id="hub-target-mode" value={targetMode} onChange={(event) => setTargetMode(event.target.value)}>
                   <option value="production">Production</option>
                   <option value="local">Local</option>
                   <option value="manual">Manual</option>
-                </select>
+                </Select>
               </div>
               <div className="field">
                 <label htmlFor="hub-manual-url">{t("hubManualUrl")}</label>
@@ -424,7 +426,7 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
               <>
                 <div className="field">
                   <label>{t("updateChannel")}</label>
-                  <select
+                  <Select
                     value={hubChannel}
                     disabled={disabled}
                     onChange={(event) => {
@@ -435,7 +437,7 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
                   >
                     <option value="stable">{t("updateChannelStable")}</option>
                     <option value="beta">{t("updateChannelBeta")}</option>
-                  </select>
+                  </Select>
                 </div>
                 {waitingForStableToCatchUp(hubChannel, hubVersion) ? (
                   <p className="cal-hint">{t("updateChannelWaitingStable").replace("{version}", hubVersion)}</p>
@@ -446,11 +448,7 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
               <p className="service-muted">{t("hubUpdateChannelNeedsFirmware")}</p>
             ) : null}
             {applying ? <p className="cal-hint">{t("hubUpdateInProgress")}</p> : null}
-            {changelogUrl ? (
-              <p className="cal-hint">
-                <a href={changelogUrl} target="_blank" rel="noreferrer">{t("hubUpdateChangelog")}</a>
-              </p>
-            ) : null}
+            {changelogUrl ? <ChangelogPanel url={changelogUrl} /> : null}
             {!supportsUpdate ? <p className="service-muted">{t("hubUpdateNeedsFirmware")}</p> : null}
           </div>
         </div>
