@@ -400,26 +400,13 @@ button:disabled {
   gap: 12px;
 }
 
-/* Sign-in: one form card; the app name and the credit are the page behind it. */
+/* Sign-in: one form card; the lab and university sit at the foot of the page. */
 .login-backdrop {
   position: fixed;
   inset: 0;
   overflow: hidden;
   pointer-events: none;
   user-select: none;
-}
-
-.login-backdrop-mark {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  white-space: nowrap;
-  font-size: clamp(88px, 17vw, 300px);
-  font-weight: 750;
-  letter-spacing: -0.05em;
-  line-height: 1;
-  color: color-mix(in srgb, var(--accent) 11%, transparent);
 }
 
 .login-backdrop-credit {
@@ -467,6 +454,7 @@ input:-webkit-autofill:focus {
   -webkit-box-shadow: 0 0 0 1000px var(--panel-solid) inset;
   -webkit-text-fill-color: var(--text);
   caret-color: var(--text);
+  border-color: var(--line-strong);
   transition: background-color 9999s ease-out 0s;
 }
 
@@ -11715,16 +11703,30 @@ button.cal-matrix-cell:active {
   font-size: 12px;
 }
 
+/* Name, then small actions; the preview text takes the rest of the pane. */
 .device-finder .finder-preview {
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .device-finder-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-dim);
+}
+
+.device-finder-preview-head div {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .device-finder-preview-head strong {
+  overflow-wrap: anywhere;
+  color: var(--text);
   font-size: 14px;
 }
 
@@ -11733,12 +11735,19 @@ button.cal-matrix-cell:active {
   font-size: 12px;
 }
 
+.device-finder-preview-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .device-finder .file-preview-content {
+  flex: 1 1 auto;
   min-height: 0;
   max-height: none;
-  height: 100%;
   margin: 0;
   overflow: auto;
+  font-size: 12px;
 }
 
 .device-finder .finder-preview .button {

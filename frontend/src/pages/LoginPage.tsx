@@ -24,9 +24,8 @@ export function LoginPage() {
 
   return (
     <main className="login-shell">
-      {/* The name and credit sit behind the form as part of the page. */}
+      {/* The lab and university, at the foot of the page. */}
       <div className="login-backdrop" aria-hidden="true">
-        <span className="login-backdrop-mark">NH Console</span>
         <span className="login-backdrop-credit">
           {LAB_NAME}
           <br />

@@ -25,8 +25,28 @@ type FileScope = typeof SCOPES[number];
 
 const SCOPE_ICONS: Record<FileScope, LucideIcon> = { user: UserRound, logs: ScrollText, calibration: Gauge };
 
-// How much of the end of a log the preview shows.
+// How much a preview reads: the end of a log, the start of anything else.
 const LOG_PREVIEW_BYTES = 32768;
+
+const fileKey = (file: DeviceFileEntry) => `${file.scope}:${file.path}`;
+
+// Text as text; anything else (an app package, a calibration blob) as a hex
+// dump of its first bytes, which says more than mojibake.
+function previewTextOf(bytes: Uint8Array) {
+  let control = 0;
+  for (const byte of bytes) {
+    if (byte < 9 || (byte > 13 && byte < 32)) control += 1;
+  }
+  if (bytes.length === 0 || control / bytes.length < 0.02) return new TextDecoder().decode(bytes);
+  const lines: string[] = [];
+  for (let offset = 0; offset < Math.min(bytes.length, 4096); offset += 16) {
+    const row = Array.from(bytes.subarray(offset, offset + 16));
+    const hex = row.map((byte) => byte.toString(16).padStart(2, "0")).join(" ").padEnd(47, " ");
+    const ascii = row.map((byte) => (byte >= 32 && byte < 127 ? String.fromCharCode(byte) : ".")).join("");
+    lines.push(`${offset.toString(16).padStart(8, "0")}  ${hex}  |${ascii}|`);
+  }
+  return lines.join("\n");
+}
 
 function chunkDataText(result: Record<string, unknown> | null | undefined) {
   const chunkResult = result ?? {};
@@ -104,6 +124,8 @@ export function DeviceFilesPage() {
   const [uploadPath, setUploadPath] = useState("");
   const [selectedFile, setSelectedFile] = useState<DeviceFileEntry | null>(null);
   const [previewOpen, setPreviewOpen] = useState(true);
+  // Previews read from the device, so they load only when asked for.
+  const [previewFor, setPreviewFor] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [previewText, setPreviewText] = useState("");
@@ -138,9 +160,6 @@ export function DeviceFilesPage() {
 
   useEffect(() => {
     if (!deviceUid) return;
-    if (activeScope === "logs") {
-      setPreviewOpen(true);
-    }
     void refreshScope(activeScope);
     void refreshStorage();
   }, [activeScope, deviceUid]);
@@ -160,8 +179,15 @@ export function DeviceFilesPage() {
     }
   }, [activeScope, items, selectedFile?.path]);
 
+  // A new selection drops the previous preview.
   useEffect(() => {
-    if (!previewOpen || !selectedFile || selectedFile.scope !== "logs") return;
+    setPreviewFor(null);
+    setPreviewText("");
+    setPreviewError("");
+  }, [selectedFile?.scope, selectedFile?.path]);
+
+  useEffect(() => {
+    if (!previewOpen || !selectedFile || previewFor !== fileKey(selectedFile)) return;
     let cancelled = false;
     const file = selectedFile;
 
@@ -172,10 +198,11 @@ export function DeviceFilesPage() {
         const begin = await queue({ command: "file_read_begin", scope: file.scope, path: file.path });
         ensureReadOk(begin.result);
         const size = Number(begin.result?.size ?? file.size ?? 0);
-        // The newest LOG_PREVIEW_BYTES, read READ_CHUNK_BYTES at a time like
-        // a download rather than in one request the device must buffer whole.
+        // LOG_PREVIEW_BYTES (a log's newest, any other file's first), read
+        // READ_CHUNK_BYTES at a time like a download rather than in one
+        // request the device must buffer whole.
         const length = Math.min(size || LOG_PREVIEW_BYTES, LOG_PREVIEW_BYTES);
-        let offset = Math.max(size - length, 0);
+        let offset = file.scope === "logs" ? Math.max(size - length, 0) : 0;
         const parts: Uint8Array[] = [];
         let loaded = 0;
         while (!cancelled && loaded < length) {
@@ -205,7 +232,7 @@ export function DeviceFilesPage() {
           cursor += part.length;
         }
         if (!cancelled) {
-          setPreviewText(new TextDecoder().decode(merged));
+          setPreviewText(previewTextOf(merged));
         }
       } catch (error) {
         if (!cancelled) {
@@ -225,7 +252,7 @@ export function DeviceFilesPage() {
     };
   // queue is stable (useCallback in useDeviceCommand) — intentionally omitted from deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeScope, previewOpen, selectedFile]);
+  }, [activeScope, previewOpen, previewFor, selectedFile]);
 
   async function downloadFileBytes(
     file: DeviceFileEntry,
@@ -355,8 +382,8 @@ export function DeviceFilesPage() {
   // A log is read from its end; show the newest lines first.
   useEffect(() => {
     const element = previewRef.current;
-    if (element) element.scrollTop = element.scrollHeight;
-  }, [previewText]);
+    if (element) element.scrollTop = selectedFile?.scope === "logs" ? element.scrollHeight : 0;
+  }, [previewText, selectedFile?.scope]);
 
   function onListKey(event: KeyboardEvent<HTMLDivElement>) {
     if (!items.length || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
@@ -523,9 +550,9 @@ export function DeviceFilesPage() {
                     className={`finder-row${selected ? " selected" : ""}`}
                     onClick={() => setSelectedFile(file)}
                     onDoubleClick={() => {
-                      // A log opens in the preview; anything else downloads.
-                      if (file.scope === "logs") setPreviewOpen(true);
-                      else void downloadFile(file);
+                      setSelectedFile(file);
+                      setPreviewOpen(true);
+                      setPreviewFor(fileKey(file));
                     }}
                   >
                     <span className="finder-cell finder-name">
@@ -546,27 +573,40 @@ export function DeviceFilesPage() {
                   <ScopeIcon size={40} strokeWidth={1.4} aria-hidden="true" />
                   <span>{items.length ? t("deviceFilesSelectHint") : t("emptyFiles")}</span>
                 </div>
-              ) : selectedFile.scope === "logs" ? (
-                <>
-                  <div className="device-finder-preview-head">
-                    <strong>{selectedFile.name || selectedFile.path}</strong>
-                    <span>{selectedSize} · {t("deviceFilesLogTail")}</span>
-                  </div>
-                  {previewLoading ? <p className="finder-empty">{t("loadingPreview")}</p> : null}
-                  {previewError ? <p className="notice error">{previewError}</p> : null}
-                  {!previewLoading && !previewError ? <pre ref={previewRef} className="file-preview-content">{previewText}</pre> : null}
-                </>
               ) : (
                 <>
-                  <div className="finder-preview-hero">
-                    <FileText size={44} strokeWidth={1.4} aria-hidden="true" />
-                    <strong>{selectedFile.name || selectedFile.path}</strong>
-                    <span>{t(`fileScope_${selectedFile.scope}`)} · {selectedSize}</span>
+                  <div className="device-finder-preview-head">
+                    <FileText size={30} strokeWidth={1.4} aria-hidden="true" />
+                    <div>
+                      <strong>{selectedFile.name || selectedFile.path}</strong>
+                      <span>{t(`fileScope_${selectedFile.scope}`)} · {selectedSize}</span>
+                    </div>
                   </div>
-                  <button className="button primary" type="button" disabled={running} onClick={() => void downloadFile(selectedFile)}>
-                    <Download size={15} strokeWidth={2} aria-hidden="true" />
-                    {t("download")}
-                  </button>
+                  <div className="actions compact">
+                    {previewFor === fileKey(selectedFile) ? (
+                      <button className="button compact" type="button" onClick={() => setPreviewFor(null)}>
+                        {t("hidePreview")}
+                      </button>
+                    ) : (
+                      <button className="button compact primary" type="button" disabled={running} onClick={() => setPreviewFor(fileKey(selectedFile))}>
+                        {t("preview")}
+                      </button>
+                    )}
+                    <button className="button compact" type="button" disabled={running} onClick={() => void downloadFile(selectedFile)}>
+                      <Download size={13} strokeWidth={2} aria-hidden="true" />
+                      {t("download")}
+                    </button>
+                  </div>
+                  {previewFor === fileKey(selectedFile) ? (
+                    <>
+                      <p className="device-finder-preview-note">
+                        {selectedFile.scope === "logs" ? t("deviceFilesLogTail") : t("deviceFilesHead")}
+                      </p>
+                      {previewLoading ? <p className="finder-empty">{t("loadingPreview")}</p> : null}
+                      {previewError ? <p className="notice error">{previewError}</p> : null}
+                      {!previewLoading && !previewError ? <pre ref={previewRef} className="file-preview-content">{previewText}</pre> : null}
+                    </>
+                  ) : null}
                 </>
               )}
             </aside>
