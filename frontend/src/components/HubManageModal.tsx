@@ -266,8 +266,15 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
   // check/apply commands (it still updates itself at boot).
   const supportsUpdate = Object.keys(updateState).length > 0;
   const checked = record(checkResult?.update);
-  const latestVersion = String(checked.version || (updateState.available === true ? updateState.version : "") || "");
-  const updateAvailable = checked.available === true || (checkResult === null && updateState.available === true);
+  // Hub v0.12.0+: behind the newest release on its channel, the Hub keeps
+  // serving its devices but refuses settings changes and new pairings, and
+  // updates itself once no device is online (like a Gateway's required update).
+  const requiredUpdate = updateState.required_update === true;
+  const requiredVersion = String(updateState.latest_hub_version || "");
+  const latestVersion = String(
+    checked.version || (updateState.available === true ? updateState.version : "") || (requiredUpdate ? requiredVersion : "") || "",
+  );
+  const updateAvailable = checked.available === true || (checkResult === null && (updateState.available === true || requiredUpdate));
   const changelogUrl = String(checked.changelog_url || updateState.changelog_url || "");
   const disabled = busy !== "" || !online || applying !== null;
   // Hub v0.9.0+ reports its update channel in the update block.
@@ -351,10 +358,11 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
               </div>
             </div>
             <div className="actions compact">
-              <button className="button primary" type="submit" disabled={disabled}>
+              <button className="button primary" type="submit" disabled={disabled || requiredUpdate}>
                 {busy === "set_config" ? t("running") : t("hubSaveAndReboot")}
               </button>
             </div>
+            {requiredUpdate ? <p className="cal-hint">{t("hubLockedUntilUpdate")}</p> : null}
           </form>
         </div>
       );
@@ -497,7 +505,7 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
                     <button
                       className="button tiny"
                       type="button"
-                      disabled={busy !== ""}
+                      disabled={busy !== "" || requiredUpdate}
                       onClick={() => void migrate(device.device_uid)}
                     >
                       {busy === `migrate:${device.device_uid}` ? t("running") : t("hubMigrateToHub")}
@@ -562,6 +570,11 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
             <button className="button" type="button" onClick={onClose}>{t("cancel")}</button>
           </div>
           {notice ? <p className={`notice ${noticeClass}`.trim()}>{notice}</p> : null}
+          {requiredUpdate && !applying ? (
+            <p className="notice error">
+              {t(updateState.auto_apply === "retry_later" ? "hubUpdateRequiredRetry" : "hubUpdateRequired").replace("{version}", requiredVersion || latestVersion)}
+            </p>
+          ) : null}
           <section className="settings-overview">
             <div className="settings-overview-card">
               <span>{t("hubStatus")}</span>

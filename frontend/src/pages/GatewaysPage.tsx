@@ -174,6 +174,9 @@ function HubCard({
         ]}
       />
 
+      {hub.update?.required_update === true ? (
+        <p className="cal-hint">{t("hubUpdateRequiredShort").replace("{version}", String(hub.update.latest_hub_version || ""))}</p>
+      ) : null}
       <ServingDevices devices={servingDevices} />
     </article>
   );

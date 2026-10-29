@@ -58,6 +58,64 @@ class GatewayChannelTest(unittest.TestCase):
         self.assertIn('latest_gateway_version(message.get("update_channel"))', source)
 
 
+class FakeHubWebSocket:
+    def __init__(self, incoming):
+        self.incoming = list(incoming)
+        self.sent = []
+
+    def receive(self):
+        return self.incoming.pop(0) if self.incoming else None
+
+    def send(self, payload):
+        self.sent.append(payload)
+
+
+class HubLatestVersionTest(unittest.TestCase):
+    def session_replies(self, messages):
+        import json
+
+        seen = []
+
+        def urlopen(url, timeout=0):
+            seen.append(url)
+            if "New-Horizons-Hub" in url:
+                # Hub manifests are firmware-style: the version is "latest".
+                version = b"v0.13.0-beta.1" if url.endswith("-beta.json") else b"v0.12.0"
+                return FakeResponse(b'{"latest":"' + version + b'","firmware":{}}')
+            return FakeResponse(b'{"version":"v0.6.0"}')
+
+        ws = FakeHubWebSocket([json.dumps(m) for m in messages] + [None])
+        with patch.object(gateway_ws, "_LATEST_GATEWAY_VERSION_CACHE", {"value": "", "expires_at": 0.0}), \
+             patch.object(gateway_ws, "_LATEST_GATEWAY_VERSION_BY_CHANNEL", {}), \
+             patch.object(gateway_ws, "_LATEST_HUB_VERSION_BY_CHANNEL", {}), \
+             patch("newhorizons_backend.gateway_ws.urllib.request.urlopen", side_effect=urlopen):
+            gateway_ws.GatewaySocketSession(NewHorizonsService(mock_mode=False), ws).handle()
+        return [json.loads(raw) for raw in ws.sent], seen
+
+    def test_hub_hello_ack_carries_the_latest_hub_version_on_its_channel(self):
+        replies, seen = self.session_replies([
+            {"type": "hello", "gateway_id": "hub-1", "client_type": "hub", "update_channel": "beta"},
+        ])
+        ack = [r for r in replies if r.get("type") == "gateway_hello_ack" and r.get("gateway_id")][0]
+        self.assertEqual(ack.get("latest_hub_version"), "v0.13.0-beta.1")
+        self.assertNotIn("latest_gateway_version", ack)
+        self.assertTrue(any(url.endswith("/releases/hub-gcu-v23d-lts-beta.json") for url in seen), seen)
+
+    def test_gateway_hello_ack_does_not_carry_a_hub_version(self):
+        replies, _ = self.session_replies([{"type": "hello", "gateway_id": "gw-1"}])
+        ack = [r for r in replies if r.get("type") == "gateway_hello_ack" and r.get("gateway_id")][0]
+        self.assertEqual(ack.get("latest_gateway_version"), "v0.6.0")
+        self.assertNotIn("latest_hub_version", ack)
+
+    def test_hub_version_check_answers_with_the_latest_stable(self):
+        replies, _ = self.session_replies([
+            {"type": "hello", "gateway_id": "hub-1", "client_type": "hub"},
+            {"type": "hub_version_check", "update_channel": "stable"},
+        ])
+        answer = [r for r in replies if r.get("type") == "hub_version"]
+        self.assertEqual(answer[0].get("latest_hub_version"), "v0.12.0")
+
+
 class TerminalChannelTest(unittest.TestCase):
     def test_set_ota_config_passes_channel_and_omits_unset_manifest(self):
         payload = compile_terminal_command("set-ota-config --auto-apply-on-boot true --channel beta")["payload"]
