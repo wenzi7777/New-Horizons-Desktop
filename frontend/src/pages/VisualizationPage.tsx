@@ -16,6 +16,7 @@ import { cssColorForValue, valueRatio } from "../lib/pressureColor";
 import { useI18n } from "../i18n";
 import { useWsState } from "../lib/wsClient";
 import { Select } from "../components/Select";
+import { FitText } from "../components/FitText";
 
 // Behind by this much, the recording card says so.
 const RECORDING_LAG_WARN_MS = 2000;
@@ -1552,30 +1553,30 @@ export function VisualizationPage() {
               <dl className="viz-card-stats">
                 <div>
                   <dt>{t("samples")}</dt>
-                  <dd>{item?.sn ?? "-"}</dd>
+                  <dd><FitText text={String(item?.sn ?? "-")} /></dd>
                 </div>
                 <div>
                   <dt>Device FPS</dt>
-                  <dd>{(deviceFpsByDevice[deviceUid] ?? 0).toFixed(1)}</dd>
+                  <dd><FitText text={(deviceFpsByDevice[deviceUid] ?? 0).toFixed(1)} /></dd>
                 </div>
                 <div>
                   <dt>Render FPS</dt>
-                  <dd>{(renderFpsByDevice[deviceUid] ?? 0).toFixed(1)}</dd>
+                  <dd><FitText text={(renderFpsByDevice[deviceUid] ?? 0).toFixed(1)} /></dd>
                 </div>
                 <div>
                   <dt>{hasEnabledCalibration ? t("maxCalibratedLevel") : "Max P"}</dt>
-                  <dd>{maxPressure.toFixed(2)}</dd>
+                  <dd><FitText text={maxPressure.toFixed(2)} /></dd>
                 </div>
-                <div>
+                <div className="is-wide">
                   <dt>Gyro</dt>
-                  <dd>{formatVector(item?.gyro ?? item?.imu?.gyro)}</dd>
+                  <dd><FitText text={formatVector(item?.gyro ?? item?.imu?.gyro)} /></dd>
                 </div>
-                <div>
+                <div className="is-wide">
                   <dt>Acc</dt>
-                  <dd>{formatVector(item?.acc ?? item?.imu?.acc)}</dd>
+                  <dd><FitText text={formatVector(item?.acc ?? item?.imu?.acc)} /></dd>
                 </div>
                 {showCop ? (
-                  <div className={`viz-card-cop${cop.hasData ? " has-data" : ""}`}>
+                  <div className={`viz-card-cop is-wide${cop.hasData ? " has-data" : ""}`}>
                     <dt>COP</dt>
                     <dd>
                       <span className="cop-mini-board">
@@ -1588,7 +1589,7 @@ export function VisualizationPage() {
                           }}
                         />
                       </span>
-                      <span>X {cop.hasData ? cop.x.toFixed(2) : "--"} · Y {cop.hasData ? cop.y.toFixed(2) : "--"}</span>
+                      <FitText text={`X ${cop.hasData ? cop.x.toFixed(2) : "--"} · Y ${cop.hasData ? cop.y.toFixed(2) : "--"}`} />
                     </dd>
                   </div>
                 ) : null}

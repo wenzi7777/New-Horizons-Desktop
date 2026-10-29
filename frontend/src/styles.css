@@ -3165,20 +3165,45 @@ input:-webkit-autofill:focus {
   font-size: 12px;
 }
 
+/* Fixed columns across the whole card (a vector or the COP gets two), so a
+   value gaining a digit never moves its neighbours; a value that outgrows
+   its column shrinks instead (FitText). Narrow screens fall back to 4 columns. */
 .viz-card-stats {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 6px 18px;
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  align-items: end;
+  gap: 6px 14px;
   margin: 0;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   background: var(--panel-soft);
 }
 
+.viz-card-stats > div {
+  min-width: 0;
+}
+
+.viz-card-stats > .is-wide {
+  grid-column: span 2;
+}
+
+.viz-card-stats:not(:has(.viz-card-cop)) {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+  .viz-card-stats,
+  .viz-card-stats:not(:has(.viz-card-cop)) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .viz-card-stats dt {
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .viz-card-stats dd {
@@ -3188,12 +3213,23 @@ input:-webkit-autofill:focus {
   font-variant-numeric: tabular-nums;
 }
 
+.fit-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 .viz-card-cop dd {
   display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 500;
   font-size: 12px;
+}
+
+.viz-card-cop dd .fit-text {
+  flex: 1;
 }
 
 /* The card a device card's "Visualize" link just opened. */
