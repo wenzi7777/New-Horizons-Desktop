@@ -299,9 +299,11 @@ class GatewaySocketSession:
             if not device_uid:
                 self._send_json({"type": "error", "code": "device_uid_required", "message": "device_uid is required"})
                 return
-            payload.setdefault("gateway_id", self.gateway_id)
+            # A reply through a relay that doesn't serve the device must not
+            # stamp that relay onto the device entry either.
+            if self.service.register_gateway_reply(device_uid, self.sender, self.gateway_id):
+                payload.setdefault("gateway_id", self.gateway_id)
             payload.setdefault("transport_path", "gateway_wss")
-            self.service.register_gateway_device(device_uid, self.sender, gateway_id=self.gateway_id)
             self.service.record_gateway_result(device_uid, payload)
             return
 
@@ -313,9 +315,11 @@ class GatewaySocketSession:
             if not device_uid:
                 self._send_json({"type": "error", "code": "device_uid_required", "message": "device_uid is required"})
                 return
-            payload.setdefault("gateway_id", self.gateway_id)
+            # A reply through a relay that doesn't serve the device must not
+            # stamp that relay onto the device entry either.
+            if self.service.register_gateway_reply(device_uid, self.sender, self.gateway_id):
+                payload.setdefault("gateway_id", self.gateway_id)
             payload.setdefault("transport_path", "gateway_wss")
-            self.service.register_gateway_device(device_uid, self.sender, gateway_id=self.gateway_id)
             self.service.record_gateway_result_chunk(device_uid, payload)
             return
 

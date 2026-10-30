@@ -366,6 +366,27 @@ class GatewayRegistryMixin:
             self._emit_event({"type": "gateway_update", "item": gateway_event})
         return device_uid
 
+    def register_gateway_reply(self, device_uid: str, sender: Callable[[dict[str, Any]], None], gateway_id: str) -> bool:
+        """A command result relayed by `gateway_id`.
+
+        The device answers whichever relay sent it a command, so a result
+        proves the device is reachable through that relay, not that the relay
+        serves it. When another relay currently serves the device, its
+        heartbeats decide; registering the replier here made two Gateways on
+        one LAN take turns owning the device (each status poll went through
+        the last one to answer). Returns whether `gateway_id` is (now) the
+        device's relay.
+        """
+        uid = self._resolve_known_device_uid(device_uid)
+        if not uid:
+            return False
+        with self._lock:
+            owner = self._gateway_device_ids.get(uid, "")
+            if owner and gateway_id and owner != gateway_id and uid in self._gateway_senders:
+                return False
+        self.register_gateway_device(uid, sender, gateway_id=gateway_id)
+        return True
+
     def _record_gateway_device_presence_locked(
         self,
         device_uid: str,

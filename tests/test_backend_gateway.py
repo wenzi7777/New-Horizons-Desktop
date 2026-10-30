@@ -558,6 +558,37 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(device["gateway_id"], "gw-B")
         self.assertTrue(device["gateway_connected"])
 
+    def test_reply_through_non_serving_gateway_does_not_take_the_device(self):
+        # Two Gateways on one LAN: the device streams to gw-A, but answers a
+        # command that went through gw-B. That reply used to make gw-B the
+        # owner, the next status poll went through gw-B, and the device's
+        # Gateway flipped between the two forever.
+        service = NewHorizonsService(mock_mode=False)
+        device_uid = "3CDC7545CCD0"
+        sent_a = []
+        sent_b = []
+        service.register_gateway("gw-A", sent_a.append, {"gateway_name": "Gateway A"})
+        service.register_gateway("gw-B", sent_b.append, {"gateway_name": "Gateway B"})
+        service.record_gateway_summary("gw-A", {
+            "gateway_name": "Gateway A",
+            "state": {"devices": [{"device_uid": device_uid, "connected": True}]},
+        })
+
+        self.assertFalse(service.register_gateway_reply(device_uid, sent_b.append, "gw-B"))
+        device = {item["device_uid"]: item for item in service.list_devices()}[device_uid]
+        self.assertEqual(device["gateway_id"], "gw-A")
+        self.assertEqual(service._gateway_device_ids[device_uid], "gw-A")
+
+        # The serving Gateway's own reply still registers it.
+        self.assertTrue(service.register_gateway_reply(device_uid, sent_a.append, "gw-A"))
+
+    def test_reply_registers_gateway_when_no_one_serves_the_device(self):
+        service = NewHorizonsService(mock_mode=False)
+        sent = []
+        service.register_gateway("gw-B", sent.append, {"gateway_name": "Gateway B"})
+        self.assertTrue(service.register_gateway_reply("3CDC7545CCD0", sent.append, "gw-B"))
+        self.assertEqual(service._gateway_device_ids["3CDC7545CCD0"], "gw-B")
+
     def test_gateway_disconnect_preserves_last_live_seen_at(self):
         service = NewHorizonsService(mock_mode=False)
         sent = []
