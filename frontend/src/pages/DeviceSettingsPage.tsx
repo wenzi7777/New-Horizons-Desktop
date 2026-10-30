@@ -2021,6 +2021,29 @@ export function DeviceSettingsPage() {
             </div>
           </div>
 
+          <div className="settings-card">
+            <h4>{t("settingsSection_pins")}</h4>
+            <p className="service-muted">{pinLayoutCopy}</p>
+            <div className="field-grid">
+              <div className="field">
+                <label>{t("analogPins")}</label>
+                <input value={analogPins} onChange={(event) => { setPinDraftDirty(true); setAnalogPins(event.target.value); }} />
+              </div>
+              <div className="field">
+                <label>{t("selectPins")}</label>
+                <input value={selectPins} onChange={(event) => { setPinDraftDirty(true); setSelectPins(event.target.value); }} />
+              </div>
+            </div>
+            <div className="actions compact">
+              <button className="button primary" type="button" disabled={isCommandBusy("set_matrix_layout") || !deviceUid} onClick={() => void applyPinLayout()}>
+                {isCommandBusy("set_matrix_layout") ? t("running") : t("applyPinLayout")}
+              </button>
+              <button className="button" type="button" onClick={() => setShowIoModal(true)}>
+                {t("ioConfigOpen")}
+              </button>
+            </div>
+          </div>
+
           {boardProfile.supportsChargeControl ? (
             <div className="settings-card">
               <h4>{t("batteryStatus")}</h4>
@@ -2318,27 +2341,6 @@ export function DeviceSettingsPage() {
             ) : null}
           </div>
 
-          <MoreDetails label={`${t("settingsAdvanced")} · ${t("settingsSection_pins")}`}>
-            <p className="service-muted">{pinLayoutCopy}</p>
-            <div className="field-grid">
-              <div className="field">
-                <label>{t("analogPins")}</label>
-                <input value={analogPins} onChange={(event) => { setPinDraftDirty(true); setAnalogPins(event.target.value); }} />
-              </div>
-              <div className="field">
-                <label>{t("selectPins")}</label>
-                <input value={selectPins} onChange={(event) => { setPinDraftDirty(true); setSelectPins(event.target.value); }} />
-              </div>
-            </div>
-            <div className="actions compact">
-              <button className="button primary" type="button" disabled={isCommandBusy("set_matrix_layout") || !deviceUid} onClick={() => void applyPinLayout()}>
-                {isCommandBusy("set_matrix_layout") ? t("running") : t("applyPinLayout")}
-              </button>
-              <button className="button" type="button" onClick={() => setShowIoModal(true)}>
-                {t("ioConfigOpen")}
-              </button>
-            </div>
-          </MoreDetails>
         </div>
       );
     }
