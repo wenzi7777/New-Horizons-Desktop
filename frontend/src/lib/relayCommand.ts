@@ -81,6 +81,9 @@ export function useRelayCommands(relay: GatewayEntry | null, text: RelayCommandT
       const ok = result !== null && result.ok !== false;
       if (result === null) {
         showNotice(t(text.noReply), "error");
+      } else if (!ok && result.message === "remote_management_disabled") {
+        // Turned off in the Gateway's own WebUI after this dialog opened.
+        showNotice(t("gatewayRemoteManagementOff"), "error");
       } else if (!ok) {
         showNotice(String(result.message ?? t(text.failed)), "error");
       }

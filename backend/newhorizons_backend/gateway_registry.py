@@ -238,6 +238,12 @@ class GatewayRegistryMixin:
             if not isinstance(capabilities, list):
                 capabilities = existing.get("capabilities") or []
             update_channel = str(payload.get("update_channel") or existing.get("update_channel") or "")
+            # Gateway only: false when its owner turned off "accept remote
+            # management" in its own WebUI. Sticky; absent (older Gateways,
+            # Hubs) counts as allowed.
+            remote_management = payload.get("remote_management")
+            if not isinstance(remote_management, bool):
+                remote_management = existing.get("remote_management", True)
             update = payload.get("update", existing.get("update"))
             if isinstance(update, dict) and update_channel and not update.get("channel"):
                 # A Gateway names its channel at the top level; the UI reads
@@ -249,6 +255,7 @@ class GatewayRegistryMixin:
                 "client_type": client_type,
                 "capabilities": [str(item) for item in capabilities],
                 "update_channel": update_channel,
+                "remote_management": bool(remote_management),
                 "mac": payload.get("mac", existing.get("mac", "")),
                 "ip": payload.get("ip", existing.get("ip", "")),
                 "version": payload.get("version") or existing.get("version", ""),
@@ -361,6 +368,7 @@ class GatewayRegistryMixin:
                 "clock": payload.get("clock"),
                 "update": payload.get("update"),
                 "update_channel": payload.get("update_channel"),
+                "remote_management": payload.get("remote_management"),
                 "nearby_devices": nearby,
             },
         )

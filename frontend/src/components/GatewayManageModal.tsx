@@ -67,6 +67,12 @@ export function gatewaySupportsCommands(gateway: GatewayEntry | null | undefined
   return Boolean(gateway?.capabilities?.includes("gateway_command"));
 }
 
+// Its owner can turn remote management off in the Gateway's own WebUI; it
+// then refuses every gateway_command. Absent (older Gateways) means allowed.
+export function gatewayAcceptsRemoteManagement(gateway: GatewayEntry | null | undefined) {
+  return gateway?.remote_management !== false;
+}
+
 export function GatewayManageModal({ gatewayId: routeGatewayId, onClose }: { gatewayId: string; onClose: () => void }) {
   const { t } = useI18n();
   const { gateways } = useWsState();
@@ -199,7 +205,9 @@ export function GatewayManageModal({ gatewayId: routeGatewayId, onClose }: { gat
   }
 
   const online = String(gateway.status ?? "offline") === "online";
-  const manageable = gatewaySupportsCommands(gateway);
+  const supportsCommands = gatewaySupportsCommands(gateway);
+  const remoteAllowed = gatewayAcceptsRemoteManagement(gateway);
+  const manageable = supportsCommands && remoteAllowed;
   const servingDevices = gateway.serving_devices ?? [];
   const deniedDevices = gateway.denied_devices ?? [];
   const nearbyDevices = gateway.nearby_devices ?? [];
@@ -246,7 +254,8 @@ export function GatewayManageModal({ gatewayId: routeGatewayId, onClose }: { gat
               <h3>{t("hubSection_overview")}</h3>
             </div>
           </div>
-          {!manageable ? <p className="notice">{t("gatewayNeedsV1")}</p> : null}
+          {!supportsCommands ? <p className="notice">{t("gatewayNeedsV1")}</p> : null}
+          {supportsCommands && !remoteAllowed ? <p className="notice">{t("gatewayRemoteManagementOff")}</p> : null}
           <div className="settings-card">
             <div className="gateway-facts">
               <div><span>{t("lastSeen")}</span><strong>{formatLastSeen(gateway!.last_seen)}</strong></div>

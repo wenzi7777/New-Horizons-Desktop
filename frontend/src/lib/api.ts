@@ -142,6 +142,8 @@ export type GatewayEntry = {
   // From the relay's hello. A Gateway takes gateway_command only when this
   // has "gateway_command" (v1.0.0+); a Hub always does.
   capabilities?: string[];
+  // Gateway only: false when its own WebUI turned off remote management.
+  remote_management?: boolean;
   // Gateway only: devices it has heard FindMe from on its LAN (served or not).
   nearby_devices?: GatewayNearbyDeviceEntry[];
   mac?: string;

@@ -2289,6 +2289,23 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(entry["denied_devices"], ["AABBCCDDEEFF"])
         self.assertEqual(entry["version"], "v1.0.0")
 
+    def test_gateway_summary_tracks_remote_management(self):
+        service = NewHorizonsService(mock_mode=False)
+        session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+        session._handle_json(json_text({"type": "hello", "gateway_id": "LabGateway", "client_type": "gateway", "capabilities": ["gateway_command"]}))
+
+        def entry():
+            return next(item for item in service.gateway_snapshot() if item["gateway_id"] == "LabGateway")
+
+        self.assertTrue(entry()["remote_management"])  # older Gateways never report it
+        session._handle_json(json_text({"type": "gateway_status", "gateway_id": "LabGateway", "payload": {"version": "v1.0.1", "remote_management": False}}))
+        self.assertFalse(entry()["remote_management"])
+        # A message without the field keeps the last report.
+        session._handle_json(json_text({"type": "gateway_claim_request", "gateway_id": "LabGateway"}))
+        self.assertFalse(entry()["remote_management"])
+        session._handle_json(json_text({"type": "gateway_status", "gateway_id": "LabGateway", "payload": {"version": "v1.0.1", "remote_management": True}}))
+        self.assertTrue(entry()["remote_management"])
+
     def test_gateway_command_result_broadcasts_event_by_request_id(self):
         service = NewHorizonsService(mock_mode=False)
         events = []
