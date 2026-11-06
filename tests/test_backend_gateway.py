@@ -2178,6 +2178,117 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(payload["code"], "gateway_control_unavailable")
         self.assertTrue(payload["retryable"])
 
+    def test_publish_gateway_command_uses_gateway_allowlist_for_capable_gateway(self):
+        service = NewHorizonsService(mock_mode=False)
+        ws = FakeGatewayWebSocket([])
+        session = GatewaySocketSession(service, ws)
+        session._handle_json(json_text({
+            "type": "hello",
+            "gateway_id": "LabGateway",
+            "client_type": "gateway",
+            "capabilities": ["gateway_command", "auto_update"],
+        }))
+
+        queued = service.publish_gateway_command("LabGateway", {"command": "device_serve", "device_uid": "3CDC7545CCD0"})
+
+        self.assertEqual(queued["status"], "queued")
+        message = next(json.loads(m) for m in ws.sent if json.loads(m).get("type") == "gateway_command")
+        self.assertEqual(message["payload"]["command"], "device_serve")
+        self.assertEqual(message["payload"]["device_uid"], "3CDC7545CCD0")
+        # Hub-only commands are not a Gateway's.
+        with self.assertRaisesRegex(ValueError, "unknown_command"):
+            service.publish_gateway_command("LabGateway", {"command": "clock_sync"})
+
+    def test_publish_gateway_command_hub_rejects_gateway_only_commands(self):
+        service = NewHorizonsService(mock_mode=False)
+        session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+        session._handle_json(json_text({"type": "hello", "gateway_id": "TestHub", "client_type": "hub"}))
+
+        for command in ("discover", "device_serve", "restart"):
+            with self.assertRaisesRegex(ValueError, "unknown_command"):
+                service.publish_gateway_command("TestHub", {"command": command})
+        service.publish_gateway_command("TestHub", {"command": "clock_sync"})
+
+    def test_publish_gateway_command_old_gateway_is_unsupported_by_relay(self):
+        service = NewHorizonsService(mock_mode=False)
+        ws = FakeGatewayWebSocket([])
+        session = GatewaySocketSession(service, ws)
+        # A pre-v1.0.0 Gateway: no client_type, no capabilities.
+        session._handle_json(json_text({"type": "hello", "gateway_id": "OldGateway"}))
+
+        with self.assertRaisesRegex(ValueError, "unsupported_by_relay"):
+            service.publish_gateway_command("OldGateway", {"command": "check_update"})
+        self.assertFalse(any(json.loads(m).get("type") == "gateway_command" for m in ws.sent))
+
+        app = Flask(__name__)
+        app.register_blueprint(create_blueprint(service=service, profiles_root=ROOT / "mock_data" / "profiles", data_root=ROOT / "mock_data" / "mqtt_store"))
+        response = app.test_client().post(
+            "/newhorizons/api/gateway-command",
+            json={"gateway_id": "OldGateway", "payload": {"command": "check_update"}},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(json_payload(response)["error"], "unsupported_by_relay")
+
+    def test_gateway_capabilities_stick_across_status_and_claim_messages(self):
+        service = NewHorizonsService(mock_mode=False)
+        session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+        session._handle_json(json_text({
+            "type": "hello",
+            "gateway_id": "LabGateway",
+            "client_type": "gateway",
+            "capabilities": ["gateway_command"],
+        }))
+        session._handle_json(json_text({"type": "gateway_status", "gateway_id": "LabGateway", "payload": {"version": "1.0.0"}}))
+
+        entry = next(item for item in service.gateway_snapshot() if item["gateway_id"] == "LabGateway")
+        self.assertEqual(entry["capabilities"], ["gateway_command"])
+
+    def test_gateway_summary_stores_update_channel_and_nearby_devices(self):
+        service = NewHorizonsService(mock_mode=False)
+        session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+        session._handle_json(json_text({
+            "type": "hello",
+            "gateway_id": "LabGateway",
+            "client_type": "gateway",
+            "capabilities": ["gateway_command", "auto_update"],
+            "update_channel": "beta",
+        }))
+        update = {
+            "required_update": True,
+            "latest_version": "v1.0.1",
+            "phase": "idle",
+            "operation": "",
+            "error": "",
+            "available": True,
+            "version": "v1.0.1",
+            "notes_url": "https://example.invalid/notes.md",
+            "auto_apply": "waiting_for_idle",
+        }
+        session._handle_json(json_text({
+            "type": "gateway_status",
+            "gateway_id": "LabGateway",
+            "payload": {
+                "version": "v1.0.0",
+                "update_channel": "beta",
+                "update": update,
+                "state": {
+                    "devices": [],
+                    "denied_devices": ["AABBCCDDEEFF"],
+                    "nearby_devices": [{"device_uid": "112233445566", "serving": False, "denied": False}],
+                    "claims": [],
+                },
+            },
+        }))
+
+        entry = next(item for item in service.gateway_snapshot() if item["gateway_id"] == "LabGateway")
+        self.assertEqual(entry["update_channel"], "beta")
+        self.assertEqual(entry["update"]["channel"], "beta")
+        self.assertTrue(entry["update"]["required_update"])
+        self.assertEqual(entry["update"]["auto_apply"], "waiting_for_idle")
+        self.assertEqual(entry["nearby_devices"][0]["device_uid"], "112233445566")
+        self.assertEqual(entry["denied_devices"], ["AABBCCDDEEFF"])
+        self.assertEqual(entry["version"], "v1.0.0")
+
     def test_gateway_command_result_broadcasts_event_by_request_id(self):
         service = NewHorizonsService(mock_mode=False)
         events = []

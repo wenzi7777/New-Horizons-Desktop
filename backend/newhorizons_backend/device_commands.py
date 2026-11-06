@@ -141,11 +141,26 @@ MODE_COMMANDS = {
     "safemaintenance": MAINTENANCE_COMMANDS,
 }
 
-# Commands that target a Hub/Gateway process itself (via
-# publish_gateway_command()) rather than a downstream device_uid. Small
-# and flat on purpose -- unlike device commands, Hubs have no "mode"
-# concept to gate against.
+# Commands that target a Hub process itself (via publish_gateway_command())
+# rather than a downstream device_uid. Small and flat on purpose -- unlike
+# device commands, relays have no "mode" concept to gate against.
 HUB_COMMANDS = {"set_config", "factory_reset", "clock_sync", "check_update", "apply_update", "set_update_channel"}
+
+# The same channel, aimed at a Gateway (v1.0.0+, which says so with
+# "gateway_command" in its hello capabilities). A Gateway has no clock to
+# sync but carries LAN devices it can discover, refuse, allow or take over.
+GATEWAY_COMMANDS = {
+    "set_config",
+    "check_update",
+    "apply_update",
+    "set_update_channel",
+    "restart",
+    "factory_reset",
+    "discover",
+    "device_reject",
+    "device_allow",
+    "device_serve",
+}
 
 # Device commands the backend issues on its own behalf (hub migration, WiFi
 # provisioning). They are deliberately absent from the terminal allowlist --

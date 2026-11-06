@@ -1,12 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 
-import { ChangelogPanel } from "./ChangelogPanel";
 import { ConfirmModal } from "./ConfirmModal";
+import { RelayRequiredUpdateBanner, RelayUpdateSection, type RelayUpdateText } from "./RelayUpdateSection";
 import { useI18n } from "../i18n";
 import { api, type GatewayEntry, type HubLanDeviceEntry } from "../lib/api";
-import { normalizeUpdateChannel, waitingForStableToCatchUp, type UpdateChannel } from "../lib/versioning";
-import { requestGatewaySnapshot, sendGatewayCommand, useWsState } from "../lib/wsClient";
+import { useRelayCommands, type RelayCommandText } from "../lib/relayCommand";
+import { relayRecord as record, relayUpdateInfo } from "../lib/relayUpdateInfo";
+import type { UpdateChannel } from "../lib/versioning";
+import { requestGatewaySnapshot, useWsState } from "../lib/wsClient";
 import { Select } from "./Select";
 
 // A Hub's management dialog, laid out like a device's settings page
@@ -18,13 +20,26 @@ type HubSection = "overview" | "connection" | "clock" | "update" | "devices" | "
 
 type Confirm = { kind: "apply_update" } | { kind: "beta_channel" } | { kind: "factory_reset" } | { kind: "delete" };
 
-// How long a requested update may take before the page stops waiting for
-// the Hub to come back with a new version.
-const UPDATE_WAIT_MS = 4 * 60 * 1000;
+const HUB_COMMAND_TEXT: RelayCommandText = {
+  noReply: "hubCommandNoReply",
+  failed: "hubCommandFailed",
+  updateDone: "hubUpdateDone",
+  updateFailed: "hubUpdateFailed",
+  updateTimeout: "hubUpdateTimeout",
+};
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
+const HUB_UPDATE_TEXT: RelayUpdateText = {
+  title: "hubSection_update",
+  copy: "hubUpdateCopy",
+  currentVersion: "hubCurrentVersion",
+  latestVersion: "hubLatestVersion",
+  check: "hubUpdateCheck",
+  apply: "hubUpdateApply",
+  updating: "hubUpdating",
+  inProgress: "hubUpdateInProgress",
+  needsUpdate: "hubUpdateNeedsFirmware",
+  channelNeedsUpdate: "hubUpdateChannelNeedsFirmware",
+};
 
 function formatLastSeen(value: unknown) {
   if (!value) return "-";
@@ -50,9 +65,16 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
   const hub: GatewayEntry | null = gateways.find((item) => item.gateway_id === routeGatewayId) ?? null;
 
   const [section, setSection] = useState<HubSection>("overview");
-  const [busy, setBusy] = useState("");
-  const [notice, setNotice] = useState("");
-  const [noticeClass, setNoticeClass] = useState<"" | "success" | "error">("");
+  const {
+    busy,
+    setBusy,
+    notice,
+    noticeClass,
+    showNotice,
+    command: hubCommand,
+    applying,
+    applyUpdate: sendApplyUpdate,
+  } = useRelayCommands(hub, HUB_COMMAND_TEXT);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
 
   // Connection form; seeded from the Hub's own report, then left alone.
@@ -65,11 +87,8 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
   const [lanDevices, setLanDevices] = useState<HubLanDeviceEntry[]>([]);
   const [lanScanned, setLanScanned] = useState(false);
 
-  // Update flow: the last check_update answer, and an apply in progress.
+  // The last check_update answer.
   const [checkResult, setCheckResult] = useState<Record<string, unknown> | null>(null);
-  // `updateKey` is the Hub's update block when the apply was requested, so
-  // an error left over from an earlier attempt is not mistaken for this one.
-  const [applying, setApplying] = useState<{ fromVersion: string; startedAt: number; updateKey: string } | null>(null);
 
   useEffect(() => {
     requestGatewaySnapshot();
@@ -83,60 +102,7 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
     setFormSeeded(true);
   }, [hub, formSeeded]);
 
-  // An update ends when the Hub reconnects with a different version, or
-  // reports the attempt failed, or it takes implausibly long.
   const hubVersion = hub?.version ?? "";
-  const updateState = record(hub?.update);
-  useEffect(() => {
-    if (!applying) return undefined;
-    if (hubVersion && hubVersion !== applying.fromVersion) {
-      setApplying(null);
-      showNotice(t("hubUpdateDone").replace("{version}", hubVersion), "success");
-      return undefined;
-    }
-    if (
-      updateState.operation === "apply_update" &&
-      updateState.phase === "error" &&
-      JSON.stringify(updateState) !== applying.updateKey
-    ) {
-      setApplying(null);
-      showNotice(t("hubUpdateFailed").replace("{error}", String(updateState.error || "error")), "error");
-      return undefined;
-    }
-    const remaining = applying.startedAt + UPDATE_WAIT_MS - Date.now();
-    const timer = window.setTimeout(() => {
-      setApplying(null);
-      showNotice(t("hubUpdateTimeout"), "error");
-    }, Math.max(0, remaining));
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applying, hubVersion, updateState.phase]);
-
-  function showNotice(text: string, kind: "" | "success" | "error") {
-    setNotice(text);
-    setNoticeClass(kind);
-  }
-
-  async function hubCommand(command: string, payload: Record<string, unknown> = {}, timeoutMs = 20000) {
-    if (!hub) return { ok: false, result: null as Record<string, unknown> | null };
-    setBusy(command);
-    showNotice("", "");
-    try {
-      const { result } = await sendGatewayCommand(hub.gateway_id, { command, ...payload }, timeoutMs);
-      const ok = result !== null && result.ok !== false;
-      if (result === null) {
-        showNotice(t("hubCommandNoReply"), "error");
-      } else if (!ok) {
-        showNotice(String(result.message ?? t("hubCommandFailed")), "error");
-      }
-      return { ok, result };
-    } catch (error) {
-      showNotice(error instanceof Error ? error.message : String(error), "error");
-      return { ok: false, result: null };
-    } finally {
-      setBusy("");
-    }
-  }
 
   async function saveConnection(event: FormEvent) {
     event.preventDefault();
@@ -169,13 +135,11 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
   }
 
   async function applyUpdate() {
-    const fromVersion = hubVersion;
-    const { ok, result } = await hubCommand("apply_update");
+    const { ok, result } = await sendApplyUpdate();
     if (!ok) {
       if (result && String(result.message ?? "") === "unknown_command") showNotice(t("hubUpdateNeedsFirmware"), "error");
       return;
     }
-    setApplying({ fromVersion, startedAt: Date.now(), updateKey: JSON.stringify(updateState) });
     showNotice(t("hubUpdateInProgress"), "");
   }
 
@@ -263,23 +227,14 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
   const clock = record(hub.clock);
   const hasClock = Object.keys(clock).length > 0;
   // Hub firmware before v0.8.0 reports no update block and has no
-  // check/apply commands (it still updates itself at boot).
-  const supportsUpdate = Object.keys(updateState).length > 0;
-  const checked = record(checkResult?.update);
-  // Hub v0.12.0+: behind the newest release on its channel, the Hub keeps
-  // serving its devices but refuses settings changes and new pairings, and
-  // updates itself once no device is online (like a Gateway's required update).
-  const requiredUpdate = updateState.required_update === true;
-  const requiredVersion = String(updateState.latest_hub_version || "");
-  const latestVersion = String(
-    checked.version || (updateState.available === true ? updateState.version : "") || (requiredUpdate ? requiredVersion : "") || "",
-  );
-  const updateAvailable = checked.available === true || (checkResult === null && (updateState.available === true || requiredUpdate));
-  const changelogUrl = String(checked.changelog_url || updateState.changelog_url || "");
+  // check/apply commands (it still updates itself at boot); v0.9.0+ reports
+  // its channel there. Hub v0.12.0+: behind the newest release on its
+  // channel, the Hub keeps serving its devices but refuses settings changes
+  // and new pairings, and updates itself once no device is online (like a
+  // Gateway's required update).
+  const updateInfo = relayUpdateInfo(hub.update, checkResult);
+  const { requiredUpdate, latestVersion, updateAvailable } = updateInfo;
   const disabled = busy !== "" || !online || applying !== null;
-  // Hub v0.9.0+ reports its update channel in the update block.
-  const supportsChannel = typeof updateState.channel === "string";
-  const hubChannel = normalizeUpdateChannel(updateState.channel);
 
   const sections: { id: HubSection; label: string }[] = [
     { id: "overview", label: t("hubSection_overview") },
@@ -403,63 +358,19 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
 
     if (section === "update") {
       return (
-        <div className="settings-stack">
-          <div className="settings-detail-header">
-            <div>
-              <h3>{t("hubSection_update")}</h3>
-              <p>{t("hubUpdateCopy")}</p>
-            </div>
-          </div>
-          <div className="settings-card">
-            <div className="settings-detail-header">
-              <div className="metric-row">
-                <div className="metric"><div className="metric-label">{t("hubCurrentVersion")}</div><div className="metric-value">{hub!.version || "-"}</div></div>
-                <div className="metric"><div className="metric-label">{t("hubLatestVersion")}</div><div className="metric-value">{latestVersion || (checkResult ? hub!.version || "-" : "-")}</div></div>
-              </div>
-              <div className="actions compact">
-                <button className="button" type="button" disabled={disabled || !supportsUpdate} onClick={() => void checkUpdate()}>
-                  {busy === "check_update" ? t("running") : t("hubUpdateCheck")}
-                </button>
-                <button
-                  className={`button${updateAvailable ? " primary" : ""}`}
-                  type="button"
-                  disabled={disabled || !supportsUpdate}
-                  onClick={() => setConfirm({ kind: "apply_update" })}
-                >
-                  {applying ? t("hubUpdating") : t("hubUpdateApply")}
-                </button>
-              </div>
-            </div>
-            {supportsChannel ? (
-              <>
-                <div className="field">
-                  <label>{t("updateChannel")}</label>
-                  <Select
-                    value={hubChannel}
-                    disabled={disabled}
-                    onChange={(event) => {
-                      const next = normalizeUpdateChannel(event.target.value);
-                      if (next === "beta") setConfirm({ kind: "beta_channel" });
-                      else void setUpdateChannel("stable");
-                    }}
-                  >
-                    <option value="stable">{t("updateChannelStable")}</option>
-                    <option value="beta">{t("updateChannelBeta")}</option>
-                  </Select>
-                </div>
-                {waitingForStableToCatchUp(hubChannel, hubVersion) ? (
-                  <p className="cal-hint">{t("updateChannelWaitingStable").replace("{version}", hubVersion)}</p>
-                ) : null}
-                {hubChannel === "beta" ? <p className="cal-hint">{t("updateChannelBetaActive")}</p> : null}
-              </>
-            ) : supportsUpdate ? (
-              <p className="service-muted">{t("hubUpdateChannelNeedsFirmware")}</p>
-            ) : null}
-            {applying ? <p className="cal-hint">{t("hubUpdateInProgress")}</p> : null}
-            {changelogUrl ? <ChangelogPanel url={changelogUrl} /> : null}
-            {!supportsUpdate ? <p className="service-muted">{t("hubUpdateNeedsFirmware")}</p> : null}
-          </div>
-        </div>
+        <RelayUpdateSection
+          version={hubVersion}
+          info={updateInfo}
+          checked={checkResult !== null}
+          applying={applying !== null}
+          busy={busy}
+          disabled={disabled}
+          text={HUB_UPDATE_TEXT}
+          onCheck={() => void checkUpdate()}
+          onRequestApply={() => setConfirm({ kind: "apply_update" })}
+          onChannelStable={() => void setUpdateChannel("stable")}
+          onRequestBeta={() => setConfirm({ kind: "beta_channel" })}
+        />
       );
     }
 
@@ -570,11 +481,12 @@ export function HubManageModal({ gatewayId: routeGatewayId, onClose }: { gateway
             <button className="button" type="button" onClick={onClose}>{t("cancel")}</button>
           </div>
           {notice ? <p className={`notice ${noticeClass}`.trim()}>{notice}</p> : null}
-          {requiredUpdate && !applying ? (
-            <p className="notice error">
-              {t(updateState.auto_apply === "retry_later" ? "hubUpdateRequiredRetry" : "hubUpdateRequired").replace("{version}", requiredVersion || latestVersion)}
-            </p>
-          ) : null}
+          <RelayRequiredUpdateBanner
+            info={updateInfo}
+            applying={applying !== null}
+            textKey="hubUpdateRequired"
+            retryTextKey="hubUpdateRequiredRetry"
+          />
           <section className="settings-overview">
             <div className="settings-overview-card">
               <span>{t("hubStatus")}</span>

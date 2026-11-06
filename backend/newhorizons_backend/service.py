@@ -12,6 +12,7 @@ from typing import Any, Callable
 from .app_event_capture import AppEventCaptureMixin
 from .app_event_log import FrameClock
 from .device_commands import (
+    GATEWAY_COMMANDS,
     HUB_COMMANDS,
     INTERNAL_DEVICE_COMMANDS,
     KNOWN_DEVICE_COMMANDS,
@@ -90,6 +91,7 @@ class NewHorizonsService(
     MAINTENANCE_COMMANDS = MAINTENANCE_COMMANDS
     MODE_COMMANDS = MODE_COMMANDS
     HUB_COMMANDS = HUB_COMMANDS
+    GATEWAY_COMMANDS = GATEWAY_COMMANDS
     INTERNAL_DEVICE_COMMANDS = INTERNAL_DEVICE_COMMANDS
     KNOWN_DEVICE_COMMANDS = KNOWN_DEVICE_COMMANDS
 

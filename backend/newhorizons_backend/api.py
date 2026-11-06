@@ -462,11 +462,11 @@ def create_blueprint(
     @auth
     @_require_roles("admin")
     def gateway_command() -> tuple[Response, int] | Response:
-        # Hub-itself counterpart to /api/device-command below -- targets a
-        # gateway_id (the Hub/Gateway process itself) rather than a
-        # device_uid. Only Hub commands (set_config/factory_reset) are
-        # meaningful here today; a real Gateway process has no equivalent
-        # remote-command surface.
+        # Relay-itself counterpart to /api/device-command below -- targets a
+        # gateway_id (the Hub or Gateway process itself) rather than a
+        # device_uid. Each kind has its own allowlist (HUB_COMMANDS /
+        # GATEWAY_COMMANDS); a Gateway older than v1.0.0 (no
+        # "gateway_command" capability) gets 400 unsupported_by_relay.
         data = _request_json_data({})
         gateway_id = str(data.get("gateway_id") or "").strip()
         if not gateway_id:

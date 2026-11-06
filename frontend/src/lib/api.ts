@@ -130,11 +130,20 @@ export type GatewayEntry = {
   // Hub only: its wall clock (HubClock.statusJson), which paired ESP-NOW
   // devices take their time from.
   clock?: Record<string, unknown> | null;
-  // Hub only (v0.8.0+): its firmware update state (OtaManager status).
-  update?: Record<string, unknown> | null;
+  // Its update state: a Hub's (v0.8.0+) OtaManager status or a Gateway's
+  // (v1.0.0+) update block -- see lib/relayUpdateInfo.ts for the fields.
+  update?: RelayUpdateState | null;
+  // The Gateway's update channel as its hello/heartbeat names it (also
+  // folded into update.channel by the Backend).
+  update_channel?: string;
   // "hub" (New Horizons Hub) or "gateway" (New Horizons Gateway software) --
   // absent/unknown gateway_ids default to "gateway" server-side.
   client_type?: "hub" | "gateway" | string;
+  // From the relay's hello. A Gateway takes gateway_command only when this
+  // has "gateway_command" (v1.0.0+); a Hub always does.
+  capabilities?: string[];
+  // Gateway only: devices it has heard FindMe from on its LAN (served or not).
+  nearby_devices?: GatewayNearbyDeviceEntry[];
   mac?: string;
   ip?: string;
   // Rides the Hub's existing gateway_status heartbeat (piggyback, like
@@ -142,6 +151,37 @@ export type GatewayEntry = {
   // included too (status "pending"), unlike serving_devices above which
   // is a routing table, not a display list.
   paired_devices?: HubPairedDeviceEntry[];
+};
+
+export type RelayUpdateState = {
+  channel?: string;
+  required_update?: boolean;
+  // Hub names it latest_hub_version, a Gateway latest_version.
+  latest_hub_version?: string;
+  latest_version?: string;
+  phase?: string;
+  operation?: string;
+  error?: string;
+  available?: boolean;
+  version?: string;
+  // Hub names it changelog_url, a Gateway notes_url.
+  changelog_url?: string;
+  notes_url?: string;
+  auto_apply?: "" | "waiting_for_idle" | "retry_later" | string;
+  [key: string]: unknown;
+};
+
+export type GatewayNearbyDeviceEntry = {
+  device_uid: string;
+  device_name?: string;
+  mode?: string;
+  wifi_rssi?: number | null;
+  addr?: string;
+  last_findme_at?: string;
+  serving?: boolean;
+  connected?: boolean;
+  denied?: boolean;
+  findme_state?: string;
 };
 
 export type HubPairedDeviceEntry = {

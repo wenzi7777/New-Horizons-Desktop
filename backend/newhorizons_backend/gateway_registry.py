@@ -151,19 +151,35 @@ class GatewayRegistryMixin:
         # simpler since there's exactly one transport (the Hub/Gateway's
         # own WS session, already tracked in _gateway_session_senders for
         # gateway_claim_update/etc.) and no per-mode command gating.
+        # Hubs and Gateways each have their own command set; a Gateway only
+        # takes commands once its hello says it can ("gateway_command" in
+        # capabilities, Gateway v1.0.0+) -- an older one would drop them.
         gateway_id = str(gateway_id or "").strip()
         if not gateway_id:
             raise ValueError("gateway_id_required")
         command = str(payload.get("command") or "")
-        if command not in self.HUB_COMMANDS:
-            raise ValueError("unknown_command")
         request_id = str(payload.get("request_id") or uuid.uuid4().hex)
         payload = dict(payload)
         payload["request_id"] = request_id
         with self._lock:
+            entry = self._gateways.get(gateway_id)
+            if entry is None:
+                allowed = self.HUB_COMMANDS | self.GATEWAY_COMMANDS
+            elif entry.get("client_type") == "hub":
+                allowed = self.HUB_COMMANDS
+            else:
+                allowed = self.GATEWAY_COMMANDS
+            if command not in allowed:
+                raise ValueError("unknown_command")
             sender = self._gateway_session_senders.get(gateway_id)
             if sender is None:
                 raise RuntimeError(GATEWAY_CONTROL_UNAVAILABLE)
+            if (
+                entry is not None
+                and entry.get("client_type") != "hub"
+                and "gateway_command" not in (entry.get("capabilities") or [])
+            ):
+                raise ValueError("unsupported_by_relay")
             message = {
                 "type": "gateway_command",
                 "request_id": request_id,
@@ -216,10 +232,23 @@ class GatewayRegistryMixin:
             # silently defaulted to the Gateway name below.
             client_type = payload.get("client_type") or existing.get("client_type") or "gateway"
             default_name = "NHOS Hub" if client_type == "hub" else "NHOS Gateway"
+            # Sticky like client_type: hello carries it, later messages
+            # (gateway_status, claim requests) usually don't.
+            capabilities = payload.get("capabilities")
+            if not isinstance(capabilities, list):
+                capabilities = existing.get("capabilities") or []
+            update_channel = str(payload.get("update_channel") or existing.get("update_channel") or "")
+            update = payload.get("update", existing.get("update"))
+            if isinstance(update, dict) and update_channel and not update.get("channel"):
+                # A Gateway names its channel at the top level; the UI reads
+                # it from the update block, where a Hub reports it.
+                update = {**update, "channel": update_channel}
             existing.update({
                 "gateway_id": gateway_id,
                 "gateway_name": payload.get("gateway_name") or payload.get("name") or existing.get("gateway_name") or default_name,
                 "client_type": client_type,
+                "capabilities": [str(item) for item in capabilities],
+                "update_channel": update_channel,
                 "mac": payload.get("mac", existing.get("mac", "")),
                 "ip": payload.get("ip", existing.get("ip", "")),
                 "version": payload.get("version") or existing.get("version", ""),
@@ -245,8 +274,11 @@ class GatewayRegistryMixin:
                 "paired_devices": payload.get("paired_devices", existing.get("paired_devices", [])),
                 # Hub only: its wall clock, which it serves to paired devices.
                 "clock": payload.get("clock", existing.get("clock")),
-                # Hub only: its firmware update state (OtaManager status).
-                "update": payload.get("update", existing.get("update")),
+                # Its update state: a Hub's OtaManager status, or a Gateway
+                # v1.0.0+'s update block (same field names).
+                "update": update,
+                # Gateway only: devices it has heard FindMe from on its LAN.
+                "nearby_devices": payload.get("nearby_devices", existing.get("nearby_devices", [])),
             })
             self._gateways[gateway_id] = existing
             event_item = dict(existing)
@@ -260,6 +292,7 @@ class GatewayRegistryMixin:
         devices = state.get("devices") if isinstance(state.get("devices"), list) else []
         denied = state.get("denied_devices") if isinstance(state.get("denied_devices"), list) else []
         claims = state.get("claims") if isinstance(state.get("claims"), list) else []
+        nearby = state.get("nearby_devices") if isinstance(state.get("nearby_devices"), list) else []
         local_ports = {
             "udp": payload.get("listen_udp_port"),
             "findme": payload.get("listen_discovery_port"),
@@ -327,6 +360,8 @@ class GatewayRegistryMixin:
                 "paired_devices": payload.get("paired_devices", []),
                 "clock": payload.get("clock"),
                 "update": payload.get("update"),
+                "update_channel": payload.get("update_channel"),
+                "nearby_devices": nearby,
             },
         )
         for event_item in device_events:

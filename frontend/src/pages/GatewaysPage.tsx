@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { ConfirmModal } from "../components/ConfirmModal";
+import { GatewayManageModal } from "../components/GatewayManageModal";
 import { HubManageModal } from "../components/HubManageModal";
 import { useI18n } from "../i18n";
 import { api, type GatewayClaimEntry, type GatewayEntry, type HubEnvironmentEntry } from "../lib/api";
@@ -81,10 +82,12 @@ function ServingDevices({ devices }: { devices: string[] }) {
 function GatewayCard({
   gateway,
   deleting,
+  onManage,
   onDelete,
 }: {
   gateway: GatewayEntry;
   deleting: boolean;
+  onManage: (gateway: GatewayEntry) => void;
   onDelete: (gateway: GatewayEntry) => void;
 }) {
   const { t } = useI18n();
@@ -94,6 +97,9 @@ function GatewayCard({
   return (
     <article className="relay-card">
       <RelayCardHeader relay={gateway}>
+        <button className="button compact" type="button" onClick={() => onManage(gateway)}>
+          {t("hubManage")}
+        </button>
         <button className="button danger compact" type="button" onClick={() => onDelete(gateway)} disabled={deleting}>
           {t("deleteGateway")}
         </button>
@@ -118,6 +124,9 @@ function GatewayCard({
         {gateway.server_url || gateway.upstream_path || "-"}
       </p>
       {gateway.last_error ? <p className="notice error">{gateway.last_error}</p> : null}
+      {gateway.update?.required_update === true ? (
+        <p className="cal-hint">{t("gatewayUpdateRequiredShort").replace("{version}", String(gateway.update.latest_version || ""))}</p>
+      ) : null}
 
       <ServingDevices devices={servingDevices} />
 
@@ -274,6 +283,7 @@ export function GatewaysPage() {
   const [noticeClass, setNoticeClass] = useState<"" | "success" | "error">("");
   const [deletingGatewayId, setDeletingGatewayId] = useState("");
   const [manageHubId, setManageHubId] = useState("");
+  const [manageGatewayId, setManageGatewayId] = useState("");
   // The relay waiting on the delete confirmation.
   const [confirmDelete, setConfirmDelete] = useState<GatewayEntry | null>(null);
 
@@ -348,6 +358,7 @@ export function GatewaysPage() {
                 key={gateway.gateway_id}
                 gateway={gateway}
                 deleting={deletingGatewayId === gateway.gateway_id}
+                onManage={(item) => setManageGatewayId(item.gateway_id)}
                 onDelete={handleDelete}
               />
             ))}
@@ -412,6 +423,7 @@ export function GatewaysPage() {
       </section>
 
       {manageHubId ? <HubManageModal gatewayId={manageHubId} onClose={() => setManageHubId("")} /> : null}
+      {manageGatewayId ? <GatewayManageModal gatewayId={manageGatewayId} onClose={() => setManageGatewayId("")} /> : null}
       {confirmDelete ? (
         <ConfirmModal
           title={confirmDelete.client_type === "hub" ? t("deleteHubConfirm") : t("deleteGatewayConfirm")}
