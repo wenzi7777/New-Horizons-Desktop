@@ -41,6 +41,10 @@ export type BatteryTimeEstimate =
   | { kind: "full" }
   | { kind: "unavailable" };
 
+function clampPercent(value: number | null): number | null {
+  return value === null ? null : Math.max(0, Math.min(100, value));
+}
+
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -83,7 +87,9 @@ export function normalizeBatteryStatus(status: BatteryProfileStatus): BatterySta
   const syncState = optionalGaugeSyncState(status.gauge_sync_state);
   const measurementsValid = optionalBoolean(status.sample_valid) !== false && syncState !== "syncing" && syncState !== "error";
   return {
-    socPercent: measurementsValid ? (socCentiPercent === null ? finiteNumber(status.soc_percent) : socCentiPercent / 100) : null,
+    // Firmware before the full-charge scaling sent the gauge's raw value,
+    // which can read over 100%.
+    socPercent: measurementsValid ? clampPercent(socCentiPercent === null ? finiteNumber(status.soc_percent) : socCentiPercent / 100) : null,
     vbatMv: measurementsValid ? finiteNumber(status.vbat_mv) : null,
     ratePercentPerHour: measurementsValid && rate !== null ? rate / 100 : null,
     batteryPresent: optionalBoolean(status.battery_present) ?? optionalBoolean(status.present),
@@ -178,7 +184,7 @@ export function estimateBatteryTime(
   if (chargeState === "charging" && rate > 0) {
     return {
       kind: "until_full",
-      minutes: Math.round(((100 - battery.socPercent) / rate) * 60),
+      minutes: Math.max(0, Math.round(((100 - battery.socPercent) / rate) * 60)),
     };
   }
   if (chargeState !== "charging" && rate < 0) {
