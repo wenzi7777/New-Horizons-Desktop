@@ -1,7 +1,7 @@
 """The relays: Gateways and Hubs that connect over the upstream WebSocket
 (gateway_ws.py). Their registration and summaries, which devices each one
 carries and how a device's presence follows them, the claim handshake,
-Hub environments and LAN migration, and the gateway_command channel that
+LAN migration, and the gateway_command channel that
 manages a Hub itself.
 
 A mixin of NewHorizonsService (service.py): it shares the service's lock and
@@ -18,64 +18,21 @@ from .result_chunks import normalize_device_result
 from .service_constants import GATEWAY_CONTROL_UNAVAILABLE
 
 
+def _channel_or(value: Any, fallback: Any) -> int:
+    # A reported channel (1-14) wins; missing or invalid keeps the fallback.
+    try:
+        channel = int(value)
+    except (TypeError, ValueError):
+        channel = 0
+    if channel > 0:
+        return channel
+    try:
+        return max(0, int(fallback or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 class GatewayRegistryMixin:
-    def list_hub_environments(self) -> list[dict[str, Any]]:
-        # Enriches each environment with its members' self-reported
-        # channels and whether any two *online* members currently share
-        # one -- see hub_channel_watch.py's header comment for why this is
-        # detection-only (no channel assignment is attempted).
-        with self._lock:
-            environments = self._hub_channel_watcher.list_environments()
-            result: list[dict[str, Any]] = []
-            for env in environments:
-                hub_ids = env.get("hub_ids") or []
-                hubs: list[dict[str, Any]] = []
-                channel_members: dict[int, list[str]] = {}
-                for gateway_id in hub_ids:
-                    channel = self._hub_channel_watcher.channel_for(gateway_id)
-                    online = str(self._gateways.get(gateway_id, {}).get("status") or "") == "online"
-                    hubs.append({"gateway_id": gateway_id, "channel": channel, "online": online})
-                    if online and channel:
-                        channel_members.setdefault(channel, []).append(gateway_id)
-                conflicting_channels = sorted(ch for ch, members in channel_members.items() if len(members) > 1)
-                result.append({
-                    **env,
-                    "hubs": hubs,
-                    "conflict": bool(conflicting_channels),
-                    "conflicting_channels": conflicting_channels,
-                })
-            return result
-
-    def create_hub_environment(self, name: str) -> dict[str, Any]:
-        return self._hub_channel_watcher.create_environment(name)
-
-    def delete_hub_environment(self, environment_id: str) -> bool:
-        deleted = self._hub_channel_watcher.delete_environment(environment_id)
-        if deleted:
-            self._resync_hub_environment_fields_locked()
-        return deleted
-
-    def set_hub_environment(self, gateway_id: str, environment_id: str | None) -> None:
-        self._hub_channel_watcher.set_hub_environment(gateway_id, environment_id)
-        self._resync_hub_environment_fields_locked()
-
-    def _resync_hub_environment_fields_locked(self) -> None:
-        # Keeps gateway_snapshot()'s "channel_environment_id" field in sync
-        # for any Hub that's currently connected -- admin-facing UI reads
-        # gateway state from there, not from a separate environments call.
-        updated: list[dict[str, Any]] = []
-        with self._lock:
-            for gateway_id, entry in self._gateways.items():
-                environment_id = self._hub_channel_watcher.hub_environment(gateway_id) or ""
-                if entry.get("channel_environment_id") != environment_id:
-                    entry["channel_environment_id"] = environment_id
-                    updated.append(dict(entry))
-        for item in updated:
-            self._emit_event({"type": "gateway_update", "item": item})
-
-    def report_hub_channel(self, gateway_id: str, channel: int) -> None:
-        self._hub_channel_watcher.report_channel(gateway_id, channel)
-
     def list_hub_lan_devices(self, gateway_id: str) -> list[dict[str, Any]]:
         # Real-hardware finding (see the plan's Step 5b section): a Hub
         # trying to discover nearby devices via its own local UDP
@@ -231,7 +188,7 @@ class GatewayRegistryMixin:
             # self-identification at all, so every entry (Hub included)
             # silently defaulted to the Gateway name below.
             client_type = payload.get("client_type") or existing.get("client_type") or "gateway"
-            default_name = "NHOS Hub" if client_type == "hub" else "NHOS Gateway"
+            default_name = "NH Hub" if client_type == "hub" else "NH Gateway"
             # Sticky like client_type: hello carries it, later messages
             # (gateway_status, claim requests) usually don't.
             capabilities = payload.get("capabilities")
@@ -276,8 +233,10 @@ class GatewayRegistryMixin:
                 "udp_dropped": int(payload.get("udp_dropped", existing.get("udp_dropped", 0)) or 0),
                 "last_error": payload.get("last_error", existing.get("last_error", "")),
                 "claims": [dict(item) for item in self._gateway_claims.values() if item.get("gateway_id") == gateway_id],
-                "channel_environment_id": self._hub_channel_watcher.hub_environment(gateway_id) or "",
-                "channel": self._hub_channel_watcher.channel_for(gateway_id),
+                # Hub only: the Wi-Fi/ESP-NOW channel it is on (set by its
+                # AP, not by us), from gateway_status. Hello carries none,
+                # so keep the last one until the session goes offline.
+                "channel": _channel_or(payload.get("channel"), existing.get("channel", 0)),
                 "paired_devices": payload.get("paired_devices", existing.get("paired_devices", [])),
                 # Hub only: its wall clock, which it serves to paired devices.
                 "clock": payload.get("clock", existing.get("clock")),
@@ -343,10 +302,6 @@ class GatewayRegistryMixin:
                 self._gateway_claims[claim_id] = claim
                 if previous.get("state") != claim.get("state") or previous.get("last_error") != claim.get("last_error"):
                     claim_events.append({"type": "gateway_claim_update", **claim})
-        # New Horizons Hub only (a Gateway never sends this) -- piggybacked
-        # on this same heartbeat rather than a separate request/response,
-        # see hub_channel_watch.py's header comment.
-        self._hub_channel_watcher.report_channel(gateway_id, payload.get("channel") or 0)
         self.register_gateway(
             gateway_id,
             self._gateway_session_senders.get(gateway_id, lambda _payload: None),
@@ -370,6 +325,7 @@ class GatewayRegistryMixin:
                 "update_channel": payload.get("update_channel"),
                 "remote_management": payload.get("remote_management"),
                 "nearby_devices": nearby,
+                "channel": payload.get("channel"),
             },
         )
         for event_item in device_events:
@@ -625,11 +581,10 @@ class GatewayRegistryMixin:
             stale_gateways = [gateway_id for gateway_id, existing in self._gateway_session_senders.items() if existing is sender or existing == sender]
             for gateway_id in stale_gateways:
                 self._gateway_session_senders.pop(gateway_id, None)
-                # Clear its reported channel immediately -- an offline Hub
-                # can't be holding a live collision against anyone.
-                self._hub_channel_watcher.clear_channel(gateway_id)
                 gateway = dict(self._gateways.get(gateway_id, {"gateway_id": gateway_id}))
                 gateway["status"] = "offline"
+                # An offline Hub is on no channel.
+                gateway["channel"] = 0
                 gateway["last_seen"] = now
                 gateway["serving_devices"] = sorted([uid for uid, gid in self._gateway_device_ids.items() if gid == gateway_id])
                 gateway["serving_device_count"] = len(gateway["serving_devices"])

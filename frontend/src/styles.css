@@ -4901,18 +4901,6 @@ input:-webkit-autofill:focus {
   margin: 0 0 12px;
 }
 
-.hub-environment-group {
-  margin-bottom: 20px;
-}
-
-.hub-environment-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-
 .mono {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }

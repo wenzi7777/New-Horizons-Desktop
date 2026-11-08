@@ -421,43 +421,6 @@ def create_blueprint(
             return json_response({"error": "gateway_not_found"}), 404
         return json_response({"status": "deleted", "gateway_id": gateway_id})
 
-    @bp.get("/api/hub-environments")
-    @auth
-    @_require_roles("admin")
-    def hub_environments() -> Response:
-        return json_response({"items": svc.list_hub_environments()})
-
-    @bp.post("/api/hub-environments")
-    @auth
-    @_require_roles("admin")
-    def hub_environment_create() -> tuple[Response, int] | Response:
-        data = _request_json_data({})
-        try:
-            result = svc.create_hub_environment(str(data.get("name") or ""))
-        except ValueError as exc:
-            return json_response({"error": str(exc)}), 400
-        return json_response(result)
-
-    @bp.delete("/api/hub-environments/<environment_id>")
-    @auth
-    @_require_roles("admin")
-    def hub_environment_delete(environment_id: str) -> tuple[Response, int] | Response:
-        if not svc.delete_hub_environment(environment_id):
-            return json_response({"error": "environment_not_found"}), 404
-        return json_response({"status": "deleted", "environment_id": environment_id})
-
-    @bp.put("/api/gateways/<gateway_id>/environment")
-    @auth
-    @_require_roles("admin")
-    def gateway_environment(gateway_id: str) -> tuple[Response, int] | Response:
-        data = _request_json_data({})
-        environment_id = str(data.get("environment_id") or "").strip() or None
-        try:
-            svc.set_hub_environment(gateway_id, environment_id)
-        except ValueError as exc:
-            return json_response({"error": str(exc)}), 400
-        return json_response({"status": "saved", "gateway_id": gateway_id, "environment_id": environment_id or ""})
-
     @bp.post("/api/gateway-command")
     @auth
     @_require_roles("admin")

@@ -1814,7 +1814,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
 
                 gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "hub-a")
                 self.assertEqual(gateway["client_type"], "hub")
-                self.assertEqual(gateway["gateway_name"], "NHOS Hub")
+                self.assertEqual(gateway["gateway_name"], "NH Hub")
                 self.assertEqual(gateway["version"], "v0.1.0")
 
     def test_gateway_hello_without_client_type_defaults_to_gateway(self):
@@ -1830,7 +1830,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
 
                 gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "gw-a")
                 self.assertEqual(gateway["client_type"], "gateway")
-                self.assertEqual(gateway["gateway_name"], "NHOS Gateway")
+                self.assertEqual(gateway["gateway_name"], "NH Gateway")
 
     def test_hub_mac_reported_via_gateway_status_is_visible_on_gateway(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1880,9 +1880,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
                 self.assertEqual(device.get("client_type"), "gateway")
 
     def test_gateway_status_channel_reported_and_visible_on_gateway(self):
-        # Channel reporting piggybacks on the existing gateway_status
-        # heartbeat -- no separate request/response round trip anymore,
-        # see hub_channel_watch.py's header comment.
+        # A Hub reports its channel on the gateway_status heartbeat.
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
                 service = NewHorizonsService(mock_mode=False)
@@ -1894,122 +1892,25 @@ class IndependentNewHorizonsTest(unittest.TestCase):
                 session._handle_json(json_text({"type": "hello", "gateway_id": "hub-a"}))
                 session._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {"channel": 9, "paired_device_count": 0}}))
 
-                self.assertEqual(service._hub_channel_watcher.channel_for("hub-a"), 9)
                 gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "hub-a")
                 self.assertEqual(gateway["channel"], 9)
-
-    def test_hub_environment_conflict_detection(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
-                service = NewHorizonsService(mock_mode=False)
-                env = service.create_hub_environment("Room 1")
-                service.set_hub_environment("hub-a", env["environment_id"])
-                service.set_hub_environment("hub-b", env["environment_id"])
-
-                # Two concurrently-connected Hub sessions -- calling
-                # _handle_json() directly (rather than the full handle()
-                # receive loop) keeps both sessions "open" (online) at
-                # once, since handle() would otherwise run each session's
-                # disconnect cleanup before the next session's messages.
-                session_a = GatewaySocketSession(service, FakeGatewayWebSocket([]))
-                session_a._handle_json(json_text({"type": "hello", "gateway_id": "hub-a"}))
-                session_a._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {"channel": 9}}))
-
-                session_b = GatewaySocketSession(service, FakeGatewayWebSocket([]))
-                session_b._handle_json(json_text({"type": "hello", "gateway_id": "hub-b"}))
-                session_b._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-b", "payload": {"channel": 9}}))
-
-                environments = service.list_hub_environments()
-                self.assertEqual(len(environments), 1)
-                self.assertTrue(environments[0]["conflict"])
-                self.assertEqual(environments[0]["conflicting_channels"], [9])
-                self.assertEqual(
-                    {hub["gateway_id"]: hub["channel"] for hub in environments[0]["hubs"]},
-                    {"hub-a": 9, "hub-b": 9},
-                )
-
-                # Different channels -> no conflict.
-                session_b._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-b", "payload": {"channel": 6}}))
-                environments = service.list_hub_environments()
-                self.assertFalse(environments[0]["conflict"])
-                self.assertEqual(environments[0]["conflicting_channels"], [])
-
-    def test_hub_environment_conflict_ignores_offline_hub(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
-                service = NewHorizonsService(mock_mode=False)
-                env = service.create_hub_environment("Room 1")
-                service.set_hub_environment("hub-a", env["environment_id"])
-                service.set_hub_environment("hub-b", env["environment_id"])
-
-                session_a = GatewaySocketSession(service, FakeGatewayWebSocket([]))
-                session_a._handle_json(json_text({"type": "hello", "gateway_id": "hub-a"}))
-                session_a._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {"channel": 9}}))
-                # hub-b reported the same channel once but is not currently
-                # connected -- it must not count toward a conflict.
-                service._hub_channel_watcher.report_channel("hub-b", 9)
-
-                environments = service.list_hub_environments()
-                self.assertFalse(environments[0]["conflict"])
-
-    def test_hub_environment_different_environments_same_channel_no_conflict(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
-                service = NewHorizonsService(mock_mode=False)
-                env1 = service.create_hub_environment("Room 1")
-                env2 = service.create_hub_environment("Room 2")
-                service.set_hub_environment("hub-a", env1["environment_id"])
-                service.set_hub_environment("hub-b", env2["environment_id"])
-
-                session_a = GatewaySocketSession(service, FakeGatewayWebSocket([]))
-                session_a._handle_json(json_text({"type": "hello", "gateway_id": "hub-a"}))
-                session_a._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {"channel": 9}}))
-
-                session_b = GatewaySocketSession(service, FakeGatewayWebSocket([]))
-                session_b._handle_json(json_text({"type": "hello", "gateway_id": "hub-b"}))
-                session_b._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-b", "payload": {"channel": 9}}))
-
-                for environment in service.list_hub_environments():
-                    self.assertFalse(environment["conflict"])
 
     def test_gateway_disconnect_clears_reported_channel(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
                 service = NewHorizonsService(mock_mode=False)
-                env = service.create_hub_environment("Room 1")
-                service.set_hub_environment("hub-a", env["environment_id"])
-                service.report_hub_channel("hub-a", 9)
-                self.assertEqual(service._hub_channel_watcher.channel_for("hub-a"), 9)
+                session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
+                session._handle_json(json_text({"type": "hello", "gateway_id": "hub-a", "client_type": "hub"}))
+                session._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {"channel": 9}}))
+                # A later heartbeat without a channel keeps the last one.
+                session._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {}}))
+                gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "hub-a")
+                self.assertEqual(gateway["channel"], 9)
 
-                sender = object()
-                service._gateway_session_senders["hub-a"] = sender
-                service.unregister_gateway_sender(sender)
+                service.unregister_gateway_sender(service._gateway_session_senders["hub-a"])
 
-                self.assertEqual(service._hub_channel_watcher.channel_for("hub-a"), 0)
-
-    def test_hub_environment_api_crud(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
-                service = NewHorizonsService(mock_mode=False)
-                app = Flask(__name__)
-                app.register_blueprint(create_blueprint(service=service, profiles_root=ROOT / "mock_data" / "profiles", data_root=ROOT / "mock_data" / "mqtt_store"))
-                client = app.test_client()
-
-                created = client.post("/newhorizons/api/hub-environments", json={"name": "Room 1"})
-                self.assertEqual(created.status_code, 200)
-                environment_id = json_payload(created)["environment_id"]
-
-                assigned = client.put(f"/newhorizons/api/gateways/hub-a/environment", json={"environment_id": environment_id})
-                self.assertEqual(assigned.status_code, 200)
-
-                listed = client.get("/newhorizons/api/hub-environments")
-                items = json_payload(listed)["items"]
-                self.assertEqual(len(items), 1)
-                self.assertEqual(items[0]["hub_ids"], ["hub-a"])
-
-                deleted = client.delete(f"/newhorizons/api/hub-environments/{environment_id}")
-                self.assertEqual(deleted.status_code, 200)
-                self.assertEqual(json_payload(client.get("/newhorizons/api/hub-environments"))["items"], [])
+                gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "hub-a")
+                self.assertEqual(gateway["channel"], 0)
 
     def test_list_hub_lan_devices_excludes_devices_already_on_this_hub(self):
         service = NewHorizonsService(mock_mode=False)

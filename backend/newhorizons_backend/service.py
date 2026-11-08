@@ -24,7 +24,6 @@ from .device_commands import (
     CommandCatalogStore,
 )
 from .discovery import DiscoveryResponder
-from .hub_channel_watch import HubChannelWatcher
 from .recording_meta import RecordingMeta, build_device_meta, new_recording_paths, status_is_full
 from .recording_session import RecordingSession
 from .result_chunks import ResultChunkReassembler
@@ -191,10 +190,8 @@ class NewHorizonsService(
         self._data_root = Path(configured_data_root) if configured_data_root else default_data_root
         self._nicknames_path = self._data_root / "_newhorizons_device_nicknames.json"
         self._device_groups_path = self._data_root / "_newhorizons_device_groups.json"
-        self._hub_environments_path = self._data_root / "_newhorizons_hub_environments.json"
         self._nicknames = self._load_nicknames()
         self._device_groups = self._load_device_groups()
-        self._hub_channel_watcher = HubChannelWatcher(path=self._hub_environments_path)
         if self._mock_mode:
             self._seed_mock_state()
         if autostart:

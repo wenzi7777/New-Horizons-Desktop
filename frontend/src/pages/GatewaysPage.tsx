@@ -4,7 +4,8 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { GatewayManageModal } from "../components/GatewayManageModal";
 import { HubManageModal } from "../components/HubManageModal";
 import { useI18n } from "../i18n";
-import { api, type GatewayClaimEntry, type GatewayEntry, type HubEnvironmentEntry } from "../lib/api";
+import { api, type GatewayClaimEntry, type GatewayEntry } from "../lib/api";
+import { relayDisplayName } from "../lib/device";
 import { requestGatewaySnapshot, useWsState } from "../lib/wsClient";
 
 const GATEWAY_REPO_URL = "https://github.com/wenzi7777/New-Horizons-Gateway";
@@ -60,10 +61,8 @@ function RelayCardHeader({ relay, children }: { relay: GatewayEntry; children: R
     <div className="relay-card-header">
       <div className="relay-card-title">
         <span className={`relay-status-dot ${status === "online" ? "online" : ""}`} title={status} aria-label={status} />
-        <h3>{relay.gateway_name || relay.gateway_id}</h3>
-        {relay.gateway_name && relay.gateway_name !== relay.gateway_id ? (
-          <span className="relay-card-id">{relay.gateway_id}</span>
-        ) : null}
+        <h3>{relayDisplayName(relay)}</h3>
+        {relay.gateway_id ? <span className="relay-card-id">{relay.gateway_id}</span> : null}
       </div>
       <div className="relay-card-actions">{children}</div>
     </div>
@@ -203,67 +202,21 @@ function HubsSection({
   onDelete: (hub: GatewayEntry) => void;
 }) {
   const { t } = useI18n();
-  const [environments, setEnvironments] = useState<HubEnvironmentEntry[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .hubEnvironments()
-      .then((res) => {
-        if (!cancelled) setEnvironments(res.items ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setEnvironments([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const environmentIdByGatewayId = new Map<string, string>();
-  for (const env of environments) {
-    for (const gatewayId of env.hub_ids ?? []) {
-      environmentIdByGatewayId.set(gatewayId, env.environment_id);
-    }
-  }
-  const grouped = new Map<string, GatewayEntry[]>();
-  for (const hub of hubs) {
-    const key = environmentIdByGatewayId.get(hub.gateway_id) ?? "";
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(hub);
-  }
-
   return (
     <section className="gateways-section">
       <h2>{t("sectionHubs")}</h2>
-      <p className="page-copy">{t("hubEnvironmentsCopy")}</p>
       {hubs.length ? (
-        Array.from(grouped.entries()).map(([environmentId, groupHubs]) => {
-          const env = environmentId ? environments.find((entry) => entry.environment_id === environmentId) : null;
-          return (
-            <div key={environmentId || "ungrouped"} className="hub-environment-group">
-              <div className="hub-environment-header">
-                <strong>{env?.name || t("hubUngrouped")}</strong>
-                {env?.conflict ? (
-                  <span className="status-pill offline">
-                    {t("hubEnvironmentConflictWarning")} ({(env.conflicting_channels ?? []).join(", ")})
-                  </span>
-                ) : null}
-              </div>
-              <div className="gateway-grid">
-                {groupHubs.map((hub) => (
-                  <HubCard
-                    key={hub.gateway_id}
-                    hub={hub}
-                    deleting={deletingId === hub.gateway_id}
-                    onManage={onManage}
-                    onDelete={onDelete}
-                  />
-                ))}
-              </div>
-            </div>
-          );
-        })
+        <div className="gateway-grid">
+          {hubs.map((hub) => (
+            <HubCard
+              key={hub.gateway_id}
+              hub={hub}
+              deleting={deletingId === hub.gateway_id}
+              onManage={onManage}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
       ) : (
         <section className="panel empty-gateway-state">
           <h3>{t("hubNoHubs")}</h3>
@@ -427,7 +380,7 @@ export function GatewaysPage() {
       {confirmDelete ? (
         <ConfirmModal
           title={confirmDelete.client_type === "hub" ? t("deleteHubConfirm") : t("deleteGatewayConfirm")}
-          message={`${confirmDelete.gateway_name || confirmDelete.gateway_id} — ${confirmDelete.client_type === "hub" ? t("deleteHubCopy") : t("deleteGatewayCopy")}`}
+          message={`${relayDisplayName(confirmDelete)} ${confirmDelete.gateway_id} — ${confirmDelete.client_type === "hub" ? t("deleteHubCopy") : t("deleteGatewayCopy")}`}
           confirmLabel={confirmDelete.client_type === "hub" ? t("deleteHub") : t("deleteGateway")}
           cancelLabel={t("cancel")}
           destructive

@@ -6,6 +6,7 @@ import { RelayRequiredUpdateBanner, RelayUpdateSection, type RelayUpdateText } f
 import { Select } from "./Select";
 import { useI18n } from "../i18n";
 import { api, type GatewayEntry, type GatewayNearbyDeviceEntry } from "../lib/api";
+import { relayDisplayName } from "../lib/device";
 import { useRelayCommands, type RelayCommandText } from "../lib/relayCommand";
 import { relayRecord, relayUpdateInfo } from "../lib/relayUpdateInfo";
 import type { UpdateChannel } from "../lib/versioning";
@@ -527,12 +528,12 @@ export function GatewayManageModal({ gatewayId: routeGatewayId, onClose }: { gat
           className="modal-panel hub-manage-modal"
           role="dialog"
           aria-modal="true"
-          aria-label={gateway.gateway_name || gateway.gateway_id}
+          aria-label={`${relayDisplayName(gateway)} ${gateway.gateway_id}`}
           onClick={(event) => event.stopPropagation()}
         >
           <div className="modal-header">
             <div>
-              <h3>{gateway.gateway_name || gateway.gateway_id}</h3>
+              <h3>{relayDisplayName(gateway)}</h3>
               <p>{gateway.gateway_id}</p>
             </div>
             <button className="button" type="button" onClick={onClose}>{t("cancel")}</button>

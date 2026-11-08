@@ -126,7 +126,6 @@ export type GatewayEntry = {
   last_error?: string;
   claims?: GatewayClaimEntry[];
   channel?: number;
-  channel_environment_id?: string;
   // Hub only: its wall clock (HubClock.statusJson), which paired ESP-NOW
   // devices take their time from.
   clock?: Record<string, unknown> | null;
@@ -198,22 +197,6 @@ export type HubLanDeviceEntry = {
   transport_path: string;
   gateway_id: string;
   mode: string;
-};
-
-export type HubEnvironmentHub = {
-  gateway_id: string;
-  channel: number;
-  online: boolean;
-};
-
-export type HubEnvironmentEntry = {
-  environment_id: string;
-  name: string;
-  created_at?: string;
-  hub_ids?: string[];
-  hubs?: HubEnvironmentHub[];
-  conflict?: boolean;
-  conflicting_channels?: number[];
 };
 
 export type ProfileListEntry = {
@@ -532,7 +515,6 @@ export const api = {
   health: () => request<BackendHealth>("/health"),
   devices: () => request<{ items: DeviceEntry[] }>("/devices"),
   gateways: () => request<{ items: GatewayEntry[] }>("/gateways"),
-  hubEnvironments: () => request<{ items: HubEnvironmentEntry[] }>("/hub-environments"),
   deleteGateway: (gatewayId: string) =>
     request<{ status: string; gateway_id: string }>(`/gateways/${encodeURIComponent(gatewayId)}`, {
       method: "DELETE",
