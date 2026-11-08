@@ -227,12 +227,38 @@ class RunnerMutexTests(unittest.TestCase):
         self.assertIn("await lock.current.run(() => runnerRef.current({ ...args, command: action.command }))", self.view)
 
     def test_every_device_call_is_inside_the_lock(self):
-        calls = [m.start() for m in re.finditer(r"runnerRef\.current\(", self.view)]
+        # Polls through the background runner (pollRunnerRef), actions
+        # through the operator's (runnerRef) -- both inside the one lock.
+        calls = [m.start() for m in re.finditer(r"(?:runnerRef|pollRunnerRef)\.current\(", self.view)]
         self.assertEqual(len(calls), 2)
         poll_start = self.view.index("await lock.current.tryRun(async () => {")
         poll_end = self.view.index("}, [spec, charts, rejection]);")
         self.assertTrue(poll_start < calls[0] < poll_end)
         self.assertIn("lock.current.run(() => runnerRef.current(", self.view[calls[1] - 40:calls[1] + 20])
+
+    def test_polls_never_mark_the_page_busy(self):
+        """Regression: polling through the operator runner set the page busy
+        every second, which disabled the Run box (dropping its focus while
+        typing) and the row menus mid-click."""
+        poll = self.view[self.view.index("const poll = useCallback("):self.view.index("}, [spec, charts, rejection]);")]
+        self.assertIn("pollRunnerRef.current(quietCommand(", poll)
+        self.assertNotIn("await runnerRef.current(", poll)
+        # A skipped pass keeps what is on screen.
+        self.assertIn("if (!response.result) return;", poll)
+        self.assertIn("pollRunnerRef.current = pollRunner ?? runner;", self.view)
+        apps = read("components/DeviceAppsPanel.tsx")
+        self.assertIn("<PanelView pkg={openReadout} runner={runner} poll={poll}", apps)
+
+    def test_busy_never_takes_focus_or_a_click(self):
+        run = self.view[self.view.index("function RunSection("):self.view.index("type Pending =")]
+        field = run[run.index("<input"):run.index("/>", run.index("<input"))]
+        self.assertNotIn("disabled=", field)
+        table = self.view[self.view.index("function TableSection("):self.view.index("function ChartSection(")]
+        trigger = table[table.index('aria-haspopup="menu"'):table.index("<MoreHorizontal")]
+        self.assertNotIn("disabled=", trigger)
+        # Busy still blocks sending: the Run button, Enter, and the menu items.
+        self.assertIn("if (!entry || disabled) return;", run)
+        self.assertIn("disabled={!enabled || disabled}", table)
 
     def test_an_action_re_polls_once_done(self):
         execute = self.view[self.view.index("const execute = useCallback("):self.view.index("const request = useCallback(")]

@@ -52,6 +52,15 @@ export type PanelViewProps = {
   pkg: unknown;
   /** Injected so this shares whatever single-flight mutex the host page owns. */
   runner: CommandRunner;
+  /**
+   * Runs the timed polls, when the host has a background path: one that stays
+   * out of the page's busy state and operation log, and answers
+   * `{result: null}` instead of queueing while an operator command holds the
+   * device. Without it, polls go through `runner`. Polling through an
+   * operator runner marked the page busy every second -- which disabled the
+   * Run box (dropping its focus) and the row menus mid-click.
+   */
+  poll?: CommandRunner;
   busy?: boolean;
   /**
    * The device's own command names (its `commands` catalog). An action whose
@@ -194,7 +203,8 @@ function TableSection({
                         aria-haspopup="menu"
                         aria-expanded={menu?.key === `${sectionKey}:${key}`}
                         title={t("panelActions")}
-                        disabled={disabled}
+                        // Always opens: its items carry the busy state, so a
+                        // click is never lost to a poll in flight.
                         onClick={(event) => {
                           const rect = event.currentTarget.getBoundingClientRect();
                           setMenu((current) =>
@@ -363,7 +373,9 @@ function RunSection({
           aria-label={section.title}
           placeholder={section.placeholder ?? t("panelRunPlaceholder")}
           value={typed}
-          disabled={disabled}
+          // Never disabled: disabling a focused input drops its focus, and
+          // the device being busy is no reason to stop someone typing. Only
+          // sending waits (the button and Enter below).
           spellCheck={false}
           autoComplete="off"
           onFocus={() => setFocused(true)}
@@ -500,7 +512,7 @@ function chartSections(sections: PanelSection[], prefix = ""): { key: string; se
   return found;
 }
 
-export function PanelView({ pkg, runner, busy = false, supportedCommands = null }: PanelViewProps) {
+export function PanelView({ pkg, runner, poll: pollRunner, busy = false, supportedCommands = null }: PanelViewProps) {
   const { t } = useI18n();
   const model = useMemo(() => panelModel(pkg), [pkg]);
   const rejection = useMemo(() => panelRejectionReason(pkg), [pkg]);
@@ -532,6 +544,8 @@ export function PanelView({ pkg, runner, busy = false, supportedCommands = null 
   // otherwise restart the polling effect -- and fire a pass -- on every render.
   const runnerRef = useRef(runner);
   runnerRef.current = runner;
+  const pollRunnerRef = useRef(pollRunner ?? runner);
+  pollRunnerRef.current = pollRunner ?? runner;
 
   const poll = useCallback(async () => {
     if (rejection || !spec) return;
@@ -543,8 +557,12 @@ export function PanelView({ pkg, runner, busy = false, supportedCommands = null 
         for (const source of spec.sources) {
           if (!byCommand.has(source.command)) {
             // Polled on a timer: quiet, so a panel does not keep the LED flashing.
-            const response = await runnerRef.current(quietCommand({ command: source.command }));
-            byCommand.set(source.command, response.result as Record<string, unknown> | null);
+            const response = await pollRunnerRef.current(quietCommand({ command: source.command }));
+            // No answer: the host skipped this pass (an operator command held
+            // the device) or it timed out. Keep what is on screen rather than
+            // blanking every table; the "Updated" time shows its age.
+            if (!response.result) return;
+            byCommand.set(source.command, response.result as Record<string, unknown>);
           }
           next[source.id] = extractSource(byCommand.get(source.command) ?? null, source);
         }

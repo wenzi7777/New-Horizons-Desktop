@@ -535,7 +535,7 @@ export function DeviceAppsPanel({
               </header>
               {/* What this panel may do to the device, every time it is opened. */}
               <PanelPermissionList permissions={openModel?.permissions ?? []} />
-              <PanelView pkg={openReadout} runner={runner} busy={disabled} supportedCommands={deviceCommands} />
+              <PanelView pkg={openReadout} runner={runner} poll={poll} busy={disabled} supportedCommands={deviceCommands} />
             </div>
           ) : null}
 
