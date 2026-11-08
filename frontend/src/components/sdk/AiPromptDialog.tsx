@@ -56,7 +56,7 @@ export function AiPromptDialog({ kind, target, source, diagnostics, author, requ
         <p className="sdk-hint">{t("sdkAiPromptIntro")}</p>
 
         <dl className="sdk-facts">
-          <div><dt>{t("sdkAiPromptKind")}</dt><dd>{kind === "flow" ? t("sdkAiPromptKindFlow") : t("sdkAiPromptKindReadout")}</dd></div>
+          <div><dt>{t("sdkAiPromptKind")}</dt><dd>{kind === "flow" ? t("sdkAiPromptKindFlow") : kind === "panel" ? t("sdkAiPromptKindPanel") : t("sdkAiPromptKindReadout")}</dd></div>
           <div><dt>{t("sdkTarget")}</dt><dd>{target.label}</dd></div>
         </dl>
 
@@ -66,7 +66,7 @@ export function AiPromptDialog({ kind, target, source, diagnostics, author, requ
             id="sdk-ai-prompt-request"
             className="sdk-ai-prompt-request"
             value={request}
-            placeholder={kind === "flow" ? t("sdkAiPromptPlaceholderFlow") : t("sdkAiPromptPlaceholderReadout")}
+            placeholder={kind === "flow" ? t("sdkAiPromptPlaceholderFlow") : kind === "panel" ? t("sdkAiPromptPlaceholderPanel") : t("sdkAiPromptPlaceholderReadout")}
             onChange={(event) => onRequestChange(event.target.value)}
             autoFocus
           />

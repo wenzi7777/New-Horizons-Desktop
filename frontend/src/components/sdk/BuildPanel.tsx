@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Download, Info, XCircle } from "lucide-react";
 
 import { useI18n } from "../../i18n";
+import { PanelPermissionList } from "../PanelView";
 import {
   downloadFile,
   exportFiles,
@@ -270,16 +271,22 @@ export function BuildPanel({ project, analysis, target, onRevealLine, onSourceCh
               ))}
             </dl>
           </details>
+          {validation.kind === "panel" ? (
+            <PanelPermissionList permissions={validation.permissions ?? []} />
+          ) : null}
           <dl className="sdk-facts">
             <div><dt>{t("sdkMinOs")}</dt><dd>{validation.minOs}</dd></div>
             {validation.kind === "flow" && report ? (
               <div><dt>{t("sdkShared")}</dt><dd>{report.reused}</dd></div>
             ) : null}
-            {validation.kind === "readout" ? (
+            {validation.kind === "readout" || validation.kind === "panel" ? (
               <>
                 <div><dt>{t("sdkSources")}</dt><dd>{validation.sources}</dd></div>
                 <div><dt>{t("sdkRefresh")}</dt><dd>{validation.refreshMs} ms</dd></div>
               </>
+            ) : null}
+            {validation.kind === "panel" ? (
+              <div><dt>{t("sdkPanelActions")}</dt><dd>{validation.actions ?? 0}</dd></div>
             ) : null}
             <div>
               <dt>{t("sdkCapabilities")}</dt>

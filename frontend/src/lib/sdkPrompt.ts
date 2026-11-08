@@ -46,6 +46,7 @@ import {
   TICK_FALLBACK_MS,
   TICK_PERIOD_MS,
   WINDOW_POOL,
+  panelset,
   readoutset,
   type Diagnostic,
 } from "../sdk/lib/index.mjs";
@@ -85,7 +86,7 @@ export const PANEL_FORMS: readonly (readonly [kind: string, form: string])[] = [
   ["tabs", '{ "kind": "tabs", "title": "…", "tabs": [{ "title": "…", "sections": [ … ] }] }'],
   ["run", '{ "kind": "run", "title": "…", "placeholder": "…", "candidates": [{ "source", "field", "action" }] }'],
   ["row_actions", '"row_actions": ["<action id>", …]   (on a table section)'],
-  ["action", '{ "id", "label", "command", "args": { "name": "$row.name", "period_us": "$input.period_us" }, "when": { "field", "eq" | "ne" | "in" }, "hidden_when": { … }, "input": { "field", "kind": "number", "label", "unit", "min", "max", "default": "$row.<field>" }, "confirm": { "title", "message": "… {name} …", "destructive" } }'],
+  ["action", '{ "id", "label", "command", "args": { "name": "$row.name", "period_us": "$input.period_us" }, "when": [{ "field", "eq" | "ne": <constant> }] (AND: every condition must hold to enable; a missing field matches nothing), "hidden_when": [ … ] (OR: any condition hides), "input": { "field", "kind": "number", "label", "unit", "min", "max", "default": "$row.<field>" }, "confirm": { "title", "message": "… {name} …", "destructive" } }'],
 ];
 
 /** What the prompt says about the device the app is meant for. */
@@ -149,8 +150,10 @@ function targetSection(kind: SdkKind, target: PromptTarget): string {
     lines.push(`Board: ${target.label?.trim() || "unknown"} (not a board this prompt has details for).`);
   }
   if (target.firmware) lines.push(`Firmware on the device: ${target.firmware}. Do not use anything that needs a newer OS.`);
-  if (kind === "readout") {
-    lines.push("A readout runs in the Desktop app, not on the device: it polls the device's read-only commands and draws widgets from the answers.");
+  if (kind === "readout" || kind === "panel") {
+    lines.push(kind === "panel"
+      ? "A panel runs in the Desktop app, not on the device: it polls the device's read-only commands, draws widgets from the answers, and sends the few commands its permissions allow when the operator picks an action."
+      : "A readout runs in the Desktop app, not on the device: it polls the device's read-only commands and draws widgets from the answers.");
     if (board) {
       lines.push(`Sensors: magnetometer ${yesNo(board.magnetometer)}, fuel gauge ${yesNo(board.fuelGauge)}.`);
     }
@@ -273,15 +276,22 @@ function readoutReference(): string {
   ].join("\n");
 }
 
-function panelReference(): string {
+const PANEL_MIN_OS = panelset.PANEL_MIN_OS;
+
+function panelReference(kind: SdkKind): string {
   const permissions = Object.entries(PANEL_PERMISSIONS)
     .map(([permission, commands]) => `\`${permission}\`: ${code(commands)}`);
   return [
-    "For reference only: App Studio builds readouts, not panels. A panel (`\"kind\": \"panel\"`, key `panel` instead of `readout`) is a readout that may also act on the device, and is published through the App Library. If the request needs buttons that change the device, say so in your note and write the read-only part as a readout.",
+    kind === "panel"
+      ? "A panel (`\"kind\": \"panel\"`, key `panel` instead of `readout`) is a readout that may also act on the device. Everything in the readout reference above applies; this is what it adds."
+      : "For reference only: this project is a readout, which cannot act. A panel (`\"kind\": \"panel\"`, key `panel` instead of `readout`) is a readout that may also act on the device; App Studio makes one with \"New panel\". If the request needs buttons that change the device, say so in your note and write the read-only part as a readout.",
     bullets([
       "`manifest.permissions` declares what a panel may send; each permission allows exactly these commands, nothing else:",
       ...permissions.map((line) => `  ${line}`),
       `At most ${MAX_PANEL_ACTIONS} actions and ${MAX_PANEL_TABS} tabs. An argument is a constant, \`$row.<field>\` or \`$input.<field>\`; nothing is computed.`,
+      "`when` enables an action only when EVERY condition holds; `hidden_when` hides it when ANY condition holds. A condition is exactly `{ \"field\", \"eq\" }` or `{ \"field\", \"ne\" }` against a constant (compared as text); a field the row does not report matches nothing, `ne` included.",
+      "Every permission declared must be used by an action, and every action must be reachable from a table's `row_actions` or a `run` section.",
+      `\`min_os\` must be at least \`${PANEL_MIN_OS}\`.`,
       "Stops last until reboot; the device refuses protected tasks and services itself.",
     ]),
     fenced("", PANEL_FORMS.map(([, form]) => form).join("\n")),
@@ -298,15 +308,19 @@ export function buildAiPrompt(options: AiPromptOptions): string {
   const source = options.source ?? "";
   const diagnostics = options.diagnostics ?? [];
   const flow = kind === "flow";
+  const panel = kind === "panel";
+  const noun = panel ? "panel" : "readout";
   const language = flow ? "nhs" : "json";
   const parts: string[] = [];
 
   parts.push(flow
     ? "# Write an NHOS flow app (.nhs)"
-    : "# Write an NHOS readout (readout.json)");
+    : `# Write an NHOS ${noun} (${noun}.json)`);
   parts.push(flow
     ? "You are writing an app for New Horizons OS (NHOS), the firmware of the TIA-CTL pressure-sensing boards (ESP32-S3 with a pressure matrix, IMU and, on some boards, an OLED, an action button and LEDs). Apps are written in `.nhs`, a small declarative language that compiles to a flow graph the device evaluates once per scanned frame. It is NOT a general-purpose language: only the statements and functions documented below exist."
-    : "You are writing a readout for New Horizons OS (NHOS), the firmware of the TIA-CTL pressure-sensing boards. A readout is a declarative JSON package: it names read-only device commands to poll and widgets (stats, tables, charts) the Desktop app draws from their answers. It carries no code.");
+    : panel
+      ? "You are writing a panel for New Horizons OS (NHOS), the firmware of the TIA-CTL pressure-sensing boards. A panel is a declarative JSON package: it names read-only device commands to poll, widgets the Desktop app draws from their answers, and actions (row menus, a Run box) that send a small, permission-gated set of commands. It carries no code."
+      : "You are writing a readout for New Horizons OS (NHOS), the firmware of the TIA-CTL pressure-sensing boards. A readout is a declarative JSON package: it names read-only device commands to poll and widgets (stats, tables, charts) the Desktop app draws from their answers. It carries no code.");
   parts.push("The user will paste your answer into NHOS App Studio, which compiles and validates it immediately, so it must be valid exactly as written.");
 
   parts.push("## What the user wants");
@@ -317,14 +331,16 @@ export function buildAiPrompt(options: AiPromptOptions): string {
   } else {
     parts.push(flow
       ? "(No description given.) Write a small, useful app for this board that shows off what it can do."
-      : "(No description given.) Write a small, useful readout for this board.");
+      : `(No description given.) Write a small, useful ${noun} for this board.`);
   }
 
   parts.push("## Output contract");
   parts.push(bullets([
     flow
       ? "Reply with exactly ONE fenced code block tagged `nhs` holding the complete program, starting with the `app <id> { … }` header."
-      : "Reply with exactly ONE fenced code block tagged `json` holding the complete package (`nhapp`, `kind`, `manifest`, `readout`).",
+      : panel
+        ? "Reply with exactly ONE fenced code block tagged `json` holding the complete package (`nhapp`, `\"kind\": \"panel\"`, `manifest` with `permissions`, `panel`)."
+        : "Reply with exactly ONE fenced code block tagged `json` holding the complete package (`nhapp`, `kind`, `manifest`, `readout`).",
     "No text before the block. After it, at most three short lines of notes: assumptions, values to tune, anything the request asked for that this format cannot do.",
     flow
       ? "Use only the statements, functions, field names and colours listed in the reference below. Do not invent syntax, functions or library calls."
@@ -360,8 +376,8 @@ export function buildAiPrompt(options: AiPromptOptions): string {
     for (const example of READOUT_EXAMPLES) {
       parts.push(`### ${example.id}\n${fenced("json", example.source)}`);
     }
-    parts.push("## Panels");
-    parts.push(panelReference());
+    parts.push(panel ? "## Panel reference" : "## Panels");
+    parts.push(panelReference(kind));
     parts.push("The published System Monitor panel. Its `sysmon` sources show the field names of tasks, services, apps, memory, scan and threads; a readout may poll `sysmon` too, and a dotted `path` (`scheduler.tasks`) walks into its parts.");
     for (const example of PANEL_EXAMPLES) {
       parts.push(`### ${example.id}\n${fenced("json", example.source)}`);
@@ -369,7 +385,7 @@ export function buildAiPrompt(options: AiPromptOptions): string {
   }
 
   if (includeCurrent) {
-    parts.push(flow ? "## Current program" : "## Current readout");
+    parts.push(flow ? "## Current program" : `## Current ${noun}`);
     parts.push(source.trim()
       ? `This is what is in the editor now. Build on it: keep its id and whatever already works.\n\n${fenced(language, source)}`
       : "The editor is empty.");
@@ -385,7 +401,7 @@ export function buildAiPrompt(options: AiPromptOptions): string {
   parts.push("## Now");
   parts.push(flow
     ? "Write the program. Remember: one ```nhs block, nothing before it, at most three short lines after it."
-    : "Write the readout. Remember: one ```json block, nothing before it, at most three short lines after it.");
+    : `Write the ${noun}. Remember: one \`\`\`json block, nothing before it, at most three short lines after it.`);
 
   return `${parts.join("\n\n")}\n`;
 }

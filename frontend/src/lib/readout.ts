@@ -173,8 +173,11 @@ type Row = Record<string, unknown>;
  */
 export function fieldValue(row: unknown, path: string | undefined): unknown {
   if (!path) return undefined;
+  const keys = path.split(".");
+  // Too deep is "not reported", never the value part of the way down.
+  if (keys.length > MAX_PATH_DEPTH) return undefined;
   let value: unknown = row;
-  for (const key of path.split(".").slice(0, MAX_PATH_DEPTH)) {
+  for (const key of keys) {
     if (Array.isArray(value)) {
       value = /^\d+$/.test(key) ? value[Number(key)] : undefined;
     } else if (value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, key)) {

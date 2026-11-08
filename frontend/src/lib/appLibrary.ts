@@ -63,7 +63,7 @@ export type AppPackage = {
 export type AppSource = {
   id: string;
   version: string;
-  kind: "flow" | "readout";
+  kind: "flow" | "readout" | "panel";
   filename: string;
   source: string;
   /** What the source must compile to, byte for byte, if it is the published version. */

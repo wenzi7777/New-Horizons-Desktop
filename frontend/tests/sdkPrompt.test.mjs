@@ -182,3 +182,18 @@ test("a readout prompt describes panels and their permission table", async () =>
     for (const command of commands) assert.ok(text.includes(`\`${command}\``), command);
   }
 });
+
+test("a panel prompt asks for a panel and states the condition rule", async () => {
+  const { prompt, sdk } = await modules;
+  const text = prompt.buildAiPrompt({ kind: "panel", request: "Stop and start services.", board: { rows: 8, cols: 8 }, includeCurrent: true, source: "{}" });
+  assert.ok(text.startsWith("# Write an NHOS panel (panel.json)"));
+  assert.ok(text.includes("`manifest` with `permissions`, `panel`"));
+  assert.ok(text.includes("## Panel reference"));
+  assert.ok(!text.includes("For reference only"));
+  assert.ok(text.includes("EVERY condition holds") && text.includes("ANY condition holds"));
+  assert.ok(text.includes(`\`${sdk.panelset.PANEL_MIN_OS}\``));
+  assert.ok(text.includes("## Current panel"));
+  // The readout prompt still points at panels, now as something Studio makes.
+  const readout = prompt.buildAiPrompt({ kind: "readout", request: "", board: { rows: 8, cols: 8 }, includeCurrent: false });
+  assert.ok(readout.includes('"New panel"'));
+});

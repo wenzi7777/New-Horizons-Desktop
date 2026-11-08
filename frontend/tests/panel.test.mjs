@@ -76,7 +76,8 @@ test("conditions gate and hide actions per row", async () => {
   assert.equal(panel.actionHidden(stop, { protected: true }), true);
   assert.equal(panel.actionHidden(stop, { protected: "true" }), true);
   assert.equal(panel.actionHidden(stop, { protected: false }), false);
-  assert.equal(panel.actionEnabled({ field: "state", in: ["running", "degraded"] }, { state: "degraded" }), true);
+  // Only eq/ne: an operator the SDK does not define never holds.
+  assert.equal(panel.actionEnabled({ field: "state", in: ["running", "degraded"] }, { state: "degraded" }), false);
   // Lists: `when` needs every condition, `hidden_when` any.
   const rate = actions.get("t_rate");
   assert.equal(panel.actionHidden(rate, { protected: false, fixed_period: true }), true);
@@ -159,4 +160,30 @@ test("error codes map to translation keys", async () => {
 test("messages substitute row fields and nothing else", async () => {
   const { panel } = await modules;
   assert.equal(panel.fillMessage("End {name}? {missing} {x.y}", { name: "imu" }), "End imu? {missing} {x.y}");
+});
+
+test("conditions follow the SDK's executable rule, case by case", async () => {
+  const { panel } = await modules;
+  const { CONDITION_CASES } = await import("../src/sdk/lib/panelset.mjs");
+  assert.ok(CONDITION_CASES.length >= 10);
+  for (const [what, when, hiddenWhen, row, enabled, hidden] of CONDITION_CASES) {
+    assert.equal(panel.actionEnabled(when, row), enabled, `${what}: enabled`);
+    assert.equal(panel.actionHidden({ id: "a", label: "a", command: "task_stop", hidden_when: hiddenWhen }, row), hidden,
+      `${what}: hidden`);
+  }
+});
+
+test("a condition the SDK would refuse is refused here too", async () => {
+  const { panel } = await modules;
+  for (const bad of [
+    { field: "state", in: ["running"] },
+    { field: "state" },
+    { field: "state", eq: "running", ne: "stopped" },
+    { field: "state", eq: { nested: true } },
+    [],
+  ]) {
+    const doc = clone();
+    doc.panel.actions[0].when = bad;
+    assert.match(panel.panelRejectionReason(doc), /^invalid_when:/, JSON.stringify(bad));
+  }
 });

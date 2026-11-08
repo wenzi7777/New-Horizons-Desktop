@@ -3,7 +3,7 @@ import { Search } from "lucide-react";
 
 import { useI18n } from "../../i18n";
 import { STATEMENT_FORMS, functionDoc } from "../../lib/nhsLanguage";
-import { READOUT_SECTION_FORMS } from "../../lib/sdkPrompt";
+import { PANEL_FORMS, READOUT_SECTION_FORMS } from "../../lib/sdkPrompt";
 import type { SdkKind } from "../../lib/sdkProject";
 import {
   DEFAULT_BUDGET_US,
@@ -21,6 +21,7 @@ import {
   OLED_ROWS,
   OPS,
   WINDOW_POOL,
+  panelset,
   readoutset,
 } from "../../sdk/lib/index.mjs";
 
@@ -132,6 +133,33 @@ export function ReferencePanel({ kind }: { kind: SdkKind }) {
               ))}
             </div>
           </section>
+          {kind === "panel" ? (
+            <>
+              <section className="sdk-section">
+                <h3>{t("sdkRefPanel")}</h3>
+                <div className="sdk-ref-list">
+                  {PANEL_FORMS.filter(([name, form]) => match(name, form)).map(([name, form]) => (
+                    <code key={name} className="sdk-ref-form">{form}</code>
+                  ))}
+                </div>
+                <p className="sdk-hint">{t("sdkRefConditionsHint")}</p>
+              </section>
+              <section className="sdk-section">
+                <h3>{t("sdkRefPermissions")}</h3>
+                <table className="sdk-table">
+                  <tbody>
+                    {Object.entries(panelset.PERMISSIONS).filter(([name, commands]) => match(name, ...commands)).map(([name, commands]) => (
+                      <tr key={name}>
+                        <td className="sdk-mono sdk-nowrap">{name}</td>
+                        <td className="sdk-chips">{commands.map((command) => <span key={command} className="sdk-chip sdk-mono">{command}</span>)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="sdk-hint">{t("sdkRefPermissionsHint")}</p>
+              </section>
+            </>
+          ) : null}
         </>
       )}
 

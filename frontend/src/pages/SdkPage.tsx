@@ -25,18 +25,22 @@ import {
   loadVirtualDevice,
   newProject,
   readManifestFields,
+  isViewKind,
+  panelTemplate,
   readoutTemplate,
   saveActiveProjectId,
   saveProjects,
   saveTargetKey,
   saveVirtualDevice,
+  sourceFilename,
+  viewKindOfSource,
   virtualTarget,
   writeManifestField,
   type MatrixTarget,
   type SdkKind,
   type SdkProject,
 } from "../lib/sdkProject";
-import { analyzeFlow, analyzeReadout, type Analysis } from "../sdk/lib/index.mjs";
+import { analyzeFlow, analyzePanel, analyzeReadout, type Analysis } from "../sdk/lib/index.mjs";
 
 type Tab = "build" | "emulator" | "reference";
 
@@ -53,10 +57,16 @@ function useDebounced<T>(value: T, delayMs: number): T {
 }
 
 function analyze(project: SdkProject, cellCount: number): Analysis {
-  return project.kind === "flow"
-    ? analyzeFlow(project.source, { cellCount })
-    : analyzeReadout(project.source);
+  if (project.kind === "flow") return analyzeFlow(project.source, { cellCount });
+  // Either validates by the document's own kind; the split only names intent.
+  return project.kind === "panel" ? analyzePanel(project.source) : analyzeReadout(project.source);
 }
+
+function templateFor(kind: SdkKind): (appId: string, author: string) => string {
+  return kind === "flow" ? flowTemplate : kind === "panel" ? panelTemplate : readoutTemplate;
+}
+
+const KIND_LABEL: Record<SdkKind, string> = { flow: ".nhs", readout: "readout", panel: "panel" };
 
 function LibraryPicker({ onOpen, onClose }: { onOpen: (entry: AppCatalogEntry) => Promise<void>; onClose: () => void }) {
   const { t } = useI18n();
@@ -194,7 +204,11 @@ export function SdkPage() {
 
   const updateSource = useCallback((source: string) => {
     setProjects((current) => current.map((project) => (
-      project.id === active.id ? { ...project, source, updatedAt: Date.now() } : project
+      project.id === active.id
+        // Changing "kind" between readout and panel in the JSON moves the
+        // project with it: filename, emulator and prompt follow the document.
+        ? { ...project, source, kind: isViewKind(project.kind) ? viewKindOfSource(source) ?? project.kind : project.kind, updatedAt: Date.now() }
+        : project
     )));
   }, [active.id]);
 
@@ -219,8 +233,8 @@ export function SdkPage() {
   }, []);
 
   const createProject = (kind: SdkKind) => {
-    const appId = freshAppId(projects, kind === "flow" ? "my_app" : "my_readout");
-    addProject(newProject(kind, kind === "flow" ? flowTemplate(appId, author) : readoutTemplate(appId, author)));
+    const appId = freshAppId(projects, kind === "flow" ? "my_app" : `my_${kind}`);
+    addProject(newProject(kind, templateFor(kind)(appId, author)));
   };
 
   const openFile = async (file: File) => {
@@ -257,7 +271,7 @@ export function SdkPage() {
     ? (pending.id === active.id && pending.source === active.source ? analysis : analyze(active, cellCount))
     : null;
   const untouchedTemplate = active.source.trim() === ""
-    || active.source === (active.kind === "flow" ? flowTemplate : readoutTemplate)(appIdOf(active), author);
+    || active.source === templateFor(active.kind)(appIdOf(active), author);
 
   const errorCount = analysis.diagnostics.filter((d) => d.severity === "error").length;
   const closePrompt = useCallback(() => setPrompting(false), []);
@@ -281,6 +295,9 @@ export function SdkPage() {
           </button>
           <button type="button" className="button compact" onClick={() => createProject("readout")}>
             <FilePlus2 size={14} strokeWidth={2} />{t("sdkNewReadout")}
+          </button>
+          <button type="button" className="button compact" onClick={() => createProject("panel")} title={t("sdkNewPanelHint")}>
+            <FilePlus2 size={14} strokeWidth={2} />{t("sdkNewPanel")}
           </button>
           <button type="button" className="button compact" onClick={() => fileInput.current?.click()}>
             <FolderOpen size={14} strokeWidth={2} />{t("sdkOpenFile")}
@@ -326,7 +343,7 @@ export function SdkPage() {
                 <li key={project.id} className={selected ? "active" : undefined}>
                   <button type="button" className="sdk-project" onClick={() => setActiveId(project.id)} aria-current={selected ? "true" : undefined}>
                     <span className="sdk-project-id">{appIdOf(project) || t("sdkUntitled")}</span>
-                    <span className="sdk-project-kind">{project.kind === "flow" ? ".nhs" : "readout"}{project.origin ? ` · ${t("sdkFromLibrary")}` : ""}</span>
+                    <span className="sdk-project-kind">{KIND_LABEL[project.kind]}{project.origin ? ` · ${t("sdkFromLibrary")}` : ""}</span>
                   </button>
                   <button type="button" className="sdk-project-delete" onClick={() => setConfirmDelete(project)} aria-label={t("sdkDeleteProject")} title={t("sdkDeleteProject")}>
                     <Trash2 size={13} strokeWidth={2} />
@@ -341,7 +358,7 @@ export function SdkPage() {
         <section className="sdk-editor" aria-label={t("sdkEditor")}>
           <div className="sdk-editor-toolbar">
             <span className={`sdk-status-dot ${analysis.ok ? "ok" : "fail"}`} aria-hidden="true" />
-            <strong className="sdk-mono">{active.kind === "flow" ? "app.nhs" : "readout.json"}</strong>
+            <strong className="sdk-mono">{sourceFilename(active.kind)}</strong>
             <span className="sdk-hint">
               {analysis.ok ? t("sdkStatusOk") : t("sdkStatusErrors").replace("{count}", String(errorCount))}
             </span>

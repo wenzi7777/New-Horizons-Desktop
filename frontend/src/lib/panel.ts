@@ -65,7 +65,6 @@ export type PanelCondition = {
   field: string;
   eq?: unknown;
   ne?: unknown;
-  in?: unknown[];
 };
 
 export type PanelInput = {
@@ -210,6 +209,21 @@ function sectionsOf(sections: PanelSection[], depth = 0): { section: PanelSectio
 }
 
 /** Returns the reason a panel (or readout) is unsafe to render, or null when it is fine. */
+const MAX_CONDITIONS = 4;
+
+/** One condition or a list of up to 4; each exactly `{field, eq}` or `{field, ne}` against a constant. */
+function validConditions(value: unknown): boolean {
+  const list = Array.isArray(value) ? value : [value];
+  if (!list.length || list.length > MAX_CONDITIONS) return false;
+  return list.every((condition) => {
+    if (!condition || typeof condition !== "object" || Array.isArray(condition)) return false;
+    const record = condition as Record<string, unknown>;
+    if (typeof record.field !== "string" || !record.field) return false;
+    const ops = ["eq", "ne"].filter((op) => op in record);
+    return ops.length === 1 && isConstant(record[ops[0]]) && Object.keys(record).length === 2;
+  });
+}
+
 export function panelRejectionReason(doc: unknown): string | null {
   const model = panelModel(doc);
   if (!model) return "not_a_panel";
@@ -246,6 +260,11 @@ export function panelRejectionReason(doc: unknown): string | null {
       const rejection = templateRejection(value, action.input);
       if (rejection) return `${rejection}:${action.id}.${key}`;
     }
+    for (const key of ["when", "hidden_when"] as const) {
+      const conditions = action[key];
+      if (conditions === undefined) continue;
+      if (!validConditions(conditions)) return `invalid_${key}:${action.id}`;
+    }
     if (action.input) {
       if (typeof action.input.field !== "string" || !action.input.field) return `invalid_input:${action.id}`;
       const def = action.input.default;
@@ -281,34 +300,30 @@ export function panelRejectionReason(doc: unknown): string | null {
   return null;
 }
 
-/** Whether a row satisfies a condition. Plain equality on reported values, nothing computed. */
+/**
+ * Whether a row satisfies a condition -- the SDK's rule (panelset.conditionHolds,
+ * tested against its CONDITION_CASES): exactly `eq` or `ne` against a constant,
+ * compared as text; a missing or null field satisfies nothing, `ne` included.
+ */
 export function conditionMatches(condition: PanelCondition | undefined, row: Row | undefined): boolean {
-  if (!condition) return true;
-  if (typeof condition !== "object" || typeof condition.field !== "string") return false;
+  if (!condition || typeof condition !== "object" || typeof condition.field !== "string") return false;
   const value = fieldValue(row, condition.field);
-  if ("eq" in condition) return looseEqual(value, condition.eq);
-  if ("ne" in condition) return !looseEqual(value, condition.ne);
-  if (Array.isArray(condition.in)) return condition.in.some((option) => looseEqual(value, option));
-  return value !== undefined && value !== null && value !== false;
-}
-
-function looseEqual(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  // The firmware's JSON is hand-built: "true" and true, "3" and 3 do occur.
-  if (left === undefined || left === null || right === undefined || right === null) return false;
-  return String(left) === String(right);
+  if (value === undefined || value === null) return false;
+  if ("eq" in condition) return String(value) === String(condition.eq);
+  if ("ne" in condition) return String(value) !== String(condition.ne);
+  return false;
 }
 
 /** Enabled for this row: every `when` condition holds. (Hidden is separate: see actionHidden.) */
 export function actionEnabled(when: PanelConditions | undefined, row: Row | undefined): boolean {
-  if (!when) return true;
+  if (when === undefined || when === null) return true;
   const list = Array.isArray(when) ? when : [when];
   return list.every((condition) => conditionMatches(condition, row));
 }
 
 /** Not offered for this row at all -- a protected task, say: any `hidden_when` condition holds. */
 export function actionHidden(action: PanelAction, row: Row | undefined): boolean {
-  if (!action.hidden_when) return false;
+  if (action.hidden_when === undefined || action.hidden_when === null) return false;
   const list = Array.isArray(action.hidden_when) ? action.hidden_when : [action.hidden_when];
   return list.some((condition) => conditionMatches(condition, row));
 }

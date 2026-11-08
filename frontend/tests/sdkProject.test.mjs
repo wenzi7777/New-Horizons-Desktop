@@ -197,3 +197,41 @@ test("manifest fields read and write back in a readout", async () => {
   // Mid-edit JSON is left alone rather than clobbered.
   assert.equal(project.writeManifestField({ kind: "readout", source: "{ broken" }, "author", "x"), "{ broken");
 });
+
+test("the panel template is accepted as written, by the SDK and by the Desktop's gate", async () => {
+  const { project, sdk } = await modules;
+  const source = project.panelTemplate("my_panel", "jane");
+  const analysis = sdk.analyzePanel(source);
+  assert.equal(analysis.ok, true, JSON.stringify(analysis.diagnostics));
+  assert.equal(analysis.kind, "panel");
+  assert.deepEqual(analysis.package.manifest.permissions, ["task_control"]);
+  assert.equal(analysis.validation.minOs, sdk.panelset.PANEL_MIN_OS);
+  // It shows both condition forms the author will copy from.
+  const doc = JSON.parse(source);
+  assert.ok(doc.panel.actions.some((action) => action.when && action.hidden_when));
+});
+
+test("panel drafts survive a reload and open, export and switch kind as panels", async () => {
+  const { project } = await modules;
+  assert.equal(project.kindOfFile("panel.json", '{"kind": "panel"}'), "panel");
+  assert.equal(project.viewKindOfSource('{"kind": "panel"}'), "panel");
+  assert.equal(project.viewKindOfSource('{"kind": "readout"}'), "readout");
+  assert.equal(project.viewKindOfSource('{"kind": "pan'), null);
+  assert.equal(project.sourceFilename("panel"), "panel.json");
+  assert.equal(project.sourceFilename("readout"), "readout.json");
+  assert.equal(project.sourceFilename("flow"), "app.nhs");
+  assert.equal(project.isViewKind("panel"), true);
+  assert.equal(project.isViewKind("flow"), false);
+  assert.equal(project.appIdOf({ kind: "panel", source: '{"manifest": {"id": "sysmon"}}' }), "sysmon");
+});
+
+test("a panel exports panel.json and lists its permissions and actions", async () => {
+  const { project, sdk } = await modules;
+  const source = project.panelTemplate("my_panel", "jane");
+  const draft = project.newProject("panel", source);
+  const files = project.exportFiles(draft, sdk.analyzePanel(source));
+  assert.deepEqual(files.map((file) => file.filename), ["panel.json", "app.nha", "meta.json", "README.md"]);
+  const readme = files.find((file) => file.filename === "README.md").content;
+  assert.ok(readme.includes("## Permissions") && readme.includes("`task_control`"));
+  assert.ok(readme.includes("(`task_stop`)"));
+});

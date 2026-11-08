@@ -810,6 +810,7 @@ function ReadoutPreview({ analysis, deviceUid }: { analysis: Analysis; deviceUid
   return (
     <>
       <p className="sdk-hint">{t("sdkEmuReadoutHint")}</p>
+      {analysis.kind === "panel" ? <p className="notice warning">{t("sdkEmuPanelActsHint")}</p> : null}
       {!pkg ? <p className="notice warning">{t("sdkEmuFixFirst")}</p> : null}
       {pkg ? <ReadoutView key={`${deviceUid}-${analysis.validation?.size}`} pkg={pkg} runner={queue} /> : null}
     </>
@@ -920,6 +921,8 @@ export function EmulatorPanel(props: Props) {
   const [deviceSource, setDeviceSource] = useState<DeviceSource>(device?.connectionState === "online" ? "live" : "recording");
   const run: RunProps = { analysis, target, devices, onMarkLines: props.onMarkLines };
 
+  // Readouts and panels poll a real device; there is nothing to emulate.
+  const isView = analysis.kind === "readout" || analysis.kind === "panel";
   const picker = (
     <section className="sdk-section sdk-picker">
       <label className="sdk-field">
@@ -932,11 +935,11 @@ export function EmulatorPanel(props: Props) {
           <option value={VIRTUAL_TARGET_KEY}>{t("sdkEmuVirtual")}</option>
         </Select>
       </label>
-      {deviceUid === null && analysis.kind !== "readout" ? <VirtualSetup virtual={virtual} onChange={onVirtualChange} /> : null}
+      {deviceUid === null && !isView ? <VirtualSetup virtual={virtual} onChange={onVirtualChange} /> : null}
     </section>
   );
 
-  if (analysis.kind === "readout") {
+  if (isView) {
     return (
       <div className="sdk-panel-body">
         {picker}

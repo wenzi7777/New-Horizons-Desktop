@@ -10,7 +10,17 @@
 import { normalizeHardwareModel } from "./boardProfile";
 import { MAX_SLOTS, appShareUs, type Analysis } from "../sdk/lib/index.mjs";
 
-export type SdkKind = "flow" | "readout";
+export type SdkKind = "flow" | "readout" | "panel";
+
+/** Readouts and panels are both JSON documents the Desktop draws. */
+export function isViewKind(kind: SdkKind): boolean {
+  return kind === "readout" || kind === "panel";
+}
+
+/** The source file a project exports as, and the App Library keeps. */
+export function sourceFilename(kind: SdkKind): string {
+  return kind === "flow" ? "app.nhs" : kind === "panel" ? "panel.json" : "readout.json";
+}
 
 export type SdkProject = {
   id: string;
@@ -223,6 +233,67 @@ export function readoutTemplate(appId: string, author: string): string {
   return `${JSON.stringify(doc, null, 2)}\n`;
 }
 
+/**
+ * A panel is a readout that can act. The template is the smallest useful one:
+ * the device's task table with stop and start on each row, and a Run box --
+ * enough to show permissions, row actions, a confirmation and a condition.
+ */
+export function panelTemplate(appId: string, author: string): string {
+  const doc = {
+    nhapp: 1,
+    kind: "panel",
+    manifest: {
+      id: appId,
+      name: titleCase(appId),
+      version: "0.1.0",
+      author: safeWord(author),
+      summary: "What this panel shows and does, in one line.",
+      category: "diagnostics",
+      min_os: "v1.19.0",
+      permissions: ["task_control"],
+    },
+    panel: {
+      refresh_ms: 1000,
+      sources: [{ id: "tasks", command: "task_list", path: "tasks" }],
+      actions: [
+        {
+          id: "stop",
+          label: "End task",
+          command: "task_stop",
+          args: { name: "$row.name" },
+          // when: every condition must hold. hidden_when: any one hides it.
+          when: { field: "state", eq: "running" },
+          hidden_when: { field: "protected", eq: true },
+          confirm: { title: "End task", message: "Stop {name} until the next reboot?", destructive: true },
+        },
+        {
+          id: "start",
+          label: "Start",
+          command: "task_start",
+          args: { name: "$row.name" },
+          when: { field: "state", eq: "stopped" },
+        },
+      ],
+      sections: [
+        { kind: "run", title: "Run", candidates: [{ source: "tasks", field: "name", action: "start" }] },
+        {
+          kind: "table",
+          title: "Tasks",
+          source: "tasks",
+          sort: { field: "cpu_permille", desc: true },
+          row_actions: ["stop", "start"],
+          columns: [
+            { label: "Task", field: "name", format: "text" },
+            { label: "State", field: "state", format: "text" },
+            { label: "CPU", field: "cpu_permille", format: "permille", bar: true, bar_max: 1000 },
+          ],
+        },
+      ],
+    },
+  };
+  return `${JSON.stringify(doc, null, 2)}\n`;
+}
+
 /** @returns a name the .nhs lexer reads as one word. */
 function safeWord(value: string): string {
   const word = value.trim().replace(/[^A-Za-z0-9_.-]/g, "_").replace(/^[^A-Za-z_]+/, "");
@@ -353,7 +424,7 @@ function isProject(value: unknown): value is SdkProject {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return typeof record.id === "string"
-    && (record.kind === "flow" || record.kind === "readout")
+    && (record.kind === "flow" || record.kind === "readout" || record.kind === "panel")
     && typeof record.source === "string";
 }
 
@@ -393,15 +464,21 @@ export function saveActiveProjectId(id: string): void {
   }
 }
 
+/** "readout" or "panel" as a JSON source declares it; null when it does not parse or says neither. */
+export function viewKindOfSource(source: string): "readout" | "panel" | null {
+  try {
+    const kind = JSON.parse(source)?.kind;
+    return kind === "readout" || kind === "panel" ? kind : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Kind of a file an author opens, from its name and content. */
 export function kindOfFile(name: string, text: string): SdkKind | null {
   if (name.endsWith(".nhs")) return "flow";
   if (name.endsWith(".json")) {
-    try {
-      return JSON.parse(text)?.kind === "readout" ? "readout" : null;
-    } catch {
-      return null;
-    }
+    return viewKindOfSource(text);
   }
   return null;
 }
@@ -415,7 +492,7 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 export type ExportFile = { filename: string; mime: string; content: string | Uint8Array };
 
 /**
- * The files an app needs in the App Library: apps/<id>/{app.nhs|readout.json,
+ * The files an app needs in the App Library: apps/<id>/{app.nhs|readout.json|panel.json,
  * app.nha, meta.json, README.md}. The package bytes are the canonical ones
  * the library's own build would produce.
  */
@@ -423,9 +500,11 @@ export function exportFiles(project: SdkProject, analysis: Analysis): ExportFile
   if (!analysis.ok || !analysis.bytes || !analysis.package) return [];
   const manifest = analysis.package.manifest as Record<string, string>;
   const files: ExportFile[] = [
-    project.kind === "flow"
-      ? { filename: "app.nhs", mime: "text/plain", content: project.source }
-      : { filename: "readout.json", mime: "application/json", content: project.source },
+    {
+      filename: sourceFilename(project.kind),
+      mime: project.kind === "flow" ? "text/plain" : "application/json",
+      content: project.source,
+    },
     { filename: "app.nha", mime: "application/json", content: analysis.bytes },
   ];
   const meta = {
@@ -453,6 +532,17 @@ function readmeFor(manifest: Record<string, string>, analysis: Analysis): string
       `${analysis.validation?.nodes} nodes, about ${analysis.validation?.estimatedUs} us per frame on a ${analysis.validation?.cellCount}-cell board; needs ${analysis.validation?.minOs}.`,
       "",
     );
+  }
+  if (analysis.kind === "panel" && analysis.package) {
+    const manifestPermissions = (analysis.package.manifest as { permissions?: string[] }).permissions ?? [];
+    const actions = ((analysis.package.panel as { actions?: { label: string; command: string }[] })?.actions) ?? [];
+    if (manifestPermissions.length) {
+      lines.push("## Permissions", "", ...manifestPermissions.map((permission) => `- \`${permission}\``), "");
+    }
+    if (actions.length) {
+      lines.push("## Actions", "", ...actions.map((action) => `- ${action.label} (\`${action.command}\`)`), "",
+        "Everything a panel can do lasts until the device reboots.", "");
+    }
   }
   return `${lines.join("\n")}`;
 }

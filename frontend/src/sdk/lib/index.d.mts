@@ -125,6 +125,18 @@ export namespace panelset {
   const MAX_LABEL: number;
   const MAX_CONFIRM_TEXT: number;
   const MAX_INPUT_TEXT: number;
+  const MAX_PATH_DEPTH: number;
+  /** `{field, eq}` or `{field, ne}`; a missing/null field satisfies neither. */
+  type Condition = { field: string; eq?: unknown; ne?: unknown };
+  type Conditions = Condition | Condition[];
+  function fieldValue(row: unknown, path: string): unknown;
+  function conditionHolds(condition: unknown, row: unknown): boolean;
+  /** `when`: every condition holds (AND); none declared means enabled. */
+  function actionEnabled(when: Conditions | undefined, row: unknown): boolean;
+  /** `hidden_when`: any condition holds (OR); none declared means shown. */
+  function actionHidden(hiddenWhen: Conditions | undefined, row: unknown): boolean;
+  /** [description, when, hidden_when, row, enabled, hidden] */
+  const CONDITION_CASES: ReadonlyArray<readonly [string, Conditions | undefined, Conditions | undefined, Record<string, unknown>, boolean, boolean]>;
 }
 
 // --- packages ------------------------------------------------------------------
