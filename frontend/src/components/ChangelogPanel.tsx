@@ -1,12 +1,13 @@
 import { useState } from "react";
 
 import { useI18n } from "../i18n";
+import { fetchReleaseNotes } from "../lib/releaseNotes";
 import { Markdown } from "./Markdown";
 
 // A release's notes (the changelog_url an update check reports), fetched on
-// demand and rendered as Markdown under a show/hide button.
+// demand in the UI language and rendered as Markdown under a show/hide button.
 export function ChangelogPanel({ url }: { url: string }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [body, setBody] = useState("");
@@ -21,9 +22,7 @@ export function ChangelogPanel({ url }: { url: string }) {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`http_${response.status}`);
-      const text = (await response.text()).trim();
+      const text = await fetchReleaseNotes(url, locale);
       setBody(text);
       if (!text) setError(t("changelogUnavailable"));
     } catch (failure) {

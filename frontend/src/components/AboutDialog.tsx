@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useI18n } from "../i18n";
+import { groupNotesByVersion, pickNotes } from "../lib/releaseNotes";
 import { compareVersions } from "../lib/versioning";
 import { Markdown } from "./Markdown";
 import { UAizuLogo } from "./UAizuLogo";
@@ -10,11 +11,16 @@ export const LAB_NAME = "Human Intelligent Sensing Lab";
 export const LAB_URL = "https://isensing.u-aizu.ac.jp/";
 export const UNIVERSITY_URL = "https://u-aizu.ac.jp/";
 
-// Release notes are the repo's notes/vX.Y.Z.md, one lazy chunk each so the
-// changelog costs nothing until someone opens it.
+// Release notes are the repo's notes/vX.Y.Z.md (plus .ja.md / .en.md
+// translations), one lazy chunk each so the changelog costs nothing until
+// someone opens it.
 const NOTE_LOADERS = import.meta.glob<string>("../../../notes/v*.md", { query: "?raw", import: "default" });
-const NOTES = Object.entries(NOTE_LOADERS)
-  .map(([path, load]) => ({ version: path.slice(path.lastIndexOf("/") + 1, -".md".length), load }))
+const NOTES = [
+  ...groupNotesByVersion(
+    Object.entries(NOTE_LOADERS).map(([path, load]) => ({ name: path.slice(path.lastIndexOf("/") + 1), value: load })),
+  ),
+]
+  .map(([version, loaders]) => ({ version, loaders }))
   .sort((a, b) => compareVersions(b.version, a.version));
 
 // Each note opens with "# vX.Y.Z", which the version picker already shows.
@@ -28,7 +34,7 @@ interface AboutDialogProps {
 }
 
 export function AboutDialog({ version, onClose }: AboutDialogProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [selected, setSelected] = useState(() =>
     NOTES.some((note) => note.version === version) ? version : NOTES[0]?.version ?? "",
   );
@@ -44,16 +50,17 @@ export function AboutDialog({ version, onClose }: AboutDialogProps) {
 
   useEffect(() => {
     const note = NOTES.find((entry) => entry.version === selected);
-    if (!note) return undefined;
+    const load = note ? pickNotes(note.loaders, locale) : undefined;
+    if (!load) return undefined;
     let cancelled = false;
     setNotes(null);
-    note.load().then((source) => {
+    load().then((source) => {
       if (!cancelled) setNotes(stripTitle(source));
     });
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [selected, locale]);
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="about-title" onClick={onClose}>

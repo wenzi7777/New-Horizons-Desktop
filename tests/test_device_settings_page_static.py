@@ -355,7 +355,7 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertIn('t("viewChangelog")', source)
         self.assertIn('t("hideChangelog")', source)
         self.assertIn('t("changelogUnavailable")', source)
-        self.assertIn("fetch(updateChangelogUrl)", source)
+        self.assertIn("fetchReleaseNotes(updateChangelogUrl, locale)", source)
         self.assertIn('className="changelog-panel"', source)
 
     def test_status_driven_tabs_auto_refresh_status_when_opened(self):

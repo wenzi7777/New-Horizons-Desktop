@@ -11,6 +11,7 @@ import { isHubRelayed, normalizeDevice, updateTransferProgress, useDevicesPollin
 import { pollDeviceCommand, quietCommand, useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
 import { storageSnapshotFromDevice } from "../lib/storageStatus";
+import { fetchReleaseNotes } from "../lib/releaseNotes";
 import { BoardIoModal } from "./TerminalPage";
 import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -1020,7 +1021,7 @@ function PressureCalibrationPanel({ t, deviceUid, run }: { t: (key: string) => s
 // ---------------------------------------------------------------------------
 
 export function DeviceSettingsPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { deviceUid = "" } = useParams();
   const { devices, refresh } = useDevicesPolling();
   const { queue, errorMessage } = useDeviceCommand(deviceUid);
@@ -1351,7 +1352,7 @@ export function DeviceSettingsPage() {
     setUpdateChangelogBody("");
     setUpdateChangelogLoading(false);
     setUpdateChangelogError("");
-  }, [updateChangelogUrl]);
+  }, [updateChangelogUrl, locale]);
 
   useEffect(() => {
     if (logging.enabled !== undefined) setLogEnabled(logging.enabled !== false);
@@ -1786,11 +1787,7 @@ export function DeviceSettingsPage() {
     setUpdateChangelogLoading(true);
     setUpdateChangelogError("");
     try {
-      const response = await fetch(updateChangelogUrl);
-      if (!response.ok) {
-        throw new Error(`http_${response.status}`);
-      }
-      const text = (await response.text()).trim();
+      const text = await fetchReleaseNotes(updateChangelogUrl, locale);
       setUpdateChangelogBody(text);
       if (!text) {
         setUpdateChangelogError(t("changelogUnavailable"));
