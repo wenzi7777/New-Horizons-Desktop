@@ -21,7 +21,7 @@ export const MAX_NODES = 24; // FlowApp::kMaxNodes
 // too_many_nodes after upload.
 export const LEGACY_MAX_NODES = 12;
 export const MIN_OS_FOR_LARGE_GRAPHS = "v1.3.0";
-export const MAX_PACKAGE_BYTES = 4096; // FlowApp::kMaxPackageBytes
+export const MAX_PACKAGE_BYTES = 8192; // FlowApp::kMaxPackageBytes, AppRegistry::kMaxPackageBytes (v1.19.0; 4096 before)
 export const MAX_EVENT_NAME = 23; // FlowNode::event is char[24]
 export const MAX_WINDOW = 128; // FlowApp::kMaxWindow
 // One ring-buffer pool per slot, shared by every windowed node in the graph.

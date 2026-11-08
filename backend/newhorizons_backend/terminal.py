@@ -26,6 +26,16 @@ DEVICE_COMMAND_ALLOWLIST = {
     "service_list",
     "service_restart",
     "dmesg",
+    # v1.19.0 task manager. Stops last until reboot; nothing is persisted.
+    "sysmon",
+    "thread_list",
+    "task_stop",
+    "task_start",
+    "task_set_period",
+    "service_stop",
+    "service_start",
+    "app_stop",
+    "app_start",
     "set_time",
     "clock_sync",
     "clock_status",
@@ -196,6 +206,41 @@ def terminal_help_items() -> list[dict[str, str]]:
             "example": "service-restart --name imu",
         },
         {
+            "command": "service-stop",
+            "description": "Stop a supervised service until it is started again or the device reboots (firmware v1.19.0+).",
+            "example": "service-stop --name imu",
+        },
+        {
+            "command": "service-start",
+            "description": "Start a service stopped with service-stop (firmware v1.19.0+).",
+            "example": "service-start --name imu",
+        },
+        {
+            "command": "task-stop",
+            "description": "Stop a scheduler task until it is started again or the device reboots; protected tasks are refused (firmware v1.19.0+).",
+            "example": "task-stop --name imu",
+        },
+        {
+            "command": "task-start",
+            "description": "Start a task stopped with task-stop (firmware v1.19.0+).",
+            "example": "task-start --name imu",
+        },
+        {
+            "command": "task-set-period",
+            "description": "Change how often a task runs, in microseconds, or \"default\" to restore it; lasts until reboot (firmware v1.19.0+).",
+            "example": "task-set-period --name imu --period-us 20000",
+        },
+        {
+            "command": "thread-list",
+            "description": "List FreeRTOS threads with priority, core, stack headroom and CPU share, plus per-core load (firmware v1.19.0+).",
+            "example": "thread-list",
+        },
+        {
+            "command": "sysmon",
+            "description": "One snapshot of everything the system monitor shows: CPU, tasks, services, apps, memory, scan and threads (firmware v1.19.0+).",
+            "example": "sysmon",
+        },
+        {
             "command": "dmesg",
             "description": "Tail the in-RAM kernel log ring (no flash reads).",
             "example": "dmesg",
@@ -234,6 +279,16 @@ def terminal_help_items() -> list[dict[str, str]]:
             "command": "app-revive",
             "description": "Clear a budget-overrun kill and restart the app.",
             "example": "app-revive --name flow",
+        },
+        {
+            "command": "app-stop",
+            "description": "Stop an app slot until it is started again or the device reboots, without touching its saved enabled state (firmware v1.19.0+).",
+            "example": "app-stop --name flow",
+        },
+        {
+            "command": "app-start",
+            "description": "Start an app slot stopped with app-stop (firmware v1.19.0+).",
+            "example": "app-start --name flow",
         },
         {
             "command": "app-events",
@@ -542,6 +597,8 @@ def compile_terminal_command(command_line: str, device_commands: set[str] | None
         "reboot": "reboot",
         "reboot-wifi-setup": "reboot_wifi_setup",
         "task-list": "task_list",
+        "thread-list": "thread_list",
+        "sysmon": "sysmon",
         "service-list": "service_list",
         "crash-log": "crash_log",
         "crash-clear": "crash_clear",
@@ -840,10 +897,21 @@ def compile_terminal_command(command_line: str, device_commands: set[str] | None
         _add_scope(payload, parsed)
         return {"command": "file_delete", "payload": payload, "argv": argv}
 
-    if command == "service-restart":
+    if command in ("service-restart", "service-stop", "service-start", "task-stop", "task-start"):
         parsed = _parse_options(args)
-        payload = {"command": "service_restart", "name": parsed["name"]}
-        return {"command": "service_restart", "payload": payload, "argv": argv}
+        resolved = command.replace("-", "_")
+        payload = {"command": resolved, "name": parsed["name"]}
+        return {"command": resolved, "payload": payload, "argv": argv}
+
+    if command == "task-set-period":
+        parsed = _parse_options(args)
+        raw = str(parsed.get("period_us", "")).strip()
+        if not raw:
+            raise ValueError("period_us_required")
+        # "default" restores the task's own period; anything else is a number.
+        period: int | str = "default" if raw == "default" else int(raw)
+        payload = {"command": "task_set_period", "name": parsed["name"], "period_us": period}
+        return {"command": "task_set_period", "payload": payload, "argv": argv}
 
     if command == "config-get":
         parsed = _parse_options(args)
@@ -876,7 +944,7 @@ def compile_terminal_command(command_line: str, device_commands: set[str] | None
         payload = {"command": "set_power_profile", "profile": parsed["profile"]}
         return {"command": "set_power_profile", "payload": payload, "argv": argv}
 
-    if command in ("app-enable", "app-disable", "app-revive"):
+    if command in ("app-enable", "app-disable", "app-revive", "app-stop", "app-start"):
         parsed = _parse_options(args)
         resolved = command.replace("-", "_")
         payload = {"command": resolved, "name": parsed["name"]}

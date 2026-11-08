@@ -20,7 +20,9 @@ export type AppCatalogEntry = {
   license?: string;
   category?: string;
   capabilities?: string[];
-  kind?: "flow" | "readout";
+  kind?: "flow" | "readout" | "panel";
+  /** A panel's declared permissions (lib/panel.ts PANEL_PERMISSIONS), shown before install. */
+  permissions?: string[];
   min_os: string;
   nodes?: number;
   estimated_us?: number;

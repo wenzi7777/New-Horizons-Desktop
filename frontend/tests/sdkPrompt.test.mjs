@@ -11,6 +11,7 @@ async function load() {
       prompt: await server.ssrLoadModule("/src/lib/sdkPrompt.ts"),
       project: await server.ssrLoadModule("/src/lib/sdkProject.ts"),
       sdk: await server.ssrLoadModule("/src/sdk/lib/index.mjs"),
+      panel: await server.ssrLoadModule("/src/lib/panel.ts"),
     };
   } finally {
     await server.close();
@@ -161,5 +162,23 @@ test("every vendored example builds with the vendored SDK", async () => {
   for (const example of prompt.READOUT_EXAMPLES) {
     const analysis = sdk.analyzeReadout(example.source);
     assert.ok(analysis.ok, `${example.id}: ${JSON.stringify(analysis.diagnostics)}`);
+  }
+});
+
+test("every vendored panel example passes the Desktop's panel gate", async () => {
+  const { prompt, panel } = await modules;
+  assert.ok(prompt.PANEL_EXAMPLES.length > 0);
+  for (const example of prompt.PANEL_EXAMPLES) {
+    assert.equal(panel.panelRejectionReason(JSON.parse(example.source)), null, example.id);
+  }
+});
+
+test("a readout prompt describes panels and their permission table", async () => {
+  const { prompt, panel } = await modules;
+  const text = prompt.buildAiPrompt({ kind: "readout", request: "", board: { rows: 8, cols: 8 }, includeCurrent: false });
+  assert.ok(text.includes("## Panels"));
+  for (const [permission, commands] of Object.entries(panel.PANEL_PERMISSIONS)) {
+    assert.ok(text.includes(`\`${permission}\``), permission);
+    for (const command of commands) assert.ok(text.includes(`\`${command}\``), command);
   }
 });

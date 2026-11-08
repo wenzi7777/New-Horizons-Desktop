@@ -102,6 +102,31 @@ export namespace readoutset {
   const MAX_REFRESH_MS: number;
 }
 
+export namespace panelset {
+  const PERMISSIONS: Readonly<Record<"task_control" | "service_control" | "app_control", readonly string[]>>;
+  const ACTION_COMMANDS: ReadonlySet<string>;
+  const FORBIDDEN_COMMAND_PREFIXES: readonly string[];
+  const FORBIDDEN_COMMANDS: ReadonlySet<string>;
+  function isForbiddenCommand(command: string): boolean;
+  const ALLOWED_SOURCES: ReadonlySet<string>;
+  const SECTION_KINDS: ReadonlySet<string>;
+  const TAB_SECTION_KINDS: ReadonlySet<string>;
+  const INPUT_KINDS: ReadonlySet<string>;
+  const TEMPLATE_RE: RegExp;
+  const FIELD_PATH_RE: RegExp;
+  const PANEL_MIN_OS: string;
+  const MAX_ACTIONS: number;
+  const MAX_TABS: number;
+  const MAX_ROW_ACTIONS: number;
+  const MAX_RUN_CANDIDATES: number;
+  const MAX_ARGS: number;
+  const MAX_CONDITIONS: number;
+  const MAX_ARG_TEXT: number;
+  const MAX_LABEL: number;
+  const MAX_CONFIRM_TEXT: number;
+  const MAX_INPUT_TEXT: number;
+}
+
 // --- packages ------------------------------------------------------------------
 
 export interface FlowNode {
@@ -121,6 +146,8 @@ export interface Manifest {
   min_os?: string;
   capabilities?: string[];
   budget_us?: number;
+  /** panel only: task_control | service_control | app_control */
+  permissions?: string[];
   [field: string]: unknown;
 }
 
@@ -139,7 +166,14 @@ export interface ReadoutPackage {
   readout: Record<string, unknown>;
 }
 
-export type Package = FlowPackage | ReadoutPackage;
+export interface PanelPackage {
+  nhapp: 1;
+  kind: "panel";
+  manifest: Manifest;
+  panel: Record<string, unknown>;
+}
+
+export type Package = FlowPackage | ReadoutPackage | PanelPackage;
 
 export function pythonFloatRepr(value: number): string;
 export function canonicalText(doc: unknown): string;
@@ -231,7 +265,7 @@ export interface ValidateOptions {
 }
 
 export interface PackageReport {
-  kind: "flow" | "readout";
+  kind: "flow" | "readout" | "panel";
   id: string;
   version: string;
   /** canonical bytes */
@@ -246,6 +280,8 @@ export interface PackageReport {
   sources?: number;
   sections?: number;
   refreshMs?: number;
+  actions?: number;
+  permissions?: string[];
 }
 
 export function validateManifest(manifest: Record<string, unknown>): void;
@@ -259,6 +295,9 @@ export function validateGraph(nodes: unknown, manifest: Record<string, unknown>,
   minOs: string;
 };
 export function validateReadout(readout: unknown): { sources: number; sections: number; refreshMs: number };
+export function validatePanel(panel: unknown, manifest: Record<string, unknown>): {
+  sources: number; sections: number; refreshMs: number; actions: number; permissions: string[];
+};
 export function validatePackage(doc: unknown, raw?: Uint8Array | null, options?: ValidateOptions): PackageReport;
 
 // --- simulator -----------------------------------------------------------------
@@ -436,7 +475,7 @@ export interface Diagnostic {
 export interface Analysis {
   /** true when the package would be accepted by the device */
   ok: boolean;
-  kind: "flow" | "readout";
+  kind: "flow" | "readout" | "panel";
   package: Record<string, any> | null;
   /** canonical bytes, when ok */
   bytes: Uint8Array | null;
@@ -448,4 +487,5 @@ export interface Analysis {
 
 export function analyzeFlow(source: string, options?: { cellCount?: number }): Analysis;
 export function analyzeReadout(source: string): Analysis;
+export function analyzePanel(source: string): Analysis;
 export function describeCode(code: string): string;

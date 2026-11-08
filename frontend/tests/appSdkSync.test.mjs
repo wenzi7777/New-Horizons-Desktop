@@ -40,9 +40,15 @@ test("the vendored authoring guide and example apps match the App Library", { sk
   const copies = [["docs/authoring.md", join(library, "docs", "authoring.md")]];
   for (const name of readdirSync(join(VENDORED, "examples")).sort()) {
     const readout = name.match(/^(.+)\.readout\.json$/);
+    const panel = name.match(/^(.+)\.panel\.json$/);
     const flow = name.match(/^(.+)\.nhs$/);
-    assert.ok(readout || flow, `unexpected example ${name}`);
-    copies.push([`examples/${name}`, readout ? join(library, "apps", readout[1], "readout.json") : join(library, "apps", flow[1], "app.nhs")]);
+    assert.ok(readout || panel || flow, `unexpected example ${name}`);
+    const original = readout
+      ? join(library, "apps", readout[1], "readout.json")
+      : panel
+        ? join(library, "apps", panel[1], "panel.json")
+        : join(library, "apps", flow[1], "app.nhs");
+    copies.push([`examples/${name}`, original]);
   }
   assert.ok(copies.length > 1, "no examples; run scripts/sync_app_sdk.sh");
   for (const [vendored, original] of copies) {

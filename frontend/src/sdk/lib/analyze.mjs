@@ -27,7 +27,7 @@ import { PackageError, validatePackage } from "./validate.mjs";
 /**
  * @typedef {object} Analysis
  * @property {boolean} ok true when the package would be accepted by the device
- * @property {"flow"|"readout"} kind
+ * @property {"flow"|"readout"|"panel"} kind
  * @property {Record<string, any>|null} package
  * @property {Uint8Array|null} bytes canonical bytes, when ok
  * @property {import("./compile.mjs").CompileReport|null} report compile report (flow only)
@@ -97,7 +97,8 @@ export function analyzeFlow(source, options = {}) {
 }
 
 /**
- * Analyse a readout package written as JSON.
+ * Analyse a readout or panel package written as JSON. Both are their own
+ * source: there is nothing to compile, only to validate.
  * @param {string} source
  * @returns {Analysis}
  */
@@ -121,6 +122,7 @@ export function analyzeReadout(source) {
     return result;
   }
   result.package = doc;
+  if (doc && typeof doc === "object" && doc.kind === "panel") result.kind = "panel";
   try {
     const bytes = canonicalBytes(doc);
     result.validation = validatePackage(doc, bytes);
@@ -132,6 +134,9 @@ export function analyzeReadout(source) {
   }
   return result;
 }
+
+/** A panel is written as JSON, exactly like a readout. */
+export const analyzePanel = analyzeReadout;
 
 /**
  * Best-effort: point a readout error at the line holding the offending value.
@@ -152,7 +157,7 @@ const CODE_MESSAGES = {
   unknown_colour: "the device's LED palette is red, green, blue, white and off",
   invalid_window: "a window must be 1 to 128 frames",
   invalid_debounce_ms: "a debounce time must be 0 to 65535 ms",
-  package_too_large: "the package exceeds the device's 4096-byte limit",
+  package_too_large: "the package exceeds the device's 8192-byte limit (4096 before firmware v1.19.0)",
   invalid_id: "the app id must be lowercase letters, digits and _, starting with a letter, at most 15 characters",
   reserved_id: "that app id is reserved",
   invalid_version: "the version must be MAJOR.MINOR.PATCH",
@@ -170,6 +175,17 @@ const CODE_MESSAGES = {
   min_os_too_low: "the graph uses something older firmware lacks or would silently ignore",
   invalid_chart_points: "a chart keeps 10 to 600 polls of history",
   too_many_series: "a chart plots at most 4 series",
+  panel_command_forbidden: "a panel may never send this command, whatever it declares",
+  panel_command_unknown: "a panel may only send task/service/app start, stop and rate commands",
+  panel_permission_missing: "the manifest does not declare the permission that unlocks this command",
+  unknown_permission: "the permissions are task_control, service_control and app_control",
+  unused_permission: "no action uses this permission; declare only what the panel needs",
+  unused_action: "no table row or Run box triggers this action",
+  unknown_action: "the section refers to an action that is not declared",
+  invalid_arg_template: "an argument is a constant, $row.<field> or $input.<field> -- nothing is computed",
+  unknown_input_field: "$input.<field> must name the action's own input field",
+  nested_tabs: "a tab cannot hold another set of tabs",
+  permissions_only_for_panel: "only a panel declares permissions",
 };
 
 /** @param {string} code */

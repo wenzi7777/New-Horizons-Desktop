@@ -2810,6 +2810,7 @@ export function DeviceSettingsPage() {
               run(String(payload.command ?? "app_view"), payload, timeoutMs, { background: true })}
             maintenanceMode={inMaintenanceMode}
             supportsRegistry={supportsAppRegistry}
+            deviceUid={deviceUid}
             busy={Boolean(busyCommand)}
             compact
           />

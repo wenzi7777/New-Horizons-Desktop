@@ -49,7 +49,8 @@ class QuietFlagTests(unittest.TestCase):
         self.assertEqual(page.count('quietCommand({ command: "status" })'), 5)
 
     def test_readouts_poll_quietly(self):
-        view = read(SRC / "components" / "ReadoutView.tsx")
+        # Readouts and panels both poll through PanelView.
+        view = read(SRC / "components" / "PanelView.tsx")
         self.assertIn("runnerRef.current(quietCommand({ command: source.command }))", view)
 
     def test_backend_background_commands_are_quiet(self):

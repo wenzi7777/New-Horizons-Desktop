@@ -144,7 +144,7 @@ device as `unknown_op`.
 | Limit | Value | Where it comes from |
 |---|---|---|
 | Nodes per graph | 24 (12 before OS v1.3.0) | `FlowApp::kMaxNodes`; a graph over 12 gets `min_os: v1.3.0` |
-| Package size | 4096 bytes | the firmware's parse buffer |
+| Package size | 8192 bytes (4096 before v1.19.0) | the firmware's parse buffer |
 | App id length | 15 chars | `/files/apps/<id>.nha` vs SPIFFS' 31-char path cap |
 | Event name | 23 chars | `FlowNode::event` is `char[24]` |
 | Window length | 128 frames | `FlowApp::kMaxWindow` |

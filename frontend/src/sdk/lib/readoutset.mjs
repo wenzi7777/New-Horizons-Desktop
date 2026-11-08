@@ -36,6 +36,11 @@ export const ALLOWED_SOURCES = Object.freeze(new Set([
   "capabilities",
   // v1.6.0: the latest IMU, magnetometer and fuel-gauge readings.
   "sensor_sample",
+  // v1.19.0: one snapshot of everything a system monitor shows (one command
+  // per poll instead of five, which matters over ESP-NOW), and the FreeRTOS
+  // threads with per-core CPU on their own.
+  "sysmon",
+  "thread_list",
 ]));
 
 /**

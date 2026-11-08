@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Check, Circle, Loader2, X } from "lucide-react";
 
 import { DevicePickCard } from "./DevicePickCard";
+import { PanelPermissionList } from "./PanelView";
 import { useI18n } from "../i18n";
 import { api, type DeviceEntry } from "../lib/api";
 import { compareVersionCores, useLocalised, type AppCatalogEntry, type AppPackage } from "../lib/appLibrary";
@@ -228,6 +229,8 @@ export function AppInstallDialog({
             <p className="service-muted">
               {isMaintenance(selected.device.mode) ? t("appInstallMaintenanceKept") : t("appInstallMaintenanceNote")}
             </p>
+            {/* A panel can act on the device: say what it may do before it is installed. */}
+            <PanelPermissionList permissions={app.permissions ?? []} />
             <div className="actions compact app-install-dialog-actions">
               <button className="button" type="button" onClick={() => setStage("pick")}>{t("appInstallBack")}</button>
               <button className="button primary" type="button" onClick={() => void install()}>{t("appInstallStart")}</button>

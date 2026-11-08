@@ -53,8 +53,35 @@ READOUT_SOURCES = {
     "memory_status", "scan_health", "storage_status", "status", "capabilities",
     # v1.6.0: the latest IMU, magnetometer and fuel-gauge readings.
     "sensor_sample",
+    # v1.19.0: the whole system monitor in one answer, and FreeRTOS threads.
+    "sysmon", "thread_list",
 }
 READOUT_SECTION_KINDS = {"stats", "table", "chart"}
+
+# A panel is a readout that may also act. What it may send is fixed by the
+# permissions its manifest declares, each naming a fixed list of commands --
+# the same table as the App Library's panelset.mjs and the Desktop's
+# lib/panel.ts. The device enforces its own protections on top.
+PANEL_PERMISSIONS = {
+    "task_control": ("task_stop", "task_start", "task_set_period"),
+    "service_control": ("service_stop", "service_start", "service_restart"),
+    "app_control": ("app_stop", "app_start", "app_revive"),
+}
+# Never sendable from a panel whatever it declares: persistent settings, file
+# writes, reboots, package management. Belt to PANEL_PERMISSIONS' braces.
+PANEL_FORBIDDEN_PREFIXES = ("set_", "file_write", "file_delete", "reboot", "calibration_")
+PANEL_FORBIDDEN_COMMANDS = {
+    "file_delete", "app_install", "app_uninstall", "app_activate", "app_deactivate",
+    "app_enable", "app_disable", "app_load_flow", "app_unload_flow", "app_reindex",
+    "enter_maintenance", "exit_maintenance", "apply_update", "check_update",
+    "config_set", "power_set_state", "resync_battery_gauge", "factory_reset", "ota_update",
+}
+PANEL_SECTION_KINDS = READOUT_SECTION_KINDS | {"tabs", "run"}
+MAX_PANEL_ACTIONS = 16
+MAX_PANEL_TABS = 8
+# `$row.<field>` / `$input.<field>`: the only argument that is not a constant.
+PANEL_TEMPLATE_RE = re.compile(r"^\$(row|input)\.([A-Za-z_][A-Za-z0-9_]*)$")
+PANEL_ROW_TEMPLATE_RE = re.compile(r"^\$row\.[A-Za-z_][A-Za-z0-9_]*$")
 
 FETCH_TIMEOUT_SEC = 5
 DEFAULT_TTL_SEC = 900
@@ -76,12 +103,103 @@ def _require(condition: bool, code: str) -> None:
         raise AppPackageError(code)
 
 
+def panel_command_allowed(command: str, permissions: list[str] | tuple[str, ...]) -> bool:
+    """Whether a panel declaring `permissions` may send `command`."""
+    if command in PANEL_FORBIDDEN_COMMANDS or command.startswith(PANEL_FORBIDDEN_PREFIXES):
+        return False
+    return any(command in PANEL_PERMISSIONS.get(permission, ()) for permission in permissions)
+
+
+def _is_constant(value: Any) -> bool:
+    if value is None or isinstance(value, bool):
+        return True
+    if isinstance(value, (int, float)):
+        return value == value and value not in (float("inf"), float("-inf"))
+    # A string that looks like a template must be one.
+    return isinstance(value, str) and not value.startswith("$")
+
+
+def _walk_sections(sections: list[Any], depth: int = 0):
+    for section in sections:
+        _require(isinstance(section, dict), "invalid_section")
+        yield section, depth
+        if section.get("kind") == "tabs":
+            tabs = section.get("tabs")
+            _require(isinstance(tabs, list) and tabs, "missing_tabs")
+            _require(len(tabs) <= MAX_PANEL_TABS, "too_many_tabs")
+            for tab in tabs:
+                _require(isinstance(tab, dict) and isinstance(tab.get("sections"), list), "invalid_tab")
+                yield from _walk_sections(tab["sections"], depth + 1)
+
+
+def _validate_view(spec: dict[str, Any], section_kinds: set[str]) -> None:
+    """Sources and sections, shared by readouts and panels."""
+    sources = spec.get("sources")
+    _require(isinstance(sources, list) and sources, "missing_sources")
+    for source in sources:
+        _require(isinstance(source, dict), "invalid_source")
+        _require(str(source.get("command")) in READOUT_SOURCES, "readout_source_not_allowed")
+    sections = spec.get("sections")
+    _require(isinstance(sections, list) and sections, "missing_sections")
+    for section, depth in _walk_sections(sections):
+        _require(str(section.get("kind")) in section_kinds, "unknown_section_kind")
+        _require(not (section.get("kind") == "tabs" and depth > 0), "nested_tabs")
+
+
+def _validate_panel_actions(panel: dict[str, Any], permissions: list[str]) -> None:
+    actions = panel.get("actions", [])
+    _require(isinstance(actions, list), "invalid_actions")
+    _require(len(actions) <= MAX_PANEL_ACTIONS, "too_many_actions")
+    ids: set[str] = set()
+    for action in actions:
+        _require(isinstance(action, dict), "invalid_action")
+        action_id = action.get("id")
+        _require(isinstance(action_id, str) and action_id and action_id not in ids, "invalid_action")
+        ids.add(action_id)
+        _require(panel_command_allowed(str(action.get("command") or ""), permissions),
+                 "panel_action_not_permitted")
+        user_input = action.get("input")
+        _require(user_input is None or (isinstance(user_input, dict)
+                                        and isinstance(user_input.get("field"), str)
+                                        and user_input["field"]), "invalid_input")
+        args = action.get("args", {})
+        _require(isinstance(args, dict), "invalid_arg_template")
+        for key, value in args.items():
+            _require(key not in ("command", "request_id"), "invalid_arg_name")
+            if isinstance(value, str) and value.startswith("$"):
+                match = PANEL_TEMPLATE_RE.match(value)
+                _require(match is not None, "invalid_arg_template")
+                if match.group(1) == "input":
+                    _require(user_input is not None and user_input["field"] == match.group(2),
+                             "input_not_declared")
+            else:
+                _require(_is_constant(value), "invalid_arg_template")
+        if user_input is not None and "default" in user_input:
+            default = user_input["default"]
+            _require(_is_constant(default) or (isinstance(default, str)
+                                               and PANEL_ROW_TEMPLATE_RE.match(default) is not None),
+                     "invalid_arg_template")
+    source_ids = {str(source.get("id")) for source in panel.get("sources", []) if isinstance(source, dict)}
+    for section, _depth in _walk_sections(panel.get("sections", [])):
+        row_actions = section.get("row_actions", [])
+        _require(isinstance(row_actions, list), "invalid_section")
+        for action_id in row_actions:
+            _require(action_id in ids, "unknown_action")
+        if section.get("kind") == "run":
+            candidates = section.get("candidates")
+            _require(isinstance(candidates, list) and candidates, "missing_candidates")
+            for candidate in candidates:
+                _require(isinstance(candidate, dict), "invalid_section")
+                _require(candidate.get("action") in ids, "unknown_action")
+                _require(str(candidate.get("source")) in source_ids, "unknown_source")
+
+
 def validate_package(doc: Any) -> dict[str, Any]:
     """Structural checks, no I/O. Raises AppPackageError, returns a summary."""
     _require(isinstance(doc, dict), "not_a_package")
     _require(doc.get("nhapp") == 1, "unsupported_package_version")
     kind = str(doc.get("kind") or "flow")
-    _require(kind in ("flow", "readout"), "unsupported_kind")
+    _require(kind in ("flow", "readout", "panel"), "unsupported_kind")
 
     manifest = doc.get("manifest")
     _require(isinstance(manifest, dict), "missing_manifest")
@@ -103,20 +221,35 @@ def validate_package(doc: Any) -> dict[str, Any]:
     for capability in capabilities:
         _require(capability in CAPABILITIES, "unknown_capability")
 
+    permissions = manifest.get("permissions", [])
+    _require(isinstance(permissions, list), "invalid_manifest")
+    _require(kind == "panel" or not permissions, "permissions_need_a_panel")
+    for permission in permissions:
+        _require(permission in PANEL_PERMISSIONS, "unknown_permission")
+
+    if kind == "panel":
+        _require("nodes" not in doc and "readout" not in doc, "panel_must_not_declare_nodes")
+        panel = doc.get("panel")
+        _require(isinstance(panel, dict), "missing_panel")
+        _validate_view(panel, PANEL_SECTION_KINDS)
+        _validate_panel_actions(panel, permissions)
+        return {
+            "id": app_id,
+            "version": str(manifest["version"]),
+            "min_os": min_os,
+            "kind": "panel",
+            "nodes": 0,
+            "capabilities": list(capabilities),
+            "permissions": list(permissions),
+            "device_path": f"{DEVICE_APP_DIR}/{app_id}.nha",
+        }
+
     if kind == "readout":
         _require("nodes" not in doc, "readout_must_not_declare_nodes")
         readout = doc.get("readout")
         _require(isinstance(readout, dict), "missing_readout")
-        sources = readout.get("sources")
-        _require(isinstance(sources, list) and sources, "missing_sources")
-        for source in sources:
-            _require(isinstance(source, dict), "invalid_source")
-            _require(str(source.get("command")) in READOUT_SOURCES, "readout_source_not_allowed")
-        sections = readout.get("sections")
-        _require(isinstance(sections, list) and sections, "missing_sections")
-        for section in sections:
-            _require(isinstance(section, dict), "invalid_section")
-            _require(str(section.get("kind")) in READOUT_SECTION_KINDS, "unknown_section_kind")
+        _require("actions" not in readout, "readout_must_not_declare_actions")
+        _validate_view(readout, READOUT_SECTION_KINDS)
         return {
             "id": app_id,
             "version": str(manifest["version"]),
@@ -127,7 +260,7 @@ def validate_package(doc: Any) -> dict[str, Any]:
             "device_path": f"{DEVICE_APP_DIR}/{app_id}.nha",
         }
 
-    _require("readout" not in doc, "flow_must_not_declare_a_readout")
+    _require("readout" not in doc and "panel" not in doc, "flow_must_not_declare_a_readout")
     nodes = doc.get("nodes")
     _require(isinstance(nodes, list), "missing_nodes")
     _require(len(nodes) > 0, "empty_graph")
@@ -269,15 +402,15 @@ class AppLibrary:
         """The source an app's package was built from, for the SDK page to open.
 
         The catalog has no URL for it, so it is found where the library keeps
-        it: `apps/<id>/app.nhs` (or `readout.json`) under the same base as the
+        it: `apps/<id>/app.nhs` (or `readout.json` / `panel.json`) under the same base as the
         package. There is no checksum for source; the SDK page recompiles it
         and compares the result against the package's sha256 instead, which is
         a stronger check than a second hash would be.
         """
         _require(bool(APP_ID_RE.match(app_id)), "invalid_id")
         entry = self.entry(app_id)
-        kind = "readout" if entry.get("kind") == "readout" else "flow"
-        filename = "readout.json" if kind == "readout" else "app.nhs"
+        kind = entry.get("kind") if entry.get("kind") in ("readout", "panel") else "flow"
+        filename = {"readout": "readout.json", "panel": "panel.json"}.get(kind, "app.nhs")
         package_url = str((entry.get("package") or {}).get("url") or "")
         if "/dist/" not in package_url:
             raise AppLibraryError("source_unavailable")

@@ -56,6 +56,27 @@ import {
   MIN_REFRESH_MS,
   SECTION_KINDS,
 } from "./readoutset.mjs";
+import {
+  ACTION_COMMANDS,
+  FIELD_PATH_RE,
+  INPUT_KINDS,
+  MAX_ACTIONS,
+  MAX_ARGS,
+  MAX_ARG_TEXT,
+  MAX_CONDITIONS,
+  MAX_CONFIRM_TEXT,
+  MAX_INPUT_TEXT,
+  MAX_LABEL,
+  MAX_ROW_ACTIONS,
+  MAX_RUN_CANDIDATES,
+  MAX_TABS,
+  PANEL_MIN_OS,
+  PERMISSIONS,
+  SECTION_KINDS as PANEL_SECTION_KINDS,
+  TAB_SECTION_KINDS,
+  TEMPLATE_RE,
+  isForbiddenCommand,
+} from "./panelset.mjs";
 import { canonicalBytes } from "./canonical.mjs";
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
@@ -323,17 +344,12 @@ export function validateGraph(nodes, manifest, options = {}) {
 }
 
 /**
- * A readout names commands to read and widgets to draw. Nothing else.
- * @param {unknown} readout
+ * The sources a readout or panel polls. Read-only by construction.
+ * @param {unknown} sources
+ * @param {boolean} panel
+ * @returns {Set<string>} the declared source ids
  */
-export function validateReadout(readout) {
-  require(isObject(readout), "missing_readout");
-
-  const refresh = readout.refresh_ms ?? 1000;
-  require(isInt(refresh) && /** @type {number} */ (refresh) >= MIN_REFRESH_MS && /** @type {number} */ (refresh) <= MAX_REFRESH_MS,
-    `invalid_refresh_ms:${text(refresh)}`);
-
-  const sources = readout.sources;
+function validateSources(sources, panel) {
   require(Array.isArray(sources) && sources.length > 0, "missing_sources");
   require(sources.length <= MAX_SOURCES, `too_many_sources:${sources.length}`);
   /** @type {Set<string>} */
@@ -346,27 +362,54 @@ export function validateReadout(readout) {
     ids.add(sourceId);
     const command = text(source.command);
     // A readout is read-only by construction: it cannot be used to
-    // reconfigure or write to a device, whatever its author intended.
+    // reconfigure or write to a device, whatever its author intended. A
+    // panel's sources obey the same rule; what it may SEND is its actions.
     require(ALLOWED_SOURCES.has(command), `readout_source_not_allowed:${command}`);
+    if (panel && "path" in source) require(FIELD_PATH_RE.test(text(source.path)), `invalid_source_path:${text(source.path)}`);
   }
+  return ids;
+}
 
-  const sections = readout.sections;
+/**
+ * @typedef {object} SectionContext
+ * @property {Set<string>} ids declared source ids
+ * @property {Set<string>} kinds section kinds allowed here
+ * @property {Map<string, Record<string, any>>|null} actions a panel's actions; null for a readout
+ * @property {Set<string>} used action ids referenced so far
+ */
+
+/**
+ * @param {unknown} value
+ * @param {SectionContext} ctx
+ * @param {string} what
+ */
+function requireField(value, ctx, what) {
+  require(text(value), `missing_${what}_field`);
+  if (ctx.actions) require(FIELD_PATH_RE.test(text(value)), `invalid_field_path:${text(value)}`);
+}
+
+/**
+ * @param {unknown} sections
+ * @param {SectionContext} ctx
+ */
+function validateSections(sections, ctx) {
   require(Array.isArray(sections) && sections.length > 0, "missing_sections");
   require(sections.length <= MAX_SECTIONS, `too_many_sections:${sections.length}`);
   for (const section of sections) {
     require(isObject(section), "invalid_section");
     const kind = text(section.kind);
-    require(SECTION_KINDS.has(kind), `unknown_section_kind:${kind}`);
+    if (kind === "tabs" && ctx.actions && !ctx.kinds.has(kind)) require(false, "nested_tabs");
+    require(ctx.kinds.has(kind), `unknown_section_kind:${kind}`);
     require(text(section.title).trim(), "missing_section_title");
 
     if (kind === "chart") {
-      require(ids.has(text(section.source)), `unknown_source:${text(section.source)}`);
+      require(ctx.ids.has(text(section.source)), `unknown_source:${text(section.source)}`);
       const series = section.series;
       require(Array.isArray(series) && series.length > 0, "missing_series");
       require(series.length <= MAX_SERIES, `too_many_series:${series.length}`);
       for (const line of series) {
         require(isObject(line), "invalid_series");
-        require(text(line.field), "missing_series_field");
+        requireField(line.field, ctx, "series");
       }
       const points = section.points ?? 60;
       require(isInt(points) && /** @type {number} */ (points) >= MIN_CHART_POINTS && /** @type {number} */ (points) <= MAX_CHART_POINTS,
@@ -383,29 +426,254 @@ export function validateReadout(readout) {
       require(items.length <= MAX_STATS, `too_many_stats:${items.length}`);
       for (const item of items) {
         require(isObject(item), "invalid_stat");
-        require(ids.has(text(item.source)), `unknown_source:${text(item.source)}`);
-        require(text(item.field), "missing_stat_field");
+        require(ctx.ids.has(text(item.source)), `unknown_source:${text(item.source)}`);
+        requireField(item.field, ctx, "stat");
         require(FORMATS.has(text(item.format ?? "raw")), `unknown_format:${text(item.format)}`);
       }
+    } else if (kind === "tabs") {
+      const tabs = section.tabs;
+      require(Array.isArray(tabs) && tabs.length > 0, "missing_tabs");
+      require(tabs.length <= MAX_TABS, `too_many_tabs:${tabs.length}`);
+      for (const tab of tabs) {
+        require(isObject(tab), "invalid_tab");
+        require(text(tab.title).trim(), "missing_tab_title");
+        validateSections(tab.sections, { ...ctx, kinds: TAB_SECTION_KINDS });
+      }
+    } else if (kind === "run") {
+      const actions = /** @type {Map<string, Record<string, any>>} */ (ctx.actions);
+      const candidates = section.candidates;
+      require(Array.isArray(candidates) && candidates.length > 0, "missing_run_candidates");
+      require(candidates.length <= MAX_RUN_CANDIDATES, `too_many_run_candidates:${candidates.length}`);
+      for (const candidate of candidates) {
+        require(isObject(candidate), "invalid_run_candidate");
+        require(ctx.ids.has(text(candidate.source)), `unknown_source:${text(candidate.source)}`);
+        requireField(candidate.field, ctx, "run");
+        const actionId = text(candidate.action);
+        require(actions.has(actionId), `unknown_action:${actionId}`);
+        ctx.used.add(actionId);
+      }
     } else {
-      require(ids.has(text(section.source)), `unknown_source:${text(section.source)}`);
+      require(ctx.ids.has(text(section.source)), `unknown_source:${text(section.source)}`);
       const columns = section.columns;
       require(Array.isArray(columns) && columns.length > 0, "missing_columns");
       require(columns.length <= MAX_COLUMNS, `too_many_columns:${columns.length}`);
       for (const column of columns) {
         require(isObject(column), "invalid_column");
-        require(text(column.field), "missing_column_field");
+        requireField(column.field, ctx, "column");
         require(FORMATS.has(text(column.format ?? "raw")), `unknown_format:${text(column.format)}`);
+      }
+      if ("row_actions" in section) {
+        require(ctx.actions, "readout_must_not_declare_actions");
+        const rowActions = section.row_actions;
+        require(Array.isArray(rowActions) && rowActions.length > 0, "invalid_row_actions");
+        require(rowActions.length <= MAX_ROW_ACTIONS, `too_many_row_actions:${rowActions.length}`);
+        require(new Set(rowActions).size === rowActions.length, "duplicate_row_action");
+        for (const id of rowActions) {
+          require(ctx.actions.has(text(id)), `unknown_action:${text(id)}`);
+          ctx.used.add(text(id));
+        }
       }
     }
   }
+}
 
-  return { sources: sources.length, sections: sections.length, refreshMs: /** @type {number} */ (refresh) };
+/**
+ * A readout names commands to read and widgets to draw. Nothing else.
+ * @param {unknown} readout
+ */
+export function validateReadout(readout) {
+  require(isObject(readout), "missing_readout");
+
+  const refresh = readout.refresh_ms ?? 1000;
+  require(isInt(refresh) && /** @type {number} */ (refresh) >= MIN_REFRESH_MS && /** @type {number} */ (refresh) <= MAX_REFRESH_MS,
+    `invalid_refresh_ms:${text(refresh)}`);
+  require(!("actions" in readout), "readout_must_not_declare_actions");
+
+  const ids = validateSources(readout.sources, false);
+  const sections = /** @type {unknown[]} */ (readout.sections);
+  validateSections(sections, { ids, kinds: SECTION_KINDS, actions: null, used: new Set() });
+
+  return { sources: ids.size, sections: sections.length, refreshMs: /** @type {number} */ (refresh) };
+}
+
+/**
+ * A constant: a string, a finite number or a boolean.
+ * @param {unknown} value
+ */
+const isConstant = (value) => typeof value === "boolean"
+  || (typeof value === "number" && Number.isFinite(value))
+  || (typeof value === "string" && value.length <= MAX_ARG_TEXT && !value.startsWith("$"));
+
+/**
+ * `when` / `hidden_when`: one condition or a list. Each compares one field of
+ * the row to a constant -- equal or not equal, nothing else.
+ * @param {unknown} value
+ * @param {string} key
+ */
+function validateConditions(value, key) {
+  const list = Array.isArray(value) ? value : [value];
+  require(list.length > 0 && list.length <= MAX_CONDITIONS, `invalid_${key}`);
+  for (const condition of list) {
+    require(isObject(condition), `invalid_${key}`);
+    require(FIELD_PATH_RE.test(text(condition.field)), `invalid_${key}`);
+    const ops = ["eq", "ne"].filter((op) => op in condition);
+    require(ops.length === 1, `invalid_${key}`);
+    require(isConstant(condition[ops[0]]), `invalid_${key}`);
+  }
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} what
+ * @param {number} max
+ */
+function optionalText(value, what, max) {
+  if (value === undefined) return;
+  require(typeof value === "string" && value.length <= max, `invalid_${what}`);
+}
+
+/**
+ * One action: a command its permissions allow, with argument templates that
+ * are data, never code.
+ * @param {Record<string, any>} action
+ * @param {Set<string>} granted commands the declared permissions unlock
+ */
+function validateAction(action, granted) {
+  const id = text(action.id);
+  require(text(action.label).trim() && text(action.label).length <= MAX_LABEL, `missing_action_label:${id}`);
+
+  const command = text(action.command);
+  // Two locks: the forbidden list first, so that the reason given for, say,
+  // `reboot` is that it is never allowed -- not merely that it is unlisted.
+  require(!isForbiddenCommand(command), `panel_command_forbidden:${command}`);
+  require(ACTION_COMMANDS.has(command), `panel_command_unknown:${command}`);
+  require(granted.has(command), `panel_permission_missing:${command}`);
+
+  const input = action.input;
+  /** @type {string|null} */
+  let inputField = null;
+  if (input !== undefined) {
+    require(isObject(input), `invalid_action_input:${id}`);
+    inputField = text(input.field);
+    require(SOURCE_ID_RE.test(inputField), `invalid_action_input:${id}`);
+    const kind = text(input.kind ?? "number");
+    require(INPUT_KINDS.has(kind), `invalid_action_input:${id}`);
+    optionalText(input.label, "action_input", MAX_LABEL);
+    if (kind === "number") {
+      for (const key of ["min", "max", "step"]) {
+        if (key in input) require(typeof input[key] === "number" && Number.isFinite(input[key]), `invalid_action_input:${id}`);
+      }
+      if ("min" in input && "max" in input) require(input.max >= input.min, `invalid_action_input:${id}`);
+    } else if ("max_length" in input) {
+      require(isInt(input.max_length) && input.max_length > 0 && input.max_length <= MAX_INPUT_TEXT, `invalid_action_input:${id}`);
+    }
+    if ("default" in input) {
+      const fallback = input.default;
+      const template = typeof fallback === "string" ? TEMPLATE_RE.exec(fallback) : null;
+      // A default may come from the row, never from another input.
+      require(isConstant(fallback) || (template !== null && template[1] === "row"), `invalid_arg_template:${text(fallback)}`);
+    }
+  }
+
+  const args = action.args ?? {};
+  require(isObject(args), `invalid_action_args:${id}`);
+  const keys = Object.keys(args);
+  require(keys.length <= MAX_ARGS, `too_many_args:${id}`);
+  for (const key of keys) {
+    require(SOURCE_ID_RE.test(key), `invalid_arg_name:${key}`);
+    const value = args[key];
+    if (typeof value === "string" && value.startsWith("$")) {
+      const template = TEMPLATE_RE.exec(value);
+      require(template, `invalid_arg_template:${value}`);
+      if (template[1] === "input") require(template[2] === inputField, `unknown_input_field:${template[2]}`);
+    } else {
+      require(isConstant(value), `invalid_arg_value:${key}`);
+    }
+  }
+
+  for (const key of ["when", "hidden_when"]) {
+    if (key in action) validateConditions(action[key], key);
+  }
+
+  if ("confirm" in action) {
+    const confirm = action.confirm;
+    require(isObject(confirm), `invalid_confirm:${id}`);
+    optionalText(confirm.title, "confirm", MAX_CONFIRM_TEXT);
+    optionalText(confirm.message, "confirm", MAX_CONFIRM_TEXT);
+    if ("destructive" in confirm) require(typeof confirm.destructive === "boolean", `invalid_confirm:${id}`);
+  }
+}
+
+/**
+ * A panel: a readout that may also act, within the permissions its manifest
+ * declares.
+ * @param {unknown} panel
+ * @param {Record<string, unknown>} manifest
+ */
+export function validatePanel(panel, manifest) {
+  require(isObject(panel), "missing_panel");
+
+  const refresh = panel.refresh_ms ?? 1000;
+  require(isInt(refresh) && /** @type {number} */ (refresh) >= MIN_REFRESH_MS && /** @type {number} */ (refresh) <= MAX_REFRESH_MS,
+    `invalid_refresh_ms:${text(refresh)}`);
+
+  const permissions = manifest.permissions ?? [];
+  require(Array.isArray(permissions), "permissions_must_be_a_list");
+  /** @type {Set<string>} */
+  const declared = new Set();
+  for (const permission of permissions) {
+    const name = text(permission);
+    require(Object.hasOwn(PERMISSIONS, name), `unknown_permission:${name}`);
+    require(!declared.has(name), `duplicate_permission:${name}`);
+    declared.add(name);
+  }
+  const granted = new Set([...declared].flatMap((name) => PERMISSIONS[/** @type {keyof typeof PERMISSIONS} */ (name)]));
+
+  const ids = validateSources(panel.sources, true);
+
+  const list = panel.actions ?? [];
+  require(Array.isArray(list), "actions_must_be_a_list");
+  require(list.length <= MAX_ACTIONS, `too_many_actions:${list.length}`);
+  /** @type {Map<string, Record<string, any>>} */
+  const actions = new Map();
+  for (const action of list) {
+    require(isObject(action), "invalid_action");
+    const id = text(action.id);
+    require(SOURCE_ID_RE.test(id), `invalid_action_id:${id}`);
+    require(!actions.has(id), `duplicate_action_id:${id}`);
+    validateAction(action, granted);
+    actions.set(id, action);
+  }
+
+  /** @type {Set<string>} */
+  const used = new Set();
+  const sections = /** @type {unknown[]} */ (panel.sections);
+  validateSections(sections, { ids, kinds: PANEL_SECTION_KINDS, actions, used });
+
+  // Least privilege: an action nothing can trigger, or a permission no action
+  // uses, is a grant the operator is asked to accept for nothing.
+  for (const id of actions.keys()) require(used.has(id), `unused_action:${id}`);
+  const commands = new Set([...actions.values()].map((action) => text(action.command)));
+  for (const name of declared) {
+    require(PERMISSIONS[/** @type {keyof typeof PERMISSIONS} */ (name)].some((command) => commands.has(command)), `unused_permission:${name}`);
+  }
+
+  const declaredMinOs = text(manifest.min_os) || "v1.0.0";
+  require(compareVersions(declaredMinOs, PANEL_MIN_OS) >= 0,
+    `min_os_too_low:declares_v${declaredMinOs.replace(/^v/, "")}_needs_v${PANEL_MIN_OS.replace(/^v/, "")}`);
+
+  return {
+    sources: ids.size,
+    sections: sections.length,
+    refreshMs: /** @type {number} */ (refresh),
+    actions: actions.size,
+    permissions: [...declared],
+  };
 }
 
 /**
  * @typedef {object} PackageReport
- * @property {"flow"|"readout"} kind
+ * @property {"flow"|"readout"|"panel"} kind
  * @property {string} id
  * @property {string} version
  * @property {number} size canonical bytes
@@ -419,6 +687,8 @@ export function validateReadout(readout) {
  * @property {number} [sources]
  * @property {number} [sections]
  * @property {number} [refreshMs]
+ * @property {number} [actions] a panel's action count
+ * @property {string[]} [permissions] a panel's declared permissions
  */
 
 /**
@@ -432,21 +702,25 @@ export function validatePackage(doc, raw = null, options = {}) {
   require(isObject(doc), "not_a_package");
   require(doc.nhapp === 1, `unsupported_package_version:${text(doc.nhapp)}`);
   const kind = text(doc.kind) || "flow";
-  require(kind === "flow" || kind === "readout", `unsupported_kind:${text(doc.kind)}`);
+  require(kind === "flow" || kind === "readout" || kind === "panel", `unsupported_kind:${text(doc.kind)}`);
 
   const manifest = doc.manifest;
   require(isObject(manifest), "missing_manifest");
   validateManifest(manifest);
+  // Permissions unlock commands a panel may send; nothing else sends any.
+  require(kind === "panel" || !("permissions" in manifest), "permissions_only_for_panel");
 
   /** @type {Omit<PackageReport, "id"|"version"|"size">} */
   let report;
-  if (kind === "readout") {
+  if (kind === "readout" || kind === "panel") {
     // Stored by the device but never dispatched: it holds a registry entry
     // and nothing else -- no nodes, no budget, no slot.
-    require(!("nodes" in doc), "readout_must_not_declare_nodes");
+    require(!("nodes" in doc), `${kind}_must_not_declare_nodes`);
+    const other = kind === "readout" ? "panel" : "readout";
+    require(!(other in doc), `${kind}_must_not_declare_a_${other}`);
     report = {
-      ...validateReadout(doc.readout),
-      kind: "readout",
+      ...(kind === "readout" ? validateReadout(doc.readout) : validatePanel(doc.panel, manifest)),
+      kind,
       nodes: 0,
       estimatedUs: 0,
       memoryBytes: 0,
@@ -454,6 +728,7 @@ export function validatePackage(doc, raw = null, options = {}) {
     };
   } else {
     require(!("readout" in doc), "flow_must_not_declare_a_readout");
+    require(!("panel" in doc), "flow_must_not_declare_a_panel");
     report = { ...validateGraph(doc.nodes, manifest, options), kind: "flow" };
   }
 

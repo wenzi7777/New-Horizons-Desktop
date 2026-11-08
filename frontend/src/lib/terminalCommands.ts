@@ -58,6 +58,9 @@ export const COMMAND_BLOCKS: CommandBlock[] = [
   { command: "scan-health", groupKey: "commandGroupCore", params: [] },
   { command: "sensor-sample", groupKey: "commandGroupCore", params: [] },
   { command: "task-list", groupKey: "commandGroupCore", params: [] },
+  // Firmware v1.19.0 task manager: monitor snapshot and FreeRTOS threads.
+  { command: "sysmon", groupKey: "commandGroupCore", params: [] },
+  { command: "thread-list", groupKey: "commandGroupCore", params: [] },
   { command: "service-list", groupKey: "commandGroupCore", params: [] },
   { command: "capabilities", groupKey: "commandGroupCore", params: [] },
   { command: "app-list", groupKey: "commandGroupCore", params: [] },
@@ -70,6 +73,17 @@ export const COMMAND_BLOCKS: CommandBlock[] = [
     command: "app-disable",
     groupKey: "commandGroupConfig",
     params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "flow1" }],
+  },
+  // Stops last until reboot (firmware v1.19.0+): nothing is persisted.
+  {
+    command: "app-stop",
+    groupKey: "commandGroupConfig",
+    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "flow" }],
+  },
+  {
+    command: "app-start",
+    groupKey: "commandGroupConfig",
+    params: [{ key: "name", labelKey: "paramAppName", type: "text", required: true, placeholder: "flow" }],
   },
   {
     command: "app-revive",
@@ -184,6 +198,34 @@ export const COMMAND_BLOCKS: CommandBlock[] = [
     command: "service-restart",
     groupKey: "commandGroupMaintenance",
     params: [{ key: "name", labelKey: "paramServiceName", type: "text", required: true, placeholder: "imu" }],
+  },
+  {
+    command: "service-stop",
+    groupKey: "commandGroupMaintenance",
+    params: [{ key: "name", labelKey: "paramServiceName", type: "text", required: true, placeholder: "imu" }],
+  },
+  {
+    command: "service-start",
+    groupKey: "commandGroupMaintenance",
+    params: [{ key: "name", labelKey: "paramServiceName", type: "text", required: true, placeholder: "imu" }],
+  },
+  {
+    command: "task-stop",
+    groupKey: "commandGroupMaintenance",
+    params: [{ key: "name", labelKey: "paramTaskName", type: "text", required: true, placeholder: "imu" }],
+  },
+  {
+    command: "task-start",
+    groupKey: "commandGroupMaintenance",
+    params: [{ key: "name", labelKey: "paramTaskName", type: "text", required: true, placeholder: "imu" }],
+  },
+  {
+    command: "task-set-period",
+    groupKey: "commandGroupMaintenance",
+    params: [
+      { key: "name", labelKey: "paramTaskName", type: "text", required: true, placeholder: "imu" },
+      { key: "period-us", labelKey: "paramPeriodUs", type: "text", required: true, placeholder: "20000" },
+    ],
   },
   { command: "dmesg", groupKey: "commandGroupFiles", params: [] },
   {

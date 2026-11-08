@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Gauge, RefreshCw, Workflow, X } from "lucide-react";
+import { Gauge, RefreshCw, SlidersHorizontal, Workflow, X } from "lucide-react";
 import { ConfirmModal } from "./ConfirmModal";
 import { DeviceAppLivePreview } from "./DeviceAppLivePreview";
-import { ReadoutView } from "./ReadoutView";
+import { PanelPermissionList, PanelView } from "./PanelView";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 import { type AppCatalogEntry, useLocalised } from "../lib/appLibrary";
@@ -19,7 +19,12 @@ import {
   parsePackageList,
 } from "../lib/deviceApps";
 import { type CommandRunner, readDeviceFile } from "../lib/deviceFileTransfer";
-import { type ReadoutPackage, isReadoutPackage } from "../lib/readout";
+import { isViewablePackage, panelModel } from "../lib/panel";
+
+/** Packages drawn by the Desktop rather than run in a slot: readouts and panels. */
+function isViewKind(kind: string): boolean {
+  return kind === "readout" || kind === "panel";
+}
 
 export type DeviceAppsPanelProps = {
   /**
@@ -39,6 +44,11 @@ export type DeviceAppsPanelProps = {
    * state and the operation log; see DeviceAppLivePreview. No preview without.
    */
   poll?: CommandRunner;
+  /**
+   * For the device's own command catalog: a panel action whose command the
+   * device does not list (older firmware) is hidden rather than offered.
+   */
+  deviceUid?: string;
 };
 
 function AppBudgetMeter({ app }: { app: InstalledApp }) {
@@ -82,10 +92,16 @@ function formatGap(ms: number): string {
 
 /** A rounded tile standing in for a package icon; the kind decides the glyph. */
 function PackageGlyph({ kind }: { kind: string }) {
-  const readout = kind === "readout";
+  const viewed = isViewKind(kind);
   return (
-    <span className={`app-glyph${readout ? " readout" : ""}`} aria-hidden="true">
-      {readout ? <Gauge size={18} strokeWidth={1.75} /> : <Workflow size={18} strokeWidth={1.75} />}
+    <span className={`app-glyph${viewed ? " readout" : ""}`} aria-hidden="true">
+      {kind === "panel" ? (
+        <SlidersHorizontal size={18} strokeWidth={1.75} />
+      ) : viewed ? (
+        <Gauge size={18} strokeWidth={1.75} />
+      ) : (
+        <Workflow size={18} strokeWidth={1.75} />
+      )}
     </span>
   );
 }
@@ -97,6 +113,7 @@ export function DeviceAppsPanel({
   busy = false,
   compact = false,
   poll,
+  deviceUid,
 }: DeviceAppsPanelProps) {
   const { t } = useI18n();
   const [apps, setApps] = useState<InstalledApp[]>([]);
@@ -108,10 +125,27 @@ export function DeviceAppsPanel({
   const [notice, setNotice] = useState<{ text: string; kind: "success" | "error" } | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [openReadout, setOpenReadout] = useState<ReadoutPackage | null>(null);
+  // A readout or a panel package, as read from the device.
+  const [openReadout, setOpenReadout] = useState<unknown>(null);
   const [openReadoutId, setOpenReadoutId] = useState<string | null>(null);
   const [confirmUninstall, setConfirmUninstall] = useState<AppPackageEntry | null>(null);
   const localise = useLocalised();
+  // The device's command names, when it reports a catalog (firmware v1.15.0+).
+  const [deviceCommands, setDeviceCommands] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!deviceUid) return;
+    let cancelled = false;
+    api
+      .deviceCommands(deviceUid)
+      .then((response) => {
+        if (cancelled || !response.catalog) return;
+        setDeviceCommands(new Set(response.catalog.commands.map((spec) => String(spec.name))));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [deviceUid]);
   // The catalog's localised name and summary, by package id. A package's own
   // manifest carries one English string, and changing that would mean a new
   // version of every package; the catalog already has every locale. Missing
@@ -212,7 +246,7 @@ export function DeviceAppsPanel({
         // or an unreachable library.
         const bytes = await readDeviceFile(runnerRef.current, { path: `apps/${entry.id}.nha` });
         const doc = JSON.parse(new TextDecoder().decode(bytes));
-        if (!isReadoutPackage(doc)) throw new Error("not_a_readout");
+        if (!isViewablePackage(doc)) throw new Error("not_a_panel");
         setOpenReadout(doc);
         setOpenReadoutId(entry.id);
       } catch (error) {
@@ -237,8 +271,9 @@ export function DeviceAppsPanel({
     [openReadoutId, run, t],
   );
 
-  const flowPackages = useMemo(() => packages.filter((p) => p.kind !== "readout"), [packages]);
-  const readoutPackages = useMemo(() => packages.filter((p) => p.kind === "readout"), [packages]);
+  const flowPackages = useMemo(() => packages.filter((p) => !isViewKind(p.kind)), [packages]);
+  const readoutPackages = useMemo(() => packages.filter((p) => isViewKind(p.kind)), [packages]);
+  const openModel = useMemo(() => panelModel(openReadout), [openReadout]);
   const available = useMemo(() => freeSlots(apps, packages), [apps, packages]);
   const packageBySlot = useMemo(() => {
     const map = new Map<number, AppPackageEntry>();
@@ -253,7 +288,7 @@ export function DeviceAppsPanel({
   const maintenanceTitle = maintenanceMode ? undefined : t("appRequiresMaintenance");
 
   function packageRow(entry: AppPackageEntry) {
-    const readout = entry.kind === "readout";
+    const readout = isViewKind(entry.kind);
     return (
       <li key={entry.id} className={`app-row${pending === entry.id ? " pending" : ""}`}>
         <PackageGlyph kind={entry.kind} />
@@ -270,7 +305,7 @@ export function DeviceAppsPanel({
             <span className="app-mono">{entry.id}</span>
             <span>{entry.size} B</span>
             {readout ? (
-              <span>{t("appKindReadout")}</span>
+              <span>{entry.kind === "panel" ? t("appKindPanel") : t("appKindReadout")}</span>
             ) : (
               <>
                 <span>~{entry.estimatedUs} µs</span>
@@ -478,12 +513,12 @@ export function DeviceAppsPanel({
           {openReadout ? (
             <div className="readout-host">
               <header className="readout-host-header">
-                <PackageGlyph kind="readout" />
+                <PackageGlyph kind={openModel?.kind ?? "readout"} />
                 <h4>
                   {(openReadoutId && catalog.has(openReadoutId)
                     ? localise(catalog.get(openReadoutId)?.name)
                     : "") ||
-                    String((openReadout.manifest as Record<string, unknown>).name ?? openReadoutId)}
+                    String(((openReadout as { manifest?: Record<string, unknown> }).manifest ?? {}).name ?? openReadoutId)}
                 </h4>
                 <button
                   type="button"
@@ -498,7 +533,9 @@ export function DeviceAppsPanel({
                   <X size={16} strokeWidth={2} />
                 </button>
               </header>
-              <ReadoutView pkg={openReadout} runner={runner} busy={disabled} />
+              {/* What this panel may do to the device, every time it is opened. */}
+              <PanelPermissionList permissions={openModel?.permissions ?? []} />
+              <PanelView pkg={openReadout} runner={runner} busy={disabled} supportedCommands={deviceCommands} />
             </div>
           ) : null}
 

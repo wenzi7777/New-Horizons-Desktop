@@ -56,6 +56,17 @@ KERNEL_COMMANDS = {
     "app-load-flow --path apps/flow.json": "app_load_flow",
     "app-unload-flow": "app_unload_flow",
     "app-view": "app_view",
+    # v1.19.0 task manager. Every stop lasts until reboot.
+    "sysmon": "sysmon",
+    "thread-list": "thread_list",
+    "task-stop --name imu": "task_stop",
+    "task-start --name imu": "task_start",
+    "task-set-period --name imu --period-us 20000": "task_set_period",
+    "task-set-period --name imu --period-us default": "task_set_period",
+    "service-stop --name imu": "service_stop",
+    "service-start --name imu": "service_start",
+    "app-stop --name flow": "app_stop",
+    "app-start --name flow": "app_start",
 }
 
 # Terminal entries handled entirely in the browser -- they open a local modal and
@@ -76,6 +87,22 @@ class KernelCommandCompilationTests(unittest.TestCase):
             with self.subTest(line=line):
                 payload = compile_terminal_command(line)["payload"]
                 self.assertEqual(validate_device_command_payload(payload)["command"], expected)
+
+    def test_task_set_period_sends_a_number_or_default(self):
+        # The firmware reads period_us with extractInt, or the string "default".
+        number = compile_terminal_command("task-set-period --name imu --period-us 20000")["payload"]
+        self.assertEqual(number, {"command": "task_set_period", "name": "imu", "period_us": 20000})
+        reset = compile_terminal_command("task-set-period --name imu --period-us default")["payload"]
+        self.assertEqual(reset["period_us"], "default")
+        with self.assertRaises(ValueError):
+            compile_terminal_command("task-set-period --name imu --period-us fast")
+
+    def test_task_manager_commands_need_no_maintenance(self):
+        for command in ("sysmon", "thread_list", "task_stop", "task_start", "task_set_period",
+                        "service_stop", "service_start", "app_stop", "app_start"):
+            with self.subTest(command=command):
+                self.assertIn(command, NewHorizonsService.NORMAL_COMMANDS)
+                self.assertIn(command, DEVICE_COMMAND_ALLOWLIST)
 
     def test_optional_arguments_are_omitted_not_defaulted(self):
         # The firmware treats an absent path as "dump everything" / "use the

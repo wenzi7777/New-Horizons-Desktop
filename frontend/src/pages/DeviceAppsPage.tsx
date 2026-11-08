@@ -146,6 +146,7 @@ export function DeviceAppsPage() {
       <DeviceAppsPanel
         runner={queue}
         poll={poll}
+        deviceUid={deviceUid}
         maintenanceMode={maintenanceMode}
         supportsRegistry={supportsRegistry}
         busy={running}

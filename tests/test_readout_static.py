@@ -22,8 +22,8 @@ def read(relative: str) -> str:
 
 class DeclarativeOnlyTests(unittest.TestCase):
     def test_the_renderer_never_evaluates_package_content(self):
-        renderer = read("components/ReadoutView.tsx")
-        lib = read("lib/readout.ts")
+        renderer = read("components/ReadoutView.tsx") + read("components/PanelView.tsx")
+        lib = read("lib/readout.ts") + read("lib/panel.ts")
         # A package's fields index into results; they must never become code.
         for danger in ("eval(", "new Function", "dangerouslySetInnerHTML", "innerHTML"):
             with self.subTest(danger=danger):
@@ -34,10 +34,13 @@ class DeclarativeOnlyTests(unittest.TestCase):
         lib = read("lib/readout.ts")
         self.assertIn("READOUT_ALLOWED_SOURCES", lib)
         self.assertIn("readout_source_not_allowed", lib)
-        # A refused readout must not render at all.
-        renderer = read("components/ReadoutView.tsx")
-        self.assertIn("readoutRejectionReason", renderer)
+        # A refused readout must not render at all. ReadoutView draws through
+        # PanelView, whose gate checks the same allowlist (panel.ts).
+        self.assertIn("<PanelView", read("components/ReadoutView.tsx"))
+        renderer = read("components/PanelView.tsx")
+        self.assertIn("panelRejectionReason", renderer)
         self.assertIn('t("readoutRejected")', renderer)
+        self.assertIn("READOUT_ALLOWED_SOURCES", read("lib/panel.ts"))
 
     def test_the_allowlist_contains_no_mutating_command(self):
         lib = read("lib/readout.ts")
@@ -64,10 +67,11 @@ class SourceOfTruthTests(unittest.TestCase):
 
     def test_readouts_are_separated_from_flow_packages(self):
         panel = read("components/DeviceAppsPanel.tsx")
-        # A readout holds no slot, so listing it among slot-bound packages
-        # would invite someone to try activating it.
-        self.assertIn('p.kind === "readout"', panel)
-        self.assertIn('p.kind !== "readout"', panel)
+        # A readout (or panel) holds no slot, so listing it among slot-bound
+        # packages would invite someone to try activating it.
+        self.assertIn('return kind === "readout" || kind === "panel";', panel)
+        self.assertIn("packages.filter((p) => isViewKind(p.kind))", panel)
+        self.assertIn("packages.filter((p) => !isViewKind(p.kind))", panel)
 
     def test_the_package_kind_is_parsed(self):
         lib = read("lib/deviceApps.ts")
@@ -76,13 +80,14 @@ class SourceOfTruthTests(unittest.TestCase):
 
 class PollingTests(unittest.TestCase):
     def test_passes_do_not_overlap(self):
-        renderer = read("components/ReadoutView.tsx")
+        renderer = read("components/PanelView.tsx")
         # The device answers one command per connection; overlapping passes
-        # would queue behind each other indefinitely.
-        self.assertIn("inFlight", renderer)
+        # would queue behind each other indefinitely. A pass is skipped while
+        # anything holds the view's lock.
+        self.assertIn("lock.current.tryRun(", renderer)
 
     def test_one_request_per_distinct_command(self):
-        renderer = read("components/ReadoutView.tsx")
+        renderer = read("components/PanelView.tsx")
         self.assertIn("byCommand", renderer)
 
     def test_the_interval_is_clamped(self):
@@ -105,7 +110,8 @@ class PublishedReadoutTests(unittest.TestCase):
         from newhorizons_backend.app_library import validate_package
 
         report = validate_package(json.loads(package.read_text()))
-        self.assertEqual(report["kind"], "readout")
+        # v2.0.0 of sysmon is a panel; v1 was a readout. Either must pass.
+        self.assertIn(report["kind"], ("readout", "panel"))
         self.assertEqual(report["device_path"], "apps/sysmon.nha")
 
 
@@ -122,7 +128,7 @@ class TranslationTests(unittest.TestCase):
             "ja": set(key_re.findall(source[ja_start:zh_start])),
             "zh-CN": set(key_re.findall(source[zh_start:merged])),
         }
-        used = set(re.findall(r't\("([A-Za-z0-9_]+)"\)', read("components/ReadoutView.tsx")))
+        used = set(re.findall(r't\("([A-Za-z0-9_]+)"\)', read("components/PanelView.tsx")))
         used |= {"installedReadouts", "appKindReadout", "readoutOpen", "appNoReadouts"}
         for locale, keys in dictionaries.items():
             with self.subTest(locale=locale):

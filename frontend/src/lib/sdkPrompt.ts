@@ -12,7 +12,7 @@ import authoringGuide from "../sdk/docs/authoring.md?raw";
 import matViewExample from "../sdk/examples/mat_view.nhs?raw";
 import sensorsExample from "../sdk/examples/sensors.readout.json?raw";
 import stepsExample from "../sdk/examples/steps.nhs?raw";
-import sysmonExample from "../sdk/examples/sysmon.readout.json?raw";
+import sysmonPanelExample from "../sdk/examples/sysmon.panel.json?raw";
 import tiltExample from "../sdk/examples/tilt.nhs?raw";
 import {
   CAPABILITIES,
@@ -50,6 +50,7 @@ import {
   type Diagnostic,
 } from "../sdk/lib/index.mjs";
 import { STATEMENT_FORMS, functionDoc } from "./nhsLanguage";
+import { MAX_PANEL_ACTIONS, MAX_PANEL_TABS, PANEL_PERMISSIONS } from "./panel";
 import type { BoardSpec, SdkKind } from "./sdkProject";
 
 /** The shape of each readout section kind, for the Reference tab and the prompt. */
@@ -66,10 +67,25 @@ export const FLOW_EXAMPLES: readonly { id: string; source: string }[] = [
   { id: "mat_view", source: matViewExample },
 ];
 
-/** The readout examples, between them using every section kind. */
+/** The readout examples (read-only packages). */
 export const READOUT_EXAMPLES: readonly { id: string; source: string }[] = [
-  { id: "sysmon", source: sysmonExample },
   { id: "sensors", source: sensorsExample },
+];
+
+/**
+ * The panel examples: a readout plus actions. sysmon uses every section kind,
+ * tabs, row menus, an input and the Run box.
+ */
+export const PANEL_EXAMPLES: readonly { id: string; source: string }[] = [
+  { id: "sysmon", source: sysmonPanelExample },
+];
+
+/** The shape of the sections and actions only a panel has. */
+export const PANEL_FORMS: readonly (readonly [kind: string, form: string])[] = [
+  ["tabs", '{ "kind": "tabs", "title": "…", "tabs": [{ "title": "…", "sections": [ … ] }] }'],
+  ["run", '{ "kind": "run", "title": "…", "placeholder": "…", "candidates": [{ "source", "field", "action" }] }'],
+  ["row_actions", '"row_actions": ["<action id>", …]   (on a table section)'],
+  ["action", '{ "id", "label", "command", "args": { "name": "$row.name", "period_us": "$input.period_us" }, "when": { "field", "eq" | "ne" | "in" }, "hidden_when": { … }, "input": { "field", "kind": "number", "label", "unit", "min", "max", "default": "$row.<field>" }, "confirm": { "title", "message": "… {name} …", "destructive" } }'],
 ];
 
 /** What the prompt says about the device the app is meant for. */
@@ -257,6 +273,21 @@ function readoutReference(): string {
   ].join("\n");
 }
 
+function panelReference(): string {
+  const permissions = Object.entries(PANEL_PERMISSIONS)
+    .map(([permission, commands]) => `\`${permission}\`: ${code(commands)}`);
+  return [
+    "For reference only: App Studio builds readouts, not panels. A panel (`\"kind\": \"panel\"`, key `panel` instead of `readout`) is a readout that may also act on the device, and is published through the App Library. If the request needs buttons that change the device, say so in your note and write the read-only part as a readout.",
+    bullets([
+      "`manifest.permissions` declares what a panel may send; each permission allows exactly these commands, nothing else:",
+      ...permissions.map((line) => `  ${line}`),
+      `At most ${MAX_PANEL_ACTIONS} actions and ${MAX_PANEL_TABS} tabs. An argument is a constant, \`$row.<field>\` or \`$input.<field>\`; nothing is computed.`,
+      "Stops last until reboot; the device refuses protected tasks and services itself.",
+    ]),
+    fenced("", PANEL_FORMS.map(([, form]) => form).join("\n")),
+  ].join("\n");
+}
+
 /**
  * Builds the prompt. Deterministic: the same options give the same text, so
  * it can be tested and diffed.
@@ -325,8 +356,14 @@ export function buildAiPrompt(options: AiPromptOptions): string {
     parts.push("## Readout reference");
     parts.push(readoutReference());
     parts.push("## Example readouts");
-    parts.push("Published readouts from the App Library. Between them they show the field names the commands they poll return.");
+    parts.push("Published packages from the App Library. Between them they show the field names the commands they poll return.");
     for (const example of READOUT_EXAMPLES) {
+      parts.push(`### ${example.id}\n${fenced("json", example.source)}`);
+    }
+    parts.push("## Panels");
+    parts.push(panelReference());
+    parts.push("The published System Monitor panel. Its `sysmon` sources show the field names of tasks, services, apps, memory, scan and threads; a readout may poll `sysmon` too, and a dotted `path` (`scheduler.tasks`) walks into its parts.");
+    for (const example of PANEL_EXAMPLES) {
       parts.push(`### ${example.id}\n${fenced("json", example.source)}`);
     }
   }

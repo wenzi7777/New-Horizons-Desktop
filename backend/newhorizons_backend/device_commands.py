@@ -83,6 +83,18 @@ SHARED_COMMANDS = {
     "app_view",
     # v1.15.0: the device's own command table (device_commands.py).
     "commands",
+    # v1.19.0 task manager: one-call monitor snapshot, FreeRTOS threads, and
+    # stopping/starting tasks, services and apps for this boot only (nothing
+    # is persisted; the firmware refuses protected ones itself).
+    "sysmon",
+    "thread_list",
+    "task_stop",
+    "task_start",
+    "task_set_period",
+    "service_stop",
+    "service_start",
+    "app_stop",
+    "app_start",
 }
 
 NORMAL_COMMANDS = SHARED_COMMANDS | {

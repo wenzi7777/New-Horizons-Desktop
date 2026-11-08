@@ -18,11 +18,13 @@ LIBRARY="${1:-${APP_DIR}/../NHOS-App-Library}"
 SOURCE="${LIBRARY}/sdk"
 TARGET="${APP_DIR}/frontend/src/sdk"
 # Small apps that between them show regions, events, emits, the status LED,
-# the OLED, the button, persisted counters, the IMU and gated pages; and both
-# readouts, which between them use every section kind. Keep this list in step
-# with frontend/src/lib/sdkPrompt.ts and frontend/tests/appSdkSync.test.mjs.
+# the OLED, the button, persisted counters, the IMU and gated pages; a
+# readout; and the sysmon panel, which uses every section kind and action
+# form. Keep this list in step with frontend/src/lib/sdkPrompt.ts and
+# frontend/tests/appSdkSync.test.mjs.
 EXAMPLE_FLOWS=(steps tilt mat_view)
-EXAMPLE_READOUTS=(sysmon sensors)
+EXAMPLE_READOUTS=(sensors)
+EXAMPLE_PANELS=(sysmon)
 
 if [[ ! -f "${SOURCE}/lib/index.mjs" ]]; then
   echo "No SDK at ${SOURCE}; pass the App Library checkout as the first argument." >&2
@@ -33,6 +35,9 @@ for app in "${EXAMPLE_FLOWS[@]}"; do
 done
 for app in "${EXAMPLE_READOUTS[@]}"; do
   [[ -f "${LIBRARY}/apps/${app}/readout.json" ]] || { echo "No example readout ${LIBRARY}/apps/${app}/readout.json" >&2; exit 1; }
+done
+for app in "${EXAMPLE_PANELS[@]}"; do
+  [[ -f "${LIBRARY}/apps/${app}/panel.json" ]] || { echo "No example panel ${LIBRARY}/apps/${app}/panel.json" >&2; exit 1; }
 done
 
 rm -rf "${TARGET}"
@@ -49,6 +54,9 @@ for app in "${EXAMPLE_FLOWS[@]}"; do
 done
 for app in "${EXAMPLE_READOUTS[@]}"; do
   cp "${LIBRARY}/apps/${app}/readout.json" "${TARGET}/examples/${app}.readout.json"
+done
+for app in "${EXAMPLE_PANELS[@]}"; do
+  cp "${LIBRARY}/apps/${app}/panel.json" "${TARGET}/examples/${app}.panel.json"
 done
 
 commit="$(git -C "${LIBRARY}" rev-parse --short HEAD 2>/dev/null || echo unknown)"

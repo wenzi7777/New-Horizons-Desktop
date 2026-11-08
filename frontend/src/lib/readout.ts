@@ -13,7 +13,7 @@ export type ReadoutFormat =
 export type ReadoutSource = {
   id: string;
   command: string;
-  /** Field inside the result's data to take, for list sources. */
+  /** Field inside the result's data to take, for list sources; dots walk into objects. */
   path?: string;
 };
 
@@ -76,9 +76,14 @@ export const READOUT_ALLOWED_SOURCES = new Set([
   "memory_status", "scan_health", "storage_status", "status", "capabilities",
   // Firmware v1.6.0: the latest IMU, magnetometer and fuel-gauge readings.
   "sensor_sample",
+  // Firmware v1.19.0: the whole monitor in one answer (a Hub relays one
+  // command per device at a time), and the FreeRTOS threads on their own.
+  "sysmon", "thread_list",
 ]);
 
 export const MIN_REFRESH_MS = 500;
+/** Steps a dotted path may walk ("threads.cores.0.busy_permille" is four). */
+export const MAX_PATH_DEPTH = 6;
 export const MAX_REFRESH_MS = 60000;
 export const MAX_CHART_SERIES = 4;
 export const DEFAULT_CHART_POINTS = 60;
@@ -104,7 +109,7 @@ export function readoutRejectionReason(doc: unknown): string | null {
   return null;
 }
 
-export function refreshInterval(spec: ReadoutSpec): number {
+export function refreshInterval(spec: Pick<ReadoutSpec, "refresh_ms">): number {
   const raw = Number(spec.refresh_ms ?? 1000);
   if (!Number.isFinite(raw)) return 1000;
   return Math.min(Math.max(raw, MIN_REFRESH_MS), MAX_REFRESH_MS);
@@ -161,6 +166,26 @@ export function numericValue(value: unknown): number | null {
 
 type Row = Record<string, unknown>;
 
+/**
+ * A field by dotted path: each step is an object's own key or an array index
+ * ("threads.cores.0.busy_permille"). It indexes into data; nothing is
+ * evaluated, and inherited properties (__proto__, constructor) are never read.
+ */
+export function fieldValue(row: unknown, path: string | undefined): unknown {
+  if (!path) return undefined;
+  let value: unknown = row;
+  for (const key of path.split(".").slice(0, MAX_PATH_DEPTH)) {
+    if (Array.isArray(value)) {
+      value = /^\d+$/.test(key) ? value[Number(key)] : undefined;
+    } else if (value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, key)) {
+      value = (value as Record<string, unknown>)[key];
+    } else {
+      return undefined;
+    }
+  }
+  return value;
+}
+
 /** Pull a source's payload out of a command result. */
 export function extractSource(
   result: Record<string, unknown> | null,
@@ -168,7 +193,9 @@ export function extractSource(
 ): Row | Row[] {
   const data = (result?.data ?? result ?? {}) as Record<string, unknown>;
   if (!source.path) return data;
-  const picked = data[source.path];
+  // A dotted path walks into nested objects -- sysmon nests each part, e.g.
+  // "scheduler.tasks".
+  const picked = fieldValue(data, source.path);
   if (Array.isArray(picked)) return picked as Row[];
   // An object under the path is one row -- sensor_sample's imu/mag/battery.
   if (picked && typeof picked === "object") return picked as Row;
@@ -189,7 +216,7 @@ export function chartPoints(section: ReadoutSection): number {
  */
 export function chartSample(section: ReadoutSection, source: Row | Row[] | undefined): (number | null)[] {
   const row = Array.isArray(source) ? source[0] : source;
-  return (section.series ?? []).slice(0, MAX_CHART_SERIES).map((line) => numericValue(row?.[line.field]));
+  return (section.series ?? []).slice(0, MAX_CHART_SERIES).map((line) => numericValue(fieldValue(row, line.field)));
 }
 
 /** Append a poll and keep only the last `points`. */
@@ -220,11 +247,11 @@ export function sortRows(rows: Row[], sort?: ReadoutSection["sort"]): Row[] {
   if (!sort?.field) return rows;
   const copy = [...rows];
   copy.sort((a, b) => {
-    const left = numericValue(a[sort.field]);
-    const right = numericValue(b[sort.field]);
+    const left = numericValue(fieldValue(a, sort.field));
+    const right = numericValue(fieldValue(b, sort.field));
     if (left !== null && right !== null) return sort.desc ? right - left : left - right;
-    const ls = String(a[sort.field] ?? "");
-    const rs = String(b[sort.field] ?? "");
+    const ls = String(fieldValue(a, sort.field) ?? "");
+    const rs = String(fieldValue(b, sort.field) ?? "");
     return sort.desc ? rs.localeCompare(ls) : ls.localeCompare(rs);
   });
   return copy;

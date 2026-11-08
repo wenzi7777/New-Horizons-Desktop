@@ -257,7 +257,8 @@ class RunnerIdentityTests(unittest.TestCase):
         self.assertNotIn("await runner(", panel)
 
     def test_readout_poll_ignores_runner_identity(self):
-        view = read("components/ReadoutView.tsx")
+        # Readouts and panels poll through PanelView.
+        view = read("components/PanelView.tsx")
         self.assertIn("runnerRef.current = runner;", view)
         self.assertNotIn("runner", self.callback_deps(view, "poll"))
 
