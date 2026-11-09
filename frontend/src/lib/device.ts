@@ -18,14 +18,9 @@ export function isHubRelayed(device: DeviceEntry | null | undefined): boolean {
   return device?.client_type === "hub";
 }
 
-// The one display name for a relay. A relay's self-reported gateway_name is
-// ignored on purpose: it is persisted per install in the Gateway's
-// .run/config.json, so installs from different releases kept different
-// defaults ("New Horizons Gateway", "NHOS Gateway") and the Relays page mixed
-// them. The gateway_id beside it is what tells relays apart.
-export function relayDisplayName(relay: { client_type?: string } | null | undefined): string {
-  return relay?.client_type === "hub" ? "NH Hub" : "NH Gateway";
-}
+// The one display name for a relay (NH Studio / NH Pocket / NH Hub /
+// NH Gateway), by client_type; see lib/relayKind.ts.
+export { isAppRelay, isLegacyGateway, relayDisplayName, relayKind, type RelayKind } from "./relayKind";
 
 export type NormalizedDevice = {
   uid: string;

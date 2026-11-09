@@ -17,6 +17,23 @@ import uuid
 from .result_chunks import normalize_device_result
 from .service_constants import GATEWAY_CONTROL_UNAVAILABLE
 
+# What can register as a relay. "gateway" is the Python NH Gateway (legacy
+# now: NH Studio replaces it), "hub" the ESP-NOW Hub, "studio" / "pocket"
+# the NH Studio desktop app and the NH Pocket Android app. A hello without
+# client_type is an old Gateway's.
+RELAY_CLIENT_TYPES = ("gateway", "hub", "studio", "pocket")
+RELAY_DEFAULT_NAMES = {
+    "gateway": "NH Gateway",
+    "hub": "NH Hub",
+    "studio": "NH Studio",
+    "pocket": "NH Pocket",
+}
+
+
+def normalize_relay_client_type(value: Any) -> str:
+    client_type = str(value or "").strip().lower()
+    return client_type if client_type in RELAY_CLIENT_TYPES else "gateway"
+
 
 def _channel_or(value: Any, fallback: Any) -> int:
     # A reported channel (1-14) wins; missing or invalid keeps the fallback.
@@ -187,8 +204,12 @@ class GatewayRegistryMixin:
             # backward compatibility. Previously there was no wire-level
             # self-identification at all, so every entry (Hub included)
             # silently defaulted to the Gateway name below.
-            client_type = payload.get("client_type") or existing.get("client_type") or "gateway"
-            default_name = "NH Hub" if client_type == "hub" else "NH Gateway"
+            client_type = normalize_relay_client_type(payload.get("client_type") or existing.get("client_type"))
+            default_name = RELAY_DEFAULT_NAMES[client_type]
+            # Set by gateway_ws.py from the app token the relay connected
+            # with (NH Studio / Pocket); sticky like client_type.
+            app_id = str(payload.get("app_id") if "app_id" in payload else existing.get("app_id", "") or "")
+            authenticated = bool(payload.get("authenticated") if "authenticated" in payload else existing.get("authenticated", False))
             # Sticky like client_type: hello carries it, later messages
             # (gateway_status, claim requests) usually don't.
             capabilities = payload.get("capabilities")
@@ -210,6 +231,11 @@ class GatewayRegistryMixin:
                 "gateway_id": gateway_id,
                 "gateway_name": payload.get("gateway_name") or payload.get("name") or existing.get("gateway_name") or default_name,
                 "client_type": client_type,
+                "app_id": app_id,
+                "authenticated": authenticated,
+                # The Python Gateway is superseded by NH Studio; the Relays
+                # page shows it as legacy.
+                "legacy": client_type == "gateway",
                 "capabilities": [str(item) for item in capabilities],
                 "update_channel": update_channel,
                 "remote_management": bool(remote_management),

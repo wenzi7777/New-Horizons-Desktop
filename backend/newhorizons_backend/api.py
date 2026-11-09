@@ -17,6 +17,8 @@ from flask import Blueprint, Response, current_app, g, request, send_file
 from .app_library import AppLibraryError, AppPackageError, get_library
 from .auth import AuthManager, DEFAULT_TOKEN_EXPIRY_SEC, user_payload
 from .gateway_auth import gateway_expected_token
+from .profile_sync import ProfileSyncStore
+from .recording_sync import MAX_CHUNK_BYTES, RecordingSyncStore, SyncError
 from .pressure_cal_client import PressureCalError, PressureCalNotConfigured, get_client
 from .pressure_cal_settings import BUILTIN_PRESETS, load_settings, save_settings
 from .recording_meta import DATA_SUFFIX, EVENTS_SUFFIX, META_SUFFIX, is_recording_dir, read_meta
@@ -62,7 +64,9 @@ def create_blueprint(
     def _auth_user() -> Any | None:
         if auth_manager is None:
             return None
-        return auth_manager.current_user()
+        # The cookie session (the browser), else an app token in
+        # `Authorization: Bearer` (NH Studio / NH Pocket).
+        return auth_manager.request_user(request.headers)
 
     def _auth_response(status_code: int, error: str) -> tuple[Response, int]:
         return json_response({"error": error}), status_code
@@ -364,6 +368,64 @@ def create_blueprint(
             return json_response({"error": "invalid_credentials"}), 401
         token = auth_manager.issue_token(user, str(current_app.secret_key or ""))
         return json_response({"token": token, "expires_in": DEFAULT_TOKEN_EXPIRY_SEC, "token_type": "Bearer"})
+
+    # ── App tokens (NH Studio / NH Pocket) ─────────────────────────────────
+    # Made, listed and revoked by an admin signed in to this page; an app
+    # holding a token cannot mint more of them.
+
+    def _session_admin() -> tuple[Response, int] | None:
+        if auth_manager is None:
+            return json_response({"error": "auth_unavailable"}), 503
+        user = _auth_user()
+        if user is None:
+            return _auth_response(401, "unauthorized")
+        if user.role != "admin" or getattr(user, "is_app", False):
+            return _auth_response(403, "forbidden")
+        return None
+
+    @bp.get("/api/app-tokens")
+    @auth
+    def app_tokens_list() -> tuple[Response, int] | Response:
+        denied = _session_admin()
+        if denied is not None:
+            return denied
+        assert auth_manager is not None
+        return json_response({"items": auth_manager.list_app_tokens()})
+
+    @bp.post("/api/app-tokens")
+    @auth
+    def app_tokens_create() -> tuple[Response, int] | Response:
+        denied = _session_admin()
+        if denied is not None:
+            return denied
+        assert auth_manager is not None
+        try:
+            data = _request_json_data({})
+        except ValueError:
+            return json_response({"error": "invalid_json"}), 400
+        if not isinstance(data, dict):
+            return json_response({"error": "invalid_json"}), 400
+        try:
+            token, item = auth_manager.create_app_token(
+                str(data.get("name") or ""),
+                str(data.get("client_type") or ""),
+                str(data.get("role") or "admin"),
+                created_by=_auth_user().username,
+            )
+        except ValueError as exc:
+            return json_response({"error": str(exc)}), 400
+        return json_response({"token": token, "token_type": "Bearer", "item": item})
+
+    @bp.delete("/api/app-tokens/<token_id>")
+    @auth
+    def app_tokens_revoke(token_id: str) -> tuple[Response, int] | Response:
+        denied = _session_admin()
+        if denied is not None:
+            return denied
+        assert auth_manager is not None
+        if not auth_manager.revoke_app_token(token_id):
+            return json_response({"error": "app_token_not_found"}), 404
+        return json_response({"status": "revoked", "item": auth_manager.app_token_info(token_id)})
 
     @bp.get("/api/health")
     @auth
@@ -781,6 +843,7 @@ def create_blueprint(
         path = _profiles_dir() / f"{_sanitize_name(name)}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        ProfileSyncStore(_profiles_dir()).note_saved(path.stem)
         return json_response({"status": "saved", "name": path.stem})
 
     @bp.delete("/api/profiles/<name>")
@@ -791,7 +854,166 @@ def create_blueprint(
         if not path.exists():
             return json_response({"error": "profile_not_found"}), 404
         path.unlink()
+        ProfileSyncStore(_profiles_dir()).note_deleted(path.stem)
         return json_response({"status": "deleted"})
+
+    # ── Sync (NH Studio / NH Pocket) ───────────────────────────────────────
+    # The API an app syncs with, normally with its app token. See
+    # recording_sync.py, device_labels.py and profile_sync.py for the rules.
+
+    def _sync_error(exc: SyncError) -> tuple[Response, int]:
+        return json_response({"error": exc.code, **exc.extra}), exc.status
+
+    def _sync_source() -> dict[str, Any]:
+        user = getattr(g, "newhorizons_user", None)
+        if user is not None and getattr(user, "is_app", False):
+            info = auth_manager.app_token_info(user.app_id) if auth_manager is not None else None
+            return {
+                "app_id": user.app_id,
+                "client_type": user.client_type,
+                "app_name": str((info or {}).get("name") or ""),
+            }
+        return {"client_type": "browser", "uploaded_by": str(getattr(user, "username", "") or "")}
+
+    def _int_arg(name: str, default: int, minimum: int = 0, maximum: int | None = None) -> int:
+        try:
+            value = int(request.args.get(name, default))
+        except (TypeError, ValueError):
+            raise SyncError(f"{name}_invalid") from None
+        value = max(minimum, value)
+        return min(maximum, value) if maximum is not None else value
+
+    def _recording_store() -> RecordingSyncStore:
+        return RecordingSyncStore(_data_dir())
+
+    @bp.get("/api/sync/recordings")
+    @auth
+    @_require_roles("admin")
+    def sync_recordings_list() -> tuple[Response, int] | Response:
+        try:
+            return json_response(_recording_store().list_recordings(
+                device_uid=str(request.args.get("device_uid") or "").strip(),
+                since_ms=_int_arg("since_ms", 0),
+                limit=_int_arg("limit", 200, 1, 1000),
+                offset=_int_arg("offset", 0),
+            ))
+        except SyncError as exc:
+            return _sync_error(exc)
+
+    @bp.post("/api/sync/recordings")
+    @auth
+    @_require_roles("admin")
+    def sync_recordings_begin() -> tuple[Response, int] | Response:
+        try:
+            data = _request_json_data({})
+        except ValueError:
+            return json_response({"error": "invalid_json"}), 400
+        try:
+            return json_response(_recording_store().begin(data, source=_sync_source()))
+        except SyncError as exc:
+            return _sync_error(exc)
+
+    @bp.get("/api/sync/recordings/file")
+    @auth
+    @_require_roles("admin")
+    def sync_recordings_file() -> tuple[Response, int] | Response:
+        try:
+            target = _recording_store().resolve_file(
+                str(request.args.get("path") or ""),
+                str(request.args.get("role") or "data"),
+            )
+        except SyncError as exc:
+            return _sync_error(exc)
+        # conditional: Range requests work, so a big download can resume.
+        return send_file(target, as_attachment=True, download_name=target.name, conditional=True)
+
+    @bp.get("/api/sync/recordings/<recording_id>")
+    @auth
+    @_require_roles("admin")
+    def sync_recordings_status(recording_id: str) -> tuple[Response, int] | Response:
+        try:
+            return json_response(_recording_store().status(recording_id))
+        except SyncError as exc:
+            return _sync_error(exc)
+
+    @bp.put("/api/sync/recordings/<recording_id>/files/<role>")
+    @auth
+    @_require_roles("admin")
+    def sync_recordings_chunk(recording_id: str, role: str) -> tuple[Response, int] | Response:
+        if request.content_length is not None and request.content_length > MAX_CHUNK_BYTES:
+            return json_response({"error": "chunk_too_large", "max_chunk_bytes": MAX_CHUNK_BYTES}), 413
+        try:
+            offset = _int_arg("offset", -1, -1)
+            if offset < 0:
+                raise SyncError("offset_required")
+            return json_response(_recording_store().write_chunk(recording_id, role, offset, request.get_data(cache=False)))
+        except SyncError as exc:
+            return _sync_error(exc)
+
+    @bp.post("/api/sync/recordings/<recording_id>/complete")
+    @auth
+    @_require_roles("admin")
+    def sync_recordings_complete(recording_id: str) -> tuple[Response, int] | Response:
+        try:
+            return json_response(_recording_store().complete(recording_id))
+        except SyncError as exc:
+            return _sync_error(exc)
+
+    @bp.get("/api/sync/labels")
+    @auth
+    @_require_roles("admin")
+    def sync_labels_get() -> tuple[Response, int] | Response:
+        try:
+            return json_response(svc.label_sync_snapshot(_int_arg("since_ms", 0)))
+        except SyncError as exc:
+            return _sync_error(exc)
+
+    @bp.put("/api/sync/labels")
+    @auth
+    @_require_roles("admin")
+    def sync_labels_put() -> tuple[Response, int] | Response:
+        try:
+            data = _request_json_data({})
+            return json_response(svc.apply_label_sync(data.get("items") if isinstance(data, dict) else None))
+        except ValueError as exc:
+            return json_response({"error": str(exc)}), 400
+
+    @bp.get("/api/sync/profiles")
+    @auth
+    @_require_roles("admin")
+    def sync_profiles_get() -> tuple[Response, int] | Response:
+        try:
+            return json_response(ProfileSyncStore(_profiles_dir()).snapshot(_int_arg("since_ms", 0)))
+        except SyncError as exc:
+            return _sync_error(exc)
+
+    @bp.put("/api/sync/profiles")
+    @auth
+    @_require_roles("admin")
+    def sync_profiles_put() -> tuple[Response, int] | Response:
+        try:
+            data = _request_json_data({})
+            return json_response(ProfileSyncStore(_profiles_dir()).apply(data.get("items") if isinstance(data, dict) else None))
+        except ValueError as exc:
+            return json_response({"error": str(exc)}), 400
+
+    @bp.get("/api/findme/policy")
+    @auth
+    @_require_roles("admin")
+    def findme_policy_get() -> Response:
+        return json_response(svc.findme_policy())
+
+    @bp.put("/api/findme/policy")
+    @auth
+    @_require_roles("admin")
+    def findme_policy_put() -> tuple[Response, int] | Response:
+        try:
+            data = _request_json_data({})
+            if not isinstance(data, dict):
+                raise ValueError("invalid_json")
+            return json_response(svc.set_findme_policy(data))
+        except ValueError as exc:
+            return json_response({"error": str(exc)}), 400
 
     @bp.get("/api/files/devices")
     @auth

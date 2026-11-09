@@ -1,15 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
 
+import { AppTokensPanel } from "../components/AppTokensPanel";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { GatewayManageModal } from "../components/GatewayManageModal";
 import { HubManageModal } from "../components/HubManageModal";
 import { useI18n } from "../i18n";
 import { api, type GatewayClaimEntry, type GatewayEntry } from "../lib/api";
-import { relayDisplayName } from "../lib/device";
+import { NH_STUDIO_DOWNLOAD_URL, isAppRelay, relayDisplayName, splitRelays } from "../lib/relayKind";
 import { requestGatewaySnapshot, useWsState } from "../lib/wsClient";
 
-const GATEWAY_REPO_URL = "https://github.com/wenzi7777/New-Horizons-Gateway";
-const GATEWAY_ZIP_URL = "https://github.com/wenzi7777/New-Horizons-Gateway/archive/refs/heads/main.zip";
 const HUB_REPO_URL = "https://github.com/wenzi7777/New-Horizons-Hub";
 
 function formatLastSeen(value: unknown) {
@@ -56,6 +55,7 @@ function RelayFacts({ facts }: { facts: [string, ReactNode, boolean?][] }) {
 }
 
 function RelayCardHeader({ relay, children }: { relay: GatewayEntry; children: ReactNode }) {
+  const { t } = useI18n();
   const status = gatewayStatus(relay);
   return (
     <div className="relay-card-header">
@@ -63,6 +63,11 @@ function RelayCardHeader({ relay, children }: { relay: GatewayEntry; children: R
         <span className={`relay-status-dot ${status === "online" ? "online" : ""}`} title={status} aria-label={status} />
         <h3>{relayDisplayName(relay)}</h3>
         {relay.gateway_id ? <span className="relay-card-id">{relay.gateway_id}</span> : null}
+        {isAppRelay(relay) ? (
+          <span className={`relay-badge ${relay.authenticated ? "" : "muted"}`.trim()}>
+            {relay.authenticated ? t("relayAuthenticated") : t("relayNotAuthenticated")}
+          </span>
+        ) : null}
       </div>
       <div className="relay-card-actions">{children}</div>
     </div>
@@ -92,9 +97,10 @@ function GatewayCard({
   const { t } = useI18n();
   const servingDevices = gateway.serving_devices ?? [];
   const claims = gateway.claims ?? [];
+  const legacy = !isAppRelay(gateway);
 
   return (
-    <article className="relay-card">
+    <article className={`relay-card ${legacy ? "legacy-card" : "app-card"}`}>
       <RelayCardHeader relay={gateway}>
         <button className="button compact" type="button" onClick={() => onManage(gateway)}>
           {t("hubManage")}
@@ -117,6 +123,15 @@ function GatewayCard({
           [t("gatewayUdpDropped"), gateway.udp_dropped ?? 0],
         ]}
       />
+
+      {legacy ? (
+        <p className="relay-legacy-hint">
+          {t("legacyGatewayHint")}{" "}
+          <a href={NH_STUDIO_DOWNLOAD_URL} target="_blank" rel="noreferrer">
+            {t("legacyGatewaySwitch")}
+          </a>
+        </p>
+      ) : null}
 
       <p className="relay-upstream">
         <span>{t("gatewayUpstream")}</span>
@@ -230,8 +245,9 @@ function HubsSection({
 export function GatewaysPage() {
   const { t } = useI18n();
   const { gateways, status, errorMessage } = useWsState();
-  const softwareGateways = gateways.filter((gateway) => gateway.client_type !== "hub");
-  const hubs = gateways.filter((gateway) => gateway.client_type === "hub");
+  // Studio / Pocket first; the Python Gateway only shows (as legacy) while
+  // one is still connected or registered.
+  const { apps: appRelays, hubs, legacyGateways } = splitRelays(gateways);
   const [notice, setNotice] = useState("");
   const [noticeClass, setNoticeClass] = useState<"" | "success" | "error">("");
   const [deletingGatewayId, setDeletingGatewayId] = useState("");
@@ -303,10 +319,10 @@ export function GatewaysPage() {
       </section>
 
       <section className="gateways-section">
-        <h2>{t("sectionGateways")}</h2>
-        {softwareGateways.length ? (
+        <h2>{t("sectionAppRelays")}</h2>
+        {appRelays.length ? (
           <section className="gateway-grid">
-            {softwareGateways.map((gateway) => (
+            {appRelays.map((gateway) => (
               <GatewayCard
                 key={gateway.gateway_id}
                 gateway={gateway}
@@ -318,8 +334,8 @@ export function GatewaysPage() {
           </section>
         ) : (
           <section className="panel empty-gateway-state">
-            <h3>{t("gatewayNoGateways")}</h3>
-            <p>{t("gatewayNoGatewaysCopy")}</p>
+            <h3>{t("appRelayNone")}</h3>
+            <p>{t("appRelayNoneCopy")}</p>
           </section>
         )}
       </section>
@@ -331,6 +347,23 @@ export function GatewaysPage() {
         onDelete={handleDelete}
       />
 
+      {legacyGateways.length ? (
+        <section className="gateways-section">
+          <h2>{t("sectionLegacyGateways")}</h2>
+          <section className="gateway-grid">
+            {legacyGateways.map((gateway) => (
+              <GatewayCard
+                key={gateway.gateway_id}
+                gateway={gateway}
+                deleting={deletingGatewayId === gateway.gateway_id}
+                onManage={(item) => setManageGatewayId(item.gateway_id)}
+                onDelete={handleDelete}
+              />
+            ))}
+          </section>
+        </section>
+      ) : null}
+
       <section className="gateway-tools panel">
         <div className="gateway-tools-copy">
           <h3>{t("gatewayToolsTitle")}</h3>
@@ -339,21 +372,18 @@ export function GatewaysPage() {
         <div className="gateway-setup-grid">
           <div className="gateway-setup">
             <div className="gateway-setup-head">
-              <h4>Gateway</h4>
+              <h4>NH Studio / NH Pocket</h4>
               <div className="gateway-tool-actions">
-                <a className="button primary compact" href={GATEWAY_ZIP_URL}>
-                  {t("gatewayDownload")}
-                </a>
-                <a className="button compact" href={GATEWAY_REPO_URL} target="_blank" rel="noreferrer">
-                  GitHub
+                <a className="button primary compact" href={NH_STUDIO_DOWNLOAD_URL} target="_blank" rel="noreferrer">
+                  {t("appSetupDownload")}
                 </a>
               </div>
             </div>
-            <p>{t("gatewaySetupGatewayCopy")}</p>
+            <p>{t("appSetupCopy")}</p>
             <ol className="gateway-instructions">
-              <li>{t("gatewayStepStart")}</li>
-              <li>{t("gatewayStepOpen")}</li>
-              <li>{t("gatewayStepDevice")}</li>
+              <li>{t("appStepInstall")}</li>
+              <li>{t("appStepToken")}</li>
+              <li>{t("appStepConnect")}</li>
             </ol>
           </div>
           <div className="gateway-setup">
@@ -375,12 +405,14 @@ export function GatewaysPage() {
         </div>
       </section>
 
+      <AppTokensPanel />
+
       {manageHubId ? <HubManageModal gatewayId={manageHubId} onClose={() => setManageHubId("")} /> : null}
       {manageGatewayId ? <GatewayManageModal gatewayId={manageGatewayId} onClose={() => setManageGatewayId("")} /> : null}
       {confirmDelete ? (
         <ConfirmModal
-          title={confirmDelete.client_type === "hub" ? t("deleteHubConfirm") : t("deleteGatewayConfirm")}
-          message={`${relayDisplayName(confirmDelete)} ${confirmDelete.gateway_id} — ${confirmDelete.client_type === "hub" ? t("deleteHubCopy") : t("deleteGatewayCopy")}`}
+          title={confirmDelete.client_type === "hub" ? t("deleteHubConfirm") : isAppRelay(confirmDelete) ? t("deleteRelayConfirm") : t("deleteGatewayConfirm")}
+          message={`${relayDisplayName(confirmDelete)} ${confirmDelete.gateway_id} — ${confirmDelete.client_type === "hub" ? t("deleteHubCopy") : isAppRelay(confirmDelete) ? t("deleteRelayCopy") : t("deleteGatewayCopy")}`}
           confirmLabel={confirmDelete.client_type === "hub" ? t("deleteHub") : t("deleteGateway")}
           cancelLabel={t("cancel")}
           destructive

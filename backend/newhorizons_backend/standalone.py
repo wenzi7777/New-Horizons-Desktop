@@ -62,7 +62,7 @@ def create_standalone_app() -> Flask:
     )
     register_websocket_routes(app, service, auth_manager=auth_manager, url_prefix=base_path)
     register_stream_websocket_routes(app, service, auth_manager=auth_manager, url_prefix=base_path)
-    register_gateway_websocket_routes(app, service, url_prefix=base_path)
+    register_gateway_websocket_routes(app, service, url_prefix=base_path, auth_manager=auth_manager)
 
     @app.get("/")
     def index() -> Response:

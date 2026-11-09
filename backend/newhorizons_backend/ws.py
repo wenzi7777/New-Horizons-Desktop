@@ -8,6 +8,8 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
+from flask import request
+
 try:  # pragma: no cover - exercised in integration environments with Flask-Sock installed.
     from flask_sock import Sock
 except Exception:  # pragma: no cover - keeps unit tests importable before dependency install.
@@ -396,7 +398,9 @@ def register_websocket_routes(
 
     @sock.route(f"{_normalize_url_prefix(url_prefix)}/ws")
     def newhorizons_ws(ws: Any) -> None:
-        user = auth_manager.current_user() if auth_manager is not None else None
+        # Cookie session (the browser) or an app token (NH Studio / Pocket):
+        # `Authorization: Bearer`, or `?token=` where headers can't be set.
+        user = auth_manager.request_user(request.headers, request.args) if auth_manager is not None else None
         if auth_manager is not None and user is None:
             ws.send(json.dumps({"type": "error", "code": "unauthorized", "message": "unauthorized"}, separators=(",", ":")))
             return
