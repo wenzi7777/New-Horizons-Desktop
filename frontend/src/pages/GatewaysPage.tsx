@@ -9,7 +9,9 @@ import { relayDisplayName } from "../lib/device";
 import { requestGatewaySnapshot, useWsState } from "../lib/wsClient";
 
 const GATEWAY_REPO_URL = "https://github.com/wenzi7777/New-Horizons-Gateway";
-const GATEWAY_ZIP_URL = "https://github.com/wenzi7777/New-Horizons-Gateway/archive/refs/heads/main.zip";
+// The download page (GitHub Pages, New-Horizons-Gateway/site): it picks the
+// right build for the visitor's computer or phone and has the install steps.
+const GATEWAY_DOWNLOAD_PAGE_URL = "https://wenzi7777.github.io/New-Horizons-Gateway/";
 const HUB_REPO_URL = "https://github.com/wenzi7777/New-Horizons-Hub";
 
 function formatLastSeen(value: unknown) {
@@ -320,6 +322,9 @@ export function GatewaysPage() {
           <section className="panel empty-gateway-state">
             <h3>{t("gatewayNoGateways")}</h3>
             <p>{t("gatewayNoGatewaysCopy")}</p>
+            <a className="button primary compact" href={GATEWAY_DOWNLOAD_PAGE_URL} target="_blank" rel="noreferrer">
+              {t("gatewayDownloadPage")}
+            </a>
           </section>
         )}
       </section>
@@ -341,8 +346,8 @@ export function GatewaysPage() {
             <div className="gateway-setup-head">
               <h4>Gateway</h4>
               <div className="gateway-tool-actions">
-                <a className="button primary compact" href={GATEWAY_ZIP_URL}>
-                  {t("gatewayDownload")}
+                <a className="button primary compact" href={GATEWAY_DOWNLOAD_PAGE_URL} target="_blank" rel="noreferrer">
+                  {t("gatewayDownloadPage")}
                 </a>
                 <a className="button compact" href={GATEWAY_REPO_URL} target="_blank" rel="noreferrer">
                   GitHub

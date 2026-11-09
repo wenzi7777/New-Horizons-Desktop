@@ -4915,6 +4915,10 @@ input:-webkit-autofill:focus {
   margin: 0;
 }
 
+.empty-gateway-state .button {
+  justify-self: start;
+}
+
 .notice {
   color: var(--text-dim);
   line-height: 1.45;
