@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type PressureCalReadings, type PressureCalServerPreset } from "../lib/api";
 
 import { useI18n } from "../i18n";
+import { VrefPanel } from "../components/VrefPanel";
 import { V15F_HARDWARE_MODEL, V20F_HARDWARE_MODEL, boardProfileForHardwareModel, displayHardwareModel, manifestUrlForHardwareModel } from "../lib/boardProfile";
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
 import { BATTERY_PRESETS, batteryCapacityChoiceFor, batteryIndicatorState, batteryLedThresholdValidationError, batteryPresetFor, type BatteryCapacityChoice, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus, batteryRecognisedFromId } from "../lib/batteryProfile";
@@ -1067,7 +1068,8 @@ export function DeviceSettingsPage() {
   const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "resync_battery_gauge", "battery_status"].includes(lastResultCommand) ? lastResult.battery : undefined));
   const battery = normalizeBatteryStatus(batteryStatus);
   // v2.0.F only: the Vref DAC and the calibration switch (read-only for now).
-  const vrefStatus = recordValue(status.vref);
+  const vrefStatus = recordValue(["set_vref", "calibration_switch"].includes(lastResultCommand) ? lastResult.vref : status.vref);
+  const rangeStatus = recordValue(["set_range", "rfb_measure"].includes(lastResultCommand) ? lastResult.range : status.range);
   const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" || lastResultCommand === "battery_status" ? lastResult.power : undefined));
   const actionButton = normalizeActionButtonStatus(
     status.action_button ?? (lastResultCommand === "set_action_button" ? lastResult.action_button : undefined),
@@ -2184,6 +2186,7 @@ export function DeviceSettingsPage() {
                   [t("vrefCalibrationSwitch"), vrefStatus.calibration_available === false ? t("batteryUnknown") : boolString(vrefStatus.calibration_on)],
                 ]}
               />
+              <VrefPanel disabled={!deviceUid || isDeviceOffline} vref={vrefStatus} range={rangeStatus} run={run} />
             </div>
           ) : null}
 

@@ -1640,6 +1640,30 @@ input:-webkit-autofill:focus {
   font-size: 13px;
 }
 
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table th,
+.data-table td {
+  padding: 6px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+}
+
+.data-table th:first-child,
+.data-table td:first-child {
+  text-align: left;
+}
+
+.data-table th {
+  color: var(--text-muted);
+  font-weight: 550;
+}
+
 .settings-facts dt {
   color: var(--text-muted);
 }

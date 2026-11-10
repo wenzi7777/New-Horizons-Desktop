@@ -87,6 +87,13 @@ DEVICE_COMMAND_ALLOWLIST = {
     "set_charge_profile",
     "set_battery_profile",
     "resync_battery_gauge",
+    # v2.0.F: the Vref DAC, the calibration switch, range and the Vref sweep.
+    "set_vref",
+    "calibration_switch",
+    "set_range",
+    "rfb_measure",
+    "vref_sweep",
+    "i2c_scan",
     "power_set_state",
     "set_action_button",
     "set_log",
