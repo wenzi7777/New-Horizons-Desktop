@@ -18,6 +18,18 @@ install on the Relays page, or through the API:
 `item = {id, name, client_type, role, created_at_ms, created_by, last_used_at_ms, revoked_at_ms, active, token_hint}`.
 Only a session admin can use these; an app token gets 403.
 
+**Signing in from the app (the usual way).** The app asks for a Desktop
+account instead of a pasted token:
+
+| Route | Body / reply |
+|---|---|
+| `POST /api/app-tokens/login` | `{username, password, client_type: "studio"\|"pocket", device_name?}` → `{token, token_type, item, user: {username, role}}`; 401 `invalid_credentials` |
+| `POST /api/app-tokens/self/revoke` | (Bearer) → `{status: "revoked", app_id}` — signing out |
+
+The password is checked once and never stored; the token gets the user's
+role and `created_by` = the username, and shows on the Relays page like any
+other. With a token, `GET /api/auth/me` adds `account` (that username).
+
 The token looks like `nhapp_<12 hex id>_<secret>`; the server stores only
 its SHA-256. The app sends it as `Authorization: Bearer <token>` on:
 

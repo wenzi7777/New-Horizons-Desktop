@@ -85,6 +85,27 @@ class AppTokenTest(_Env):
         self.assertEqual(client.get(f"{PREFIX}/devices", headers=self.bearer(token)).status_code, 401)
         self.assertEqual(self.admin_client().delete(f"{PREFIX}/app-tokens/nope").status_code, 404)
 
+    def test_app_signs_in_with_a_desktop_account_and_signs_out(self):
+        client = self.app.test_client()
+        bad = client.post(f"{PREFIX}/app-tokens/login", json={"username": "admin", "password": "nope", "client_type": "studio"})
+        self.assertEqual(bad.status_code, 401)
+        self.assertEqual(client.post(f"{PREFIX}/app-tokens/login", json={"username": "admin", "password": "admin", "client_type": "toaster"}).status_code, 400)
+        ok = client.post(f"{PREFIX}/app-tokens/login", json={"username": "admin", "password": "admin", "client_type": "pocket", "device_name": "Pixel 9"})
+        self.assertEqual(ok.status_code, 200, ok.get_json())
+        body = ok.get_json()
+        self.assertEqual(body["user"], {"username": "admin", "role": "admin"})
+        self.assertEqual(body["item"]["name"], "NH Pocket · Pixel 9")
+        self.assertEqual(body["item"]["created_by"], "admin")
+        # No session: the cookie jar stays signed out.
+        self.assertFalse(client.get(f"{PREFIX}/auth/me").get_json()["authenticated"])
+        token = body["token"]
+        me = client.get(f"{PREFIX}/auth/me", headers=self.bearer(token)).get_json()
+        self.assertEqual((me["client_type"], me["role"], me["account"]), ("pocket", "admin", "admin"))
+        out = client.post(f"{PREFIX}/app-tokens/self/revoke", headers=self.bearer(token))
+        self.assertEqual(out.status_code, 200)
+        self.assertEqual(client.get(f"{PREFIX}/devices", headers=self.bearer(token)).status_code, 401)
+        self.assertEqual(client.post(f"{PREFIX}/app-tokens/self/revoke").status_code, 401)
+
     def test_wrong_tokens_and_unauthenticated_requests_are_refused(self):
         token, _ = self.app_token()
         client = self.app.test_client()

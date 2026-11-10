@@ -348,7 +348,12 @@ def create_blueprint(
         user = _auth_user()
         if user is None:
             return json_response({"authenticated": False})
-        return json_response(user_payload(user))
+        payload = user_payload(user)
+        if getattr(user, "is_app", False) and auth_manager is not None:
+            info = auth_manager.app_token_info(str(user.app_id)) or {}
+            # The Desktop account an app signed in with (its token's creator).
+            payload["account"] = info.get("created_by") or ""
+        return json_response(payload)
 
     @bp.post("/api/token")
     @auth
@@ -426,6 +431,52 @@ def create_blueprint(
         if not auth_manager.revoke_app_token(token_id):
             return json_response({"error": "app_token_not_found"}), 404
         return json_response({"status": "revoked", "item": auth_manager.app_token_info(token_id)})
+
+    # NH Studio / NH Pocket sign in with a Desktop account: the password is
+    # checked once and exchanged for an app token of that user's role, made
+    # for this one install (listed and revocable on the Relays page). The app
+    # keeps only the token; no session cookie is set.
+    @bp.post("/api/app-tokens/login")
+    @auth
+    def app_tokens_login() -> tuple[Response, int] | Response:
+        if auth_manager is None:
+            return json_response({"error": "auth_unavailable"}), 503
+        try:
+            data = _request_json_data({})
+        except ValueError:
+            return json_response({"error": "invalid_json"}), 400
+        if not isinstance(data, dict):
+            return json_response({"error": "invalid_json"}), 400
+        username = str(data.get("username") or "").strip()
+        password = str(data.get("password") or "")
+        if not username or not password:
+            return json_response({"error": "username_and_password_required"}), 400
+        client_type = str(data.get("client_type") or "").strip()
+        if client_type not in {"studio", "pocket"}:
+            return json_response({"error": "invalid_client_type"}), 400
+        user = auth_manager.authenticate(username, password)
+        if user is None:
+            return json_response({"error": "invalid_credentials"}), 401
+        label = "NH Studio" if client_type == "studio" else "NH Pocket"
+        device = str(data.get("device_name") or "").strip()[:64]
+        name = f"{label} · {device}" if device else label
+        try:
+            token, item = auth_manager.create_app_token(name, client_type, user.role, created_by=user.username)
+        except ValueError as exc:
+            return json_response({"error": str(exc)}), 400
+        return json_response({"token": token, "token_type": "Bearer", "item": item, "user": {"username": user.username, "role": user.role}})
+
+    # Signing out of the app revokes the token it holds (only its own).
+    @bp.post("/api/app-tokens/self/revoke")
+    @auth
+    def app_tokens_revoke_self() -> tuple[Response, int] | Response:
+        if auth_manager is None:
+            return json_response({"error": "auth_unavailable"}), 503
+        user = _auth_user()
+        if user is None or not getattr(user, "is_app", False):
+            return _auth_response(401, "unauthorized")
+        auth_manager.revoke_app_token(str(user.app_id))
+        return json_response({"status": "revoked", "app_id": user.app_id})
 
     @bp.get("/api/health")
     @auth
