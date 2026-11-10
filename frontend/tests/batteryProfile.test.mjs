@@ -8,6 +8,7 @@ import {
   buildBatteryProfileCommand,
   buildBatteryGaugeResyncCommand,
   normalizeBatteryStatus,
+  batteryRecognisedFromId,
 } from "../src/lib/batteryProfile.ts";
 
 test("builds a set_battery_profile command with a positive custom capacity and 10mA current increment", () => {
@@ -59,6 +60,7 @@ test("normalizes the canonical Task 1 firmware battery status into display value
     ratePercentPerHour: -2.08,
     batteryPresent: true,
     profileSource: "manual",
+    batteryId: null,
     profileResolved: false,
     profileRequired: true,
     capacityMah: 400,
@@ -255,4 +257,22 @@ test("a resyncing fuel gauge withholds the stale reading instead of warning on i
   assert.equal(result.syncing, true);
   assert.equal(result.socPercent, null);
   assert.equal(result.lowBattery, false);
+});
+
+test("a battery recognised from its ID resistor is reported as auto (v2.0.F)", () => {
+  const battery = normalizeBatteryStatus({
+    battery_present: true,
+    profile_source: "auto",
+    profile_resolved: true,
+    profile_required: false,
+    capacity_mah: 500,
+    max_charge_current_ma: 350,
+    battery_id: { read_ok: true, kind: "known", mv: 1100, ohm: 100000 },
+  });
+  assert.equal(battery.profileSource, "auto");
+  assert.deepEqual(battery.batteryId, { readOk: true, kind: "known", mv: 1100, ohm: 100000 });
+  assert.equal(batteryRecognisedFromId(battery), true);
+  assert.equal(batteryRecognisedFromId(normalizeBatteryStatus({ profile_source: "manual" })), false);
+  // Boards without BAT_ID report no battery_id at all.
+  assert.equal(normalizeBatteryStatus({ profile_source: "manual" }).batteryId, null);
 });

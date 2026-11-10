@@ -217,6 +217,21 @@ class DeviceCommandValidationTest(unittest.TestCase):
         self.assertIn('wikiSlug: "vd-ctl-r-v2-1-gcu-lts"', source)
         self.assertIn('manifestBaseUrl: "https://raw.githubusercontent.com/wenzi7777/New-Horizons-OS/main/releases/arduino-gcu-v21-lts"', source)
 
+    def test_backend_board_profile_recognizes_v20f_like_v15f_with_its_own_manifest(self):
+        from newhorizons_backend.board_profile import board_profile_for_hardware_model
+
+        v20 = board_profile_for_hardware_model("TIA-CTL v2.0.F 2026.10")
+        v15 = board_profile_for_hardware_model("TIA-CTL v1.5.F 2026.7")
+
+        self.assertEqual(v20["hardware_model"], "TIA-CTL v2.0.F 2026.10")
+        # Manifests keep the pre-rename name, so the legacy spelling must resolve too.
+        for legacy in ("VD-CTL/R v2.0.F 2026.10", "TIA-CTL/R v2.0.F 2026.10"):
+            self.assertEqual(board_profile_for_hardware_model(legacy)["hardware_model"], "TIA-CTL v2.0.F 2026.10")
+        self.assertEqual(v20["default_analog_pins"], v15["default_analog_pins"])
+        self.assertEqual(v20["default_select_pins"], v15["default_select_pins"])
+        self.assertEqual(v20["external_led_count"], 9)
+        self.assertTrue(v20["default_manifest_url"].endswith("/arduino-v20f-latest.json"))
+
     def test_backend_board_profile_recognizes_v15f_local_hardware_capabilities(self):
         from newhorizons_backend.board_profile import board_profile_for_hardware_model
 

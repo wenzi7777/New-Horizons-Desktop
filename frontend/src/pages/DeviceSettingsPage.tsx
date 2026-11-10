@@ -4,9 +4,9 @@ import { Link, useParams } from "react-router-dom";
 import { api, type PressureCalReadings, type PressureCalServerPreset } from "../lib/api";
 
 import { useI18n } from "../i18n";
-import { V15F_HARDWARE_MODEL, boardProfileForHardwareModel, displayHardwareModel, manifestUrlForHardwareModel } from "../lib/boardProfile";
+import { V15F_HARDWARE_MODEL, V20F_HARDWARE_MODEL, boardProfileForHardwareModel, displayHardwareModel, manifestUrlForHardwareModel } from "../lib/boardProfile";
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
-import { BATTERY_PRESETS, batteryCapacityChoiceFor, batteryIndicatorState, batteryLedThresholdValidationError, batteryPresetFor, type BatteryCapacityChoice, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
+import { BATTERY_PRESETS, batteryCapacityChoiceFor, batteryIndicatorState, batteryLedThresholdValidationError, batteryPresetFor, type BatteryCapacityChoice, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus, batteryRecognisedFromId } from "../lib/batteryProfile";
 import { isHubRelayed, normalizeDevice, relayDisplayName, updateTransferProgress, useDevicesPolling } from "../lib/device";
 import { pollDeviceCommand, quietCommand, useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
@@ -1066,6 +1066,8 @@ export function DeviceSettingsPage() {
   const wifi = recordValue(status.wifi);
   const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "resync_battery_gauge", "battery_status"].includes(lastResultCommand) ? lastResult.battery : undefined));
   const battery = normalizeBatteryStatus(batteryStatus);
+  // v2.0.F only: the Vref DAC and the calibration switch (read-only for now).
+  const vrefStatus = recordValue(status.vref);
   const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" || lastResultCommand === "battery_status" ? lastResult.power : undefined));
   const actionButton = normalizeActionButtonStatus(
     status.action_button ?? (lastResultCommand === "set_action_button" ? lastResult.action_button : undefined),
@@ -1121,7 +1123,7 @@ export function DeviceSettingsPage() {
     setModeDraft(currentMode);
   }, [currentMode, deviceUid]);
   const boardProfile = useMemo(() => boardProfileForHardwareModel(normalized?.hardwareModel), [normalized?.hardwareModel]);
-  const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : boardProfile.hardwareModel === V15F_HARDWARE_MODEL ? t("powerStatusCopyV15") : t("powerStatusCopy");
+  const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : boardProfile.hardwareModel === V15F_HARDWARE_MODEL || boardProfile.hardwareModel === V20F_HARDWARE_MODEL ? t("powerStatusCopyV15") : t("powerStatusCopy");
   const pinLayoutCopy = boardProfile.powerUx === "remote_only" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1");
   // Firmware with update channels reports ota.channel. There, manifestUrl is
   // only an optional custom override (empty = follow the channel); on older
@@ -2076,7 +2078,11 @@ export function DeviceSettingsPage() {
                       <h4>{t("batterySetup")}</h4>
                       <p className="service-muted">{t("batterySetupCopy")}</p>
                     </div>
-                    {batteryProfileSetupRequired(batteryStatus) ? <p className="notice">{t("batteryProfileSetupNotice")}</p> : null}
+                    {batteryRecognisedFromId(battery) ? (
+                      <p className="notice">{t("batteryProfileAutoNotice")}: {battery.capacityMah} mAh · {battery.maxChargeCurrentMa} mA</p>
+                    ) : null}
+                    {!batteryRecognisedFromId(battery) && batteryProfileSetupRequired(batteryStatus) ? <p className="notice">{t("batteryProfileSetupNotice")}</p> : null}
+                    {batteryRecognisedFromId(battery) ? null : (<>
                     <div className="field-grid">
                       <div className="field">
                         <label>{t("batteryCapacityMah")}</label>
@@ -2102,6 +2108,7 @@ export function DeviceSettingsPage() {
                     <div className="actions compact">
                       <button className="button primary" type="button" disabled={isCommandBusy("set_battery_profile") || !deviceUid || batteryProfileDraftError !== null} onClick={() => void applyBatteryProfile()}>{isCommandBusy("set_battery_profile") ? t("running") : t("saveBatteryProfile")}</button>
                     </div>
+                    </>)}
                   </div>
                 ) : null}
                 {batteryLedSupported ? (
@@ -2132,6 +2139,9 @@ export function DeviceSettingsPage() {
                     [t("batteryRate"), battery.ratePercentPerHour === null ? t("batteryUnknown") : `${battery.ratePercentPerHour}%/h`],
                     [t("batteryPresent"), battery.batteryPresent === null ? t("batteryUnknown") : boolString(battery.batteryPresent)],
                     [t("batteryGaugeSyncState"), battery.syncState ?? t("batteryUnknown")],
+                    ...(battery.batteryId
+                      ? [[t("batteryId"), battery.batteryId.readOk === false ? t("batteryUnknown") : `${battery.batteryId.kind ?? "-"}${battery.batteryId.ohm ? ` · ${(battery.batteryId.ohm / 1000).toFixed(1)} kΩ` : ""}`] as [string, unknown]]
+                      : []),
                     ...(boardProfile.supportsBatteryPercentageIndicator
                       ? [
                         [t("batteryCapacityMah"), battery.profileResolved === false ? t("batteryNotSet") : battery.capacityMah ?? t("batteryUnknown")] as [string, unknown],
@@ -2155,6 +2165,25 @@ export function DeviceSettingsPage() {
                   </div>
                 ) : null}
               </MoreDetails>
+            </div>
+          ) : null}
+
+          {vrefStatus.supported === true ? (
+            <div className="settings-card">
+              <div className="settings-detail-header">
+                <div>
+                  <h4>{t("vrefTitle")}</h4>
+                  <p>{t("vrefCopy")}</p>
+                </div>
+              </div>
+              <FactList
+                items={[
+                  [t("vrefMv"), vrefStatus.ok === false ? t("batteryUnknown") : `${vrefStatus.mv ?? "-"} mV`],
+                  [t("vrefLimitMv"), `${vrefStatus.limit_mv ?? "-"} mV`],
+                  [t("vrefEepromMv"), `${vrefStatus.eeprom_mv ?? "-"} mV${vrefStatus.eeprom_ok === false ? " ⚠" : ""}`],
+                  [t("vrefCalibrationSwitch"), vrefStatus.calibration_available === false ? t("batteryUnknown") : boolString(vrefStatus.calibration_on)],
+                ]}
+              />
             </div>
           ) : null}
 

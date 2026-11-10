@@ -75,6 +75,7 @@ test("artwork is claimed exactly when it exists, and every board has a pin picke
   for (const model of [
     "TIA-CTL v1.0.F 2026.4",
     "TIA-CTL v1.5.F 2026.7",
+    "TIA-CTL v2.0.F 2026.10",
     "TIA-CTL v2.1 GCU LTS",
     "TIA-CTL v2.2.C GCU LTS",
     "TIA-CTL v2.3.D GCU LTS",
@@ -91,7 +92,7 @@ test("artwork is claimed exactly when it exists, and every board has a pin picke
 
 test("names older firmware reports (VD-CTL/R, TIA-CTL/R) resolve to the same profile", async () => {
   const { boardProfileForHardwareModel, wikiSlugFromHardwareModel, displayHardwareModel } = await loadBoardProfile();
-  for (const model of ["v1.0.F 2026.4", "v1.5.F 2026.7", "v2.1 GCU LTS", "v2.2.C GCU LTS", "v2.3.D GCU LTS"]) {
+  for (const model of ["v1.0.F 2026.4", "v1.5.F 2026.7", "v2.0.F 2026.10", "v2.1 GCU LTS", "v2.2.C GCU LTS", "v2.3.D GCU LTS"]) {
     for (const prefix of ["VD-CTL/R", "TIA-CTL/R"]) {
       const legacy = boardProfileForHardwareModel(`${prefix} ${model}`);
       assert.equal(legacy.hardwareModel, `TIA-CTL ${model}`);
@@ -101,4 +102,18 @@ test("names older firmware reports (VD-CTL/R, TIA-CTL/R) resolve to the same pro
   }
   // A board no profile knows yet keeps the wiki directory naming.
   assert.equal(wikiSlugFromHardwareModel("TIA-CTL v9.9"), "vd-ctl-r-v9-9");
+});
+
+test("v2.0.F shares the v1.5.F matrix and pins and has its own manifest and wiki", async () => {
+  const { boardProfileForHardwareModel, manifestUrlForHardwareModel, wikiSlugFromHardwareModel } = await loadBoardProfile();
+  const v20 = boardProfileForHardwareModel("VD-CTL/R v2.0.F 2026.10");
+  const v15 = boardProfileForHardwareModel("TIA-CTL v1.5.F 2026.7");
+  assert.equal(v20.hardwareModel, "TIA-CTL v2.0.F 2026.10");
+  assert.deepEqual(v20.defaultAnalogPins, v15.defaultAnalogPins);
+  assert.deepEqual(v20.defaultSelectPins, v15.defaultSelectPins);
+  assert.equal(v20.supportsActionButtonSettings, true);
+  assert.equal(v20.supportsBatteryPercentageIndicator, true);
+  assert.equal(wikiSlugFromHardwareModel("TIA-CTL v2.0.F 2026.10"), "vd-ctl-r-v2-0-f");
+  assert.match(manifestUrlForHardwareModel("VD-CTL/R v2.0.F 2026.10"), /arduino-v20f-latest\.json$/);
+  assert.match(manifestUrlForHardwareModel("TIA-CTL v2.0.F 2026.10", "beta"), /arduino-v20f-beta\.json$/);
 });
