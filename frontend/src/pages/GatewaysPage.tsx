@@ -100,7 +100,7 @@ function GatewayCard({
   const legacy = !isAppRelay(gateway);
 
   return (
-    <article className={`relay-card ${legacy ? "legacy-card" : "app-card"}`}>
+    <article className={`relay-card ${legacy ? "legacy-card" : "app-relay-card"}`}>
       <RelayCardHeader relay={gateway}>
         <button className="button compact" type="button" onClick={() => onManage(gateway)}>
           {t("hubManage")}
