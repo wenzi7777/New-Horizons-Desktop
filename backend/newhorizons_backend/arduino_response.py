@@ -62,6 +62,22 @@ class ArduinoResponseMixin:
             default_ms = 3000
         elif command == "calibration_tare_capture":
             default_ms = 1000
+        elif command == "rfb_measure":
+            # Seven passes (find the size, then six Vref points), each waiting
+            # for the op-amps; about 1.5 s on the bench, longer with more samples.
+            return 15.0
+        elif command == "vref_sweep":
+            # Blocks the device for settle + capture at every step.
+            try:
+                start = float(payload.get("start_mv", 100))
+                stop = float(payload.get("stop_mv", 800))
+                step = max(10.0, float(payload.get("step_mv", 100)))
+                settle = float(payload.get("settle_ms", 150))
+                capture = float(payload.get("duration_ms", 300))
+            except (TypeError, ValueError):
+                return 60.0
+            steps = max(1.0, (stop - start) / step + 1.0)
+            return min(120.0, steps * (settle + capture + 150.0) / 1000.0 + 5.0)
         try:
             duration_ms = float(payload.get("duration_ms", default_ms) or 0)
         except (TypeError, ValueError):

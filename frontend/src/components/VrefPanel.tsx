@@ -44,8 +44,15 @@ function download(name: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
-export function VrefPanel({ disabled, vref, range, run }: Props) {
+export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: Props) {
   const { t } = useI18n();
+  // What the device last answered to a command here. The page's own status can
+  // lag a command (a status poll lands in between, a relay drops a field), and a
+  // Rfb that was just measured must unlock the range modes at once.
+  const [answeredVref, setAnsweredVref] = useState<Record<string, unknown>>({});
+  const [answeredRange, setAnsweredRange] = useState<Record<string, unknown>>({});
+  const vref = { ...vrefProp, ...answeredVref };
+  const range = { ...rangeProp, ...answeredRange };
   const currentMv = num(vref.mv);
   const limitMv = num(vref.limit_mv);
   const calibrationOn = vref.calibration_on === true;
@@ -85,6 +92,8 @@ export function VrefPanel({ disabled, vref, range, run }: Props) {
       if (!result || result.status === "error" || result.ok === false) {
         throw new Error(String(result?.error || result?.message || "no_response"));
       }
+      if (result.vref && typeof result.vref === "object") setAnsweredVref(result.vref as Record<string, unknown>);
+      if (result.range && typeof result.range === "object") setAnsweredRange(result.range as Record<string, unknown>);
       return result;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -95,7 +104,8 @@ export function VrefPanel({ disabled, vref, range, run }: Props) {
   }
 
   const working = disabled || busy !== null;
-  const rfbValid = knownRows > 0;
+  // A table that came back from this very measurement counts even if `range` did not.
+  const rfbValid = knownRows > 0 || (rfbRows?.some((row) => row.rfb_ohm > 0) ?? false);
 
   async function measureRfb() {
     const mv = Number(measureVref);
@@ -200,9 +210,10 @@ export function VrefPanel({ disabled, vref, range, run }: Props) {
             <label>{t("rangeRefRfb")}</label>
             <input type="number" min="1000" max="1000000" step="1000" value={refRfbDraft} onChange={(event) => setRefRfbDraft(event.target.value)} />
           </div>
-          <div className="field">
-            <label><input type="checkbox" checked={leakDraft} onChange={(event) => setLeakDraft(event.target.checked)} /> {t("rangeLeak")}</label>
-          </div>
+          <label className="switch-row">
+            <input type="checkbox" checked={leakDraft} onChange={(event) => setLeakDraft(event.target.checked)} />
+            <span>{t("rangeLeak")}</span>
+          </label>
         </div>
         <p className="service-muted">{t("rangeSaturated")}: {num(range.saturated_rows) ?? "-"}</p>
         <div className="actions compact">

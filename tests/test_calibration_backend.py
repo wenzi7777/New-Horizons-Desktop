@@ -143,6 +143,20 @@ class ArduinoTimeoutTests(unittest.TestCase):
         self.assertEqual(timeout({"command": "calibration_capture_cell", "duration_ms": 5000}), 8.0)
         self.assertEqual(timeout({"command": "calibration_tare_capture"}), 4.0)
 
+    def test_v20f_range_commands_are_not_cut_off_at_two_seconds(self):
+        from newhorizons_backend.service import NewHorizonsService
+
+        timeout = NewHorizonsService._arduino_command_timeout
+        # rfb_measure takes ~1.5 s on the bench: a 2 s socket timeout read it as a dropped connection.
+        self.assertGreaterEqual(timeout({"command": "rfb_measure"}), 10.0)
+        # A sweep blocks the device for settle + capture at every step: 8 steps of
+        # 150 + 300 ms (+ overhead) took 3.9 s, and a 24-step sweep is far longer.
+        self.assertGreater(timeout({"command": "vref_sweep", "start_mv": 100, "stop_mv": 800, "step_mv": 100}), 4.0)
+        long_sweep = timeout({"command": "vref_sweep", "start_mv": 100, "stop_mv": 800, "step_mv": 30, "settle_ms": 500, "duration_ms": 1000})
+        self.assertGreater(long_sweep, 30.0)
+        self.assertLessEqual(long_sweep, 120.0)
+        self.assertEqual(timeout({"command": "vref_sweep", "start_mv": "x"}), 60.0)
+
 
 if __name__ == "__main__":
     unittest.main()
