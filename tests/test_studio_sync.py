@@ -535,3 +535,13 @@ class FindmePolicyTest(_Env):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RelayBenchTest(_Env):
+    def test_upload_is_read_and_discarded_and_needs_a_sign_in(self):
+        client = self.app.test_client()
+        self.assertEqual(client.post(f"{PREFIX}/relay-bench", data=b"x" * 10).status_code, 401)
+        token, _ = self.app_token("studio", role="user")
+        response = client.post(f"{PREFIX}/relay-bench", data=b"x" * 300_000, headers=self.bearer(token))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["received"], 300_000)

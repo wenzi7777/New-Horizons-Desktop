@@ -6,6 +6,7 @@ import re
 import secrets
 import shutil
 import tempfile
+import time
 import uuid
 import zipfile
 from functools import wraps
@@ -483,6 +484,25 @@ def create_blueprint(
     @_require_roles("admin", "user")
     def health() -> Response:
         return json_response(svc.health())
+
+    # The relay performance test of NH Studio / NH Pocket / headless: the body
+    # is read (to time the upload) and thrown away; at most 16 MB.
+    @bp.post("/api/relay-bench")
+    @auth
+    @_require_roles("admin", "user")
+    def relay_bench() -> tuple[Response, int] | Response:
+        limit = 16 * 1024 * 1024
+        received = 0
+        started = time.monotonic()
+        stream = request.stream
+        while True:
+            chunk = stream.read(64 * 1024)
+            if not chunk:
+                break
+            received += len(chunk)
+            if received > limit:
+                return json_response({"error": "too_large"}), 413
+        return json_response({"received": received, "seconds": round(time.monotonic() - started, 4)})
 
     @bp.get("/api/devices")
     @auth
