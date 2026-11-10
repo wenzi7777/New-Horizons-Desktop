@@ -30,7 +30,7 @@ export type DeviceEntry = {
   // Horizons Hub, ESP-NOW) or "gateway" (New Horizons Gateway software).
   // Empty/absent when the device isn't relayed through either (e.g. direct
   // UDP ingest with no gateway_wss hop at all).
-  client_type?: "hub" | "gateway" | string;
+  client_type?: "studio" | "pocket" | "hub" | "gateway" | string;
   last_gateway_seen_at?: string;
   gateway_state?: Record<string, unknown> | null;
   last_seen_at?: string;
@@ -135,9 +135,15 @@ export type GatewayEntry = {
   // The Gateway's update channel as its hello/heartbeat names it (also
   // folded into update.channel by the Backend).
   update_channel?: string;
-  // "hub" (New Horizons Hub) or "gateway" (New Horizons Gateway software) --
-  // absent/unknown gateway_ids default to "gateway" server-side.
-  client_type?: "hub" | "gateway" | string;
+  // "studio" (NH Studio), "pocket" (NH Pocket), "hub" (New Horizons Hub) or
+  // "gateway" (the legacy NH Gateway software) -- absent/unknown default to
+  // "gateway" server-side.
+  client_type?: "studio" | "pocket" | "hub" | "gateway" | string;
+  // NH Studio / Pocket: the app token it connected with (its id), if any.
+  app_id?: string;
+  authenticated?: boolean;
+  // True for the legacy Python Gateway.
+  legacy?: boolean;
   // From the relay's hello. A Gateway takes gateway_command only when this
   // has "gateway_command" (v1.0.0+); a Hub always does.
   capabilities?: string[];
@@ -152,6 +158,20 @@ export type GatewayEntry = {
   // included too (status "pending"), unlike serving_devices above which
   // is a routing table, not a display list.
   paired_devices?: HubPairedDeviceEntry[];
+};
+
+// One NH Studio / NH Pocket app token (never the token itself, only its id).
+export type AppTokenEntry = {
+  id: string;
+  name: string;
+  client_type: "studio" | "pocket" | string;
+  role: "admin" | "user" | string;
+  created_at_ms: number;
+  created_by: string;
+  last_used_at_ms: number | null;
+  revoked_at_ms: number | null;
+  active: boolean;
+  token_hint: string;
 };
 
 export type RelayUpdateState = {
@@ -515,6 +535,14 @@ export const api = {
   health: () => request<BackendHealth>("/health"),
   devices: () => request<{ items: DeviceEntry[] }>("/devices"),
   gateways: () => request<{ items: GatewayEntry[] }>("/gateways"),
+  appTokens: () => request<{ items: AppTokenEntry[] }>("/app-tokens"),
+  createAppToken: (name: string, clientType: "studio" | "pocket", role: "admin" | "user") =>
+    request<{ token: string; token_type: string; item: AppTokenEntry }>("/app-tokens", {
+      method: "POST",
+      body: { name, client_type: clientType, role },
+    }),
+  revokeAppToken: (tokenId: string) =>
+    request<{ status: string; item: AppTokenEntry }>(`/app-tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }),
   deleteGateway: (gatewayId: string) =>
     request<{ status: string; gateway_id: string }>(`/gateways/${encodeURIComponent(gatewayId)}`, {
       method: "DELETE",

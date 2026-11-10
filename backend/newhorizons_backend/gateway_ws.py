@@ -17,7 +17,9 @@ try:  # pragma: no cover - depends on optional runtime package.
 except Exception:  # pragma: no cover
     Sock = None  # type: ignore[assignment]
 
+from .auth import APP_TOKEN_PREFIX, AuthManager, AuthUser
 from .gateway_auth import gateway_expected_token
+from .gateway_registry import normalize_relay_client_type
 from .service import NewHorizonsService
 
 
@@ -155,10 +157,13 @@ def _clock_is_synced(payload: dict[str, Any]) -> bool | None:
 
 
 class GatewaySocketSession:
-    def __init__(self, service: NewHorizonsService, ws: Any) -> None:
+    def __init__(self, service: NewHorizonsService, ws: Any, app_user: AuthUser | None = None) -> None:
         self.service = service
         self.ws = ws
         self.gateway_id = ""
+        # Set when the relay connected with an app token (NH Studio / NH
+        # Pocket): the token, not hello, then says which app this is.
+        self.app_user = app_user
         self.sender = self.send_command
         self._send_lock = threading.RLock()
 
@@ -207,8 +212,11 @@ class GatewaySocketSession:
 
         msg_type = str(message.get("type") or "").strip()
         if msg_type == "hello":
-            self.gateway_id = str(message.get("gateway_id") or "")
-            self.service.register_gateway(self.gateway_id, self.sender, message)
+            hello = self._identified_hello(message)
+            if hello is None:
+                return
+            self.gateway_id = str(hello.get("gateway_id") or "")
+            self.service.register_gateway(self.gateway_id, self.sender, hello)
             ack = {
                 "type": "gateway_hello_ack",
                 "gateway_id": self.gateway_id,
@@ -216,13 +224,19 @@ class GatewaySocketSession:
                 "server_time_ms": int(_time.time() * 1000),
                 "transport_mode": "udp_gateway_wss",
             }
-            if str(message.get("client_type") or "") == "hub":
+            client_type = normalize_relay_client_type(hello.get("client_type"))
+            ack["client_type"] = client_type
+            if self.app_user is not None:
+                ack["app_id"] = self.app_user.app_id
+            if client_type == "hub":
                 # A Hub behind this version locks its settings and new
                 # pairings, and updates itself once no device is online.
                 ack["latest_hub_version"] = latest_hub_version(message.get("update_channel"))
-            else:
+            elif client_type == "gateway":
                 # The newest version on this Gateway's own channel, so a
                 # beta is only ever pushed to Gateways that chose beta.
+                # (NH Studio / Pocket update themselves from their own
+                # stores; a Gateway version means nothing to them.)
                 ack["latest_gateway_version"] = latest_gateway_version(message.get("update_channel"))
             self._send_json(ack)
             return
@@ -262,7 +276,10 @@ class GatewaySocketSession:
             if gateway_id:
                 if not self.gateway_id:
                     self.gateway_id = gateway_id
-                self.service.register_gateway(gateway_id, self.sender, message)
+                claim_hello = dict(message)
+                if self.app_user is not None:
+                    claim_hello.update(client_type=self.app_user.client_type, app_id=self.app_user.app_id, authenticated=True)
+                self.service.register_gateway(gateway_id, self.sender, claim_hello)
             try:
                 claim = self.service.handle_gateway_claim_request(gateway_id, message)
             except ValueError as exc:
@@ -325,6 +342,32 @@ class GatewaySocketSession:
 
         self._send_json({"type": "error", "code": "unknown_gateway_type", "message": "Unknown gateway message type"})
 
+    def _identified_hello(self, message: dict[str, Any]) -> dict[str, Any] | None:
+        """hello with the relay's identity settled, or None (refused, the
+        socket told why).
+
+        A relay that came with an app token is that app: its client_type
+        is the token's, and it gets the token id as gateway_id unless it
+        names one. Without a token, "studio" / "pocket" are still accepted
+        (like a Gateway, which never had one) unless the server requires
+        tokens for apps (NEWHORIZONS_REQUIRE_APP_TOKEN=1)."""
+        hello = dict(message)
+        claimed = normalize_relay_client_type(hello.get("client_type"))
+        if self.app_user is not None:
+            hello["client_type"] = self.app_user.client_type
+            hello["app_id"] = self.app_user.app_id
+            hello["authenticated"] = True
+            if not str(hello.get("gateway_id") or "").strip():
+                hello["gateway_id"] = f"nh-{self.app_user.client_type}-{self.app_user.app_id}"
+            return hello
+        hello["client_type"] = claimed
+        hello["app_id"] = ""
+        hello["authenticated"] = False
+        if claimed in ("studio", "pocket") and _app_token_required():
+            self._send_json({"type": "error", "code": "app_token_required", "message": "NH Studio / NH Pocket must connect with an app token"})
+            return None
+        return hello
+
     def _maybe_push_time(self, device_uid: str, payload: dict[str, Any]) -> None:
         """Give an unsynced device a wall clock.
 
@@ -381,7 +424,16 @@ class GatewaySocketSession:
         return decoded
 
 
-def register_gateway_websocket_routes(app: Any, service: NewHorizonsService, url_prefix: str = "/newhorizons") -> Any | None:
+def _app_token_required() -> bool:
+    return os.getenv("NEWHORIZONS_REQUIRE_APP_TOKEN", "0") in {"1", "true", "True"}
+
+
+def register_gateway_websocket_routes(
+    app: Any,
+    service: NewHorizonsService,
+    url_prefix: str = "/newhorizons",
+    auth_manager: AuthManager | None = None,
+) -> Any | None:
     if Sock is None:
         app.logger.warning("Flask-Sock is not installed; %s/gateway/ws is disabled", _normalize_url_prefix(url_prefix) or "")
         return None
@@ -389,11 +441,22 @@ def register_gateway_websocket_routes(app: Any, service: NewHorizonsService, url
 
     @sock.route(f"{_normalize_url_prefix(url_prefix)}/gateway/ws")
     def newhorizons_gateway_ws(ws: Any) -> None:
-        expected_token = gateway_expected_token()
-        if expected_token and _token_from_request() != expected_token:
-            ws.send(json.dumps({"type": "error", "code": "unauthorized", "message": "unauthorized"}, separators=(",", ":")))
-            return
-        GatewaySocketSession(service, ws).handle()
+        token = _token_from_request()
+        app_user: AuthUser | None = None
+        if token.startswith(APP_TOKEN_PREFIX):
+            # An app token is checked whatever else is configured: a wrong
+            # or revoked one is refused, never silently downgraded.
+            manager = auth_manager or app.config.get("NEWHORIZONS_AUTH_MANAGER")
+            app_user = manager.authenticate_app_token(token) if manager is not None else None
+            if app_user is None:
+                ws.send(json.dumps({"type": "error", "code": "unauthorized", "message": "unauthorized"}, separators=(",", ":")))
+                return
+        else:
+            expected_token = gateway_expected_token()
+            if expected_token and token != expected_token:
+                ws.send(json.dumps({"type": "error", "code": "unauthorized", "message": "unauthorized"}, separators=(",", ":")))
+                return
+        GatewaySocketSession(service, ws, app_user=app_user).handle()
 
     return sock
 

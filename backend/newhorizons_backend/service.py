@@ -23,7 +23,7 @@ from .device_commands import (
     STATUS_COMMANDS,
     CommandCatalogStore,
 )
-from .discovery import DiscoveryResponder
+from .discovery import DiscoveryResponder, FindmePolicy, load_findme_policy, save_findme_policy
 from .recording_meta import RecordingMeta, build_device_meta, new_recording_paths, status_is_full
 from .recording_session import RecordingSession
 from .result_chunks import ResultChunkReassembler
@@ -192,6 +192,12 @@ class NewHorizonsService(
         self._device_groups_path = self._data_root / "_newhorizons_device_groups.json"
         self._nicknames = self._load_nicknames()
         self._device_groups = self._load_device_groups()
+        # When each label was last changed, for sync (device_labels.py).
+        self._label_times_path = self._data_root / "_newhorizons_device_label_times.json"
+        self._label_times = self._load_label_times()
+        # Which devices the FindMe responder offers itself to (discovery.py).
+        self._findme_policy_path = self._data_root / "_newhorizons_findme_policy.json"
+        self._findme_policy = load_findme_policy(self._findme_policy_path)
         if self._mock_mode:
             self._seed_mock_state()
         if autostart:
@@ -221,6 +227,7 @@ class NewHorizonsService(
                         gateway_id=self._gateway_id,
                         udp_port=lambda: self._udp_ingest.bound_port if self._udp_ingest else self._udp_port,
                         priority=self._discovery_priority,
+                        policy=lambda: self._findme_policy,
                     )
                     self._discovery.start()
                 self._transport_error = ""
@@ -563,6 +570,25 @@ class NewHorizonsService(
 
     def files_root(self) -> Path:
         return self._data_root
+
+    def findme_policy(self) -> dict[str, Any]:
+        with self._lock:
+            payload = self._findme_policy.to_dict()
+        payload["gateway_id"] = self._gateway_id
+        return payload
+
+    def set_findme_policy(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Replaces the policy; fields left out keep their value."""
+        with self._lock:
+            merged = self._findme_policy.to_dict()
+            for key in ("offer_policy", "managed", "denied"):
+                if key in data:
+                    merged[key] = data[key]
+            merged["updated_at_ms"] = int(time.time() * 1000)
+            policy = FindmePolicy.from_dict(merged)
+            save_findme_policy(self._findme_policy_path, policy)
+            self._findme_policy = policy
+        return self.findme_policy()
 
     def publish_command(self, device_uid: str, payload: dict[str, Any]) -> dict[str, Any]:
         device_uid = self._resolve_known_device_uid(device_uid)
