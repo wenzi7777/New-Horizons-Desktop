@@ -1068,8 +1068,13 @@ export function DeviceSettingsPage() {
   const batteryStatus = recordValue(status.battery ?? (["set_charge_profile", "set_battery_profile", "resync_battery_gauge", "battery_status"].includes(lastResultCommand) ? lastResult.battery : undefined));
   const battery = normalizeBatteryStatus(batteryStatus);
   // v2.0.F only: the Vref DAC and the calibration switch (read-only for now).
-  const vrefStatus = recordValue(["set_vref", "calibration_switch"].includes(lastResultCommand) ? lastResult.vref : status.vref);
-  const rangeStatus = recordValue(["set_range", "rfb_measure"].includes(lastResultCommand) ? lastResult.range : status.range);
+  // The reply to a Vref / range command is the freshest word on them -- but a
+  // refused command (above the ceiling, say) carries none, and the card must not
+  // vanish then: fall back to the status.
+  const answeredVref = recordValue(["set_vref", "calibration_switch"].includes(lastResultCommand) ? lastResult.vref : undefined);
+  const vrefStatus = Object.keys(answeredVref).length > 0 ? answeredVref : recordValue(status.vref);
+  const answeredRange = recordValue(["set_range", "rfb_measure"].includes(lastResultCommand) ? lastResult.range : undefined);
+  const rangeStatus = Object.keys(answeredRange).length > 0 ? answeredRange : recordValue(status.range);
   const powerStatus = recordValue(status.power ?? (lastResultCommand === "power_set_state" || lastResultCommand === "battery_status" ? lastResult.power : undefined));
   const actionButton = normalizeActionButtonStatus(
     status.action_button ?? (lastResultCommand === "set_action_button" ? lastResult.action_button : undefined),
