@@ -45,8 +45,11 @@ The cookie login is unchanged.
 ## Relay: `/gateway/ws`
 
 Same protocol as the Python Gateway (`gateway_ws.py`). In `hello`,
-`client_type` is `"studio"` or `"pocket"` (also `"gateway"`, `"hub"`;
-anything else counts as `"gateway"`).
+`client_type` is `"studio"` or `"pocket"` (also `"relay"` for NH Studio
+headless, `"hub"`, and `"gateway"` for the legacy Python Gateway; anything
+else counts as `"gateway"`). `"relay"` and `"hub"` never need a token, even
+with `NEWHORIZONS_REQUIRE_APP_TOKEN=1`: they relay only (no sync). A relay
+is not legacy and takes `gateway_command` like studio/pocket.
 
 - With an app token: the token decides `client_type` (whatever hello says)
   and, if hello has no `gateway_id`, it becomes `nh-<client_type>-<app id>`.
@@ -58,7 +61,7 @@ anything else counts as `"gateway"`).
   `latest_gateway_version` is sent only to `"gateway"`.
 - The relay entry (`/api/gateways`, `gateway_update` events) gains
   `app_id`, `authenticated`, `legacy` (true for the Python Gateway).
-- `gateway_command` reaches a studio/pocket relay only if its hello lists
+- `gateway_command` reaches a studio/pocket/relay relay only if its hello lists
   `"gateway_command"` in `capabilities` (as for the Gateway), with the
   Gateway's command set.
 

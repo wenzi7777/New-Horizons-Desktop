@@ -536,11 +536,6 @@ export const api = {
   devices: () => request<{ items: DeviceEntry[] }>("/devices"),
   gateways: () => request<{ items: GatewayEntry[] }>("/gateways"),
   appTokens: () => request<{ items: AppTokenEntry[] }>("/app-tokens"),
-  createAppToken: (name: string, clientType: "studio" | "pocket", role: "admin" | "user") =>
-    request<{ token: string; token_type: string; item: AppTokenEntry }>("/app-tokens", {
-      method: "POST",
-      body: { name, client_type: clientType, role },
-    }),
   revokeAppToken: (tokenId: string) =>
     request<{ status: string; item: AppTokenEntry }>(`/app-tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }),
   deleteGateway: (gatewayId: string) =>

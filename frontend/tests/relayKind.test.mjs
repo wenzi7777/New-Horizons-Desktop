@@ -15,15 +15,18 @@ test("relays are named by client_type; unknown ones are old Gateways", async () 
   const { relayDisplayName, relayKind, isLegacyGateway, isAppRelay } = await load();
   assert.equal(relayDisplayName({ client_type: "studio" }), "NH Studio");
   assert.equal(relayDisplayName({ client_type: "pocket" }), "NH Pocket");
+  assert.equal(relayDisplayName({ client_type: "relay" }), "NH Studio headless");
   assert.equal(relayDisplayName({ client_type: "hub" }), "NH Hub");
-  assert.equal(relayDisplayName({ client_type: "gateway" }), "NH Gateway");
-  assert.equal(relayDisplayName({}), "NH Gateway");
-  assert.equal(relayDisplayName(null), "NH Gateway");
+  assert.equal(relayDisplayName({ client_type: "gateway" }), "NH Gateway (legacy)");
+  assert.equal(relayDisplayName({}), "NH Gateway (legacy)");
+  assert.equal(relayDisplayName(null), "NH Gateway (legacy)");
   assert.equal(relayKind({ client_type: "Studio" }), "studio");
   assert.equal(relayKind({ client_type: "toaster" }), "gateway");
   assert.ok(isLegacyGateway({}));
   assert.ok(!isLegacyGateway({ client_type: "hub" }));
   assert.ok(isAppRelay({ client_type: "pocket" }));
+  assert.ok(isAppRelay({ client_type: "relay" }));
+  assert.ok(!isLegacyGateway({ client_type: "relay" }));
   assert.ok(!isAppRelay({ client_type: "gateway" }));
 });
 
@@ -35,9 +38,10 @@ test("the Relays page splits apps, hubs and legacy Gateways", async () => {
     { gateway_id: "h1", client_type: "hub" },
     { gateway_id: "p1", client_type: "pocket" },
     { gateway_id: "g2", client_type: "gateway" },
+    { gateway_id: "r1", client_type: "relay" },
   ];
   const { apps, hubs, legacyGateways } = splitRelays(relays);
-  assert.deepEqual(apps.map((r) => r.gateway_id), ["s1", "p1"]);
+  assert.deepEqual(apps.map((r) => r.gateway_id), ["s1", "p1", "r1"]);
   assert.deepEqual(hubs.map((r) => r.gateway_id), ["h1"]);
   assert.deepEqual(legacyGateways.map((r) => r.gateway_id), ["g1", "g2"]);
 });

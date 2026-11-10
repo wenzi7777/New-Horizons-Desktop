@@ -350,7 +350,8 @@ class GatewaySocketSession:
         is the token's, and it gets the token id as gateway_id unless it
         names one. Without a token, "studio" / "pocket" are still accepted
         (like a Gateway, which never had one) unless the server requires
-        tokens for apps (NEWHORIZONS_REQUIRE_APP_TOKEN=1)."""
+        tokens for apps (NEWHORIZONS_REQUIRE_APP_TOKEN=1). "relay" (NH
+        Studio headless) and "hub" never need one: they only relay."""
         hello = dict(message)
         claimed = normalize_relay_client_type(hello.get("client_type"))
         if self.app_user is not None:

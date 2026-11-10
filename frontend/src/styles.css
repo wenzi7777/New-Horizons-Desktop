@@ -11999,47 +11999,6 @@ button.cal-matrix-cell:active {
   font-size: 13px;
 }
 
-.app-token-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 10px;
-}
-
-.app-token-form label {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.app-token-form label:first-child {
-  flex: 1 1 220px;
-}
-
-.app-token-form label > span {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.app-token-created p {
-  margin: 0 0 6px;
-}
-
-.app-token-secret {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.app-token-secret code {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-}
-
 .app-token-list {
   display: grid;
   gap: 8px;

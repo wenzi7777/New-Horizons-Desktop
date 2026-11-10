@@ -19,14 +19,16 @@ from .service_constants import GATEWAY_CONTROL_UNAVAILABLE
 
 # What can register as a relay. "gateway" is the Python NH Gateway (legacy
 # now: NH Studio replaces it), "hub" the ESP-NOW Hub, "studio" / "pocket"
-# the NH Studio desktop app and the NH Pocket Android app. A hello without
-# client_type is an old Gateway's.
-RELAY_CLIENT_TYPES = ("gateway", "hub", "studio", "pocket")
+# the NH Studio desktop app and the NH Pocket Android app, "relay" NH Studio
+# headless (nh-studio: relay only, no sign-in, like the Hub). A hello
+# without client_type is an old Gateway's.
+RELAY_CLIENT_TYPES = ("gateway", "hub", "studio", "pocket", "relay")
 RELAY_DEFAULT_NAMES = {
     "gateway": "NH Gateway",
     "hub": "NH Hub",
     "studio": "NH Studio",
     "pocket": "NH Pocket",
+    "relay": "NH Studio headless",
 }
 
 

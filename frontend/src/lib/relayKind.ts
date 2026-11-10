@@ -2,25 +2,27 @@
 // the one name it is shown under. Pure, so node tests load it directly.
 //
 // "studio" / "pocket": the NH Studio desktop app and the NH Pocket Android
-// app; "hub": the ESP-NOW Hub; "gateway": the Python NH Gateway, which NH
+// app; "relay": NH Studio headless (nh-studio, relay only, grouped with the
+// apps on the Relays page); "hub": the ESP-NOW Hub; "gateway": the Python NH Gateway, which NH
 // Studio replaces (shown as legacy). An entry with no or an unknown
 // client_type is an old Gateway's, as the Backend treats it.
-export type RelayKind = "studio" | "pocket" | "hub" | "gateway";
+export type RelayKind = "studio" | "pocket" | "relay" | "hub" | "gateway";
 
 type RelayLike = { client_type?: string } | null | undefined;
 
 const NAMES: Record<RelayKind, string> = {
   studio: "NH Studio",
   pocket: "NH Pocket",
+  relay: "NH Studio headless",
   hub: "NH Hub",
-  gateway: "NH Gateway",
+  gateway: "NH Gateway (legacy)",
 };
 
 export const NH_STUDIO_DOWNLOAD_URL = "https://wenzi7777.github.io/New-Horizons-Gateway/";
 
 export function relayKind(relay: RelayLike): RelayKind {
   const value = String(relay?.client_type ?? "").trim().toLowerCase();
-  return value === "studio" || value === "pocket" || value === "hub" ? value : "gateway";
+  return value === "studio" || value === "pocket" || value === "relay" || value === "hub" ? value : "gateway";
 }
 
 // A relay's self-reported gateway_name is ignored on purpose: it is persisted
@@ -33,7 +35,7 @@ export function relayDisplayName(relay: RelayLike): string {
 
 export function isAppRelay(relay: RelayLike): boolean {
   const kind = relayKind(relay);
-  return kind === "studio" || kind === "pocket";
+  return kind === "studio" || kind === "pocket" || kind === "relay";
 }
 
 export function isLegacyGateway(relay: RelayLike): boolean {

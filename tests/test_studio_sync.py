@@ -180,6 +180,24 @@ class RelayClientTypeTest(_Env):
             self.assertEqual(ack["client_type"], client_type)
             self.assertNotIn("latest_gateway_version", ack)
 
+    def test_headless_relay_needs_no_token_and_is_not_legacy(self):
+        with patch.dict("os.environ", {"NEWHORIZONS_REQUIRE_APP_TOKEN": "1"}):
+            session, ws = self.session()
+            self.hello(session, gateway_id="nh-relay-1", client_type="relay", capabilities=["gateway_command"])
+            entry = self.relay("nh-relay-1")
+            self.assertEqual(entry["client_type"], "relay")
+            self.assertEqual(entry["gateway_name"], "NH Studio headless")
+            self.assertFalse(entry["legacy"])
+            self.assertFalse(entry["authenticated"])
+            ack = ws.sent[-1]
+            self.assertEqual(ack["client_type"], "relay")
+            self.assertNotIn("latest_gateway_version", ack)
+            sent = []
+            self.service._gateway_session_senders["nh-relay-1"] = sent.append
+            result = self.service.publish_gateway_command("nh-relay-1", {"command": next(iter(self.service.GATEWAY_COMMANDS))})
+            self.assertEqual(result["status"], "queued")
+            self.assertEqual(sent[0]["type"], "gateway_command")
+
     def test_old_gateway_and_hub_keep_working_and_gateway_is_legacy(self):
         session, ws = self.session()
         self.hello(session, gateway_id="nh-gateway-abc")

@@ -7,7 +7,7 @@ import { useI18n } from "../i18n";
 import { V15F_HARDWARE_MODEL, boardProfileForHardwareModel, displayHardwareModel, manifestUrlForHardwareModel } from "../lib/boardProfile";
 import { actionButtonActionsForGesture, buildActionButtonCommand, normalizeActionButtonStatus, type ActionButtonAction, type ActionButtonGesture } from "../lib/actionButton";
 import { BATTERY_PRESETS, batteryCapacityChoiceFor, batteryIndicatorState, batteryLedThresholdValidationError, batteryPresetFor, type BatteryCapacityChoice, batteryProfileSetupRequired, batteryProfileValidationError, buildBatteryGaugeResyncCommand, buildBatteryLedThresholdCommand, buildBatteryProfileCommand, durationLabel, estimateBatteryTime, normalizeBatteryStatus } from "../lib/batteryProfile";
-import { isHubRelayed, normalizeDevice, updateTransferProgress, useDevicesPolling } from "../lib/device";
+import { isHubRelayed, normalizeDevice, relayDisplayName, updateTransferProgress, useDevicesPolling } from "../lib/device";
 import { pollDeviceCommand, quietCommand, useDeviceCommand } from "../lib/deviceCommand";
 import { appHref } from "../lib/runtime";
 import { storageSnapshotFromDevice } from "../lib/storageStatus";
@@ -1855,8 +1855,8 @@ export function DeviceSettingsPage() {
     if (section === "overview") {
       const connectionSummary = hubRelayed
         ? t("deviceViaHubLong")
-        : device?.client_type === "gateway" || findme.gateway_id
-          ? t("deviceViaGatewayLong")
+        : device?.client_type || findme.gateway_id
+          ? t("deviceViaRelayLong").replace("{relay}", relayDisplayName(device))
           : t("offline");
       const relayId = hubRelayed ? device?.gateway_id : findme.gateway_id;
       return (
