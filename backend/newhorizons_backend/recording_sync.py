@@ -106,8 +106,18 @@ def normalize_device_uid(value: Any) -> str:
     return uid
 
 
+# An upload nobody finished is dropped after this long (the app starts
+# over with begin, so nothing is lost but the bytes already sent).
+STALE_UPLOAD_MS = 7 * 24 * 60 * 60 * 1000
+
+
 class RecordingSyncStore:
+    # Guards the index only. Each upload has a lock of its own, so one
+    # upload's complete (hashing up to three 4 GB files) never holds up
+    # another upload's chunks.
     _lock = threading.RLock()
+    _locks_guard = threading.Lock()
+    _id_locks: dict[str, threading.RLock] = {}
 
     def __init__(self, data_root: Path) -> None:
         self.data_root = Path(data_root)
@@ -138,18 +148,44 @@ class RecordingSyncStore:
         tmp.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
         tmp.replace(self._index_path())
 
+    def _id_lock(self, recording_id: str) -> threading.RLock:
+        key = f"{self.data_root}\0{recording_id}"
+        with self._locks_guard:
+            lock = self._id_locks.get(key)
+            if lock is None:
+                lock = self._id_locks[key] = threading.RLock()
+            return lock
+
     def _completed(self, recording_id: str) -> dict[str, Any] | None:
         """The index entry, if the recording is still on disk. One deleted
         from the Files page since can be uploaded again."""
-        index = self._load_index()
-        entry = index.get(recording_id)
-        if entry is None:
-            return None
-        if not (self.data_root / str(entry.get("path") or "_missing_")).is_dir():
-            index.pop(recording_id, None)
-            self._save_index(index)
-            return None
-        return entry
+        with self._lock:
+            index = self._load_index()
+            entry = index.get(recording_id)
+            if entry is None:
+                return None
+            if not (self.data_root / str(entry.get("path") or "_missing_")).is_dir():
+                index.pop(recording_id, None)
+                self._save_index(index)
+                return None
+            return entry
+
+    def _drop_stale_uploads(self, keep: Path) -> None:
+        """Removes uploads untouched for STALE_UPLOAD_MS (an app that was
+        uninstalled mid-upload never comes back for them)."""
+        uploads = self._sync_dir / "uploads"
+        if not uploads.is_dir():
+            return
+        cutoff = time.time() - STALE_UPLOAD_MS / 1000.0
+        for staging in uploads.iterdir():
+            if staging == keep or not staging.is_dir():
+                continue
+            try:
+                newest = max([staging.stat().st_mtime, *(child.stat().st_mtime for child in staging.iterdir())])
+            except OSError:
+                continue
+            if newest < cutoff:
+                shutil.rmtree(staging, ignore_errors=True)
 
     @staticmethod
     def _check_recording_id(recording_id: Any) -> str:
@@ -167,7 +203,8 @@ class RecordingSyncStore:
         device_uid = normalize_device_uid(payload.get("device_uid"))
         started_at = parse_started_at(payload.get("started_at"))
         files = self._check_files(payload.get("files"))
-        with self._lock:
+        with self._id_lock(recording_id):
+            self._drop_stale_uploads(keep=self._staging_dir(recording_id))
             done = self._completed(recording_id)
             if done is not None:
                 if done.get("files") != files or done.get("device_uid") != device_uid:
@@ -194,7 +231,7 @@ class RecordingSyncStore:
 
     def status(self, recording_id: str) -> dict[str, Any]:
         recording_id = self._check_recording_id(recording_id)
-        with self._lock:
+        with self._id_lock(recording_id):
             done = self._completed(recording_id)
             if done is not None:
                 return self._complete_payload(recording_id, done)
@@ -210,7 +247,7 @@ class RecordingSyncStore:
             raise SyncError("role_invalid")
         if len(data) > MAX_CHUNK_BYTES:
             raise SyncError("chunk_too_large", 413, max_chunk_bytes=MAX_CHUNK_BYTES)
-        with self._lock:
+        with self._id_lock(recording_id):
             if self._completed(recording_id) is not None:
                 raise SyncError("upload_already_complete", 409)
             staging = self._staging_dir(recording_id)
@@ -232,7 +269,7 @@ class RecordingSyncStore:
 
     def complete(self, recording_id: str) -> dict[str, Any]:
         recording_id = self._check_recording_id(recording_id)
-        with self._lock:
+        with self._id_lock(recording_id):
             done = self._completed(recording_id)
             if done is not None:
                 return self._complete_payload(recording_id, done)
@@ -269,10 +306,13 @@ class RecordingSyncStore:
                     raise SyncError("meta_invalid", 422, roles=["meta"])
                 meta = loaded
             started_at = parse_started_at(manifest["started_at"])
-            paths = new_recording_paths(self.data_root, manifest["device_uid"], started_at)
-            shutil.move(str(staging / "data.part"), paths.data)
-            if "events" in files:
-                shutil.move(str(staging / "events.part"), paths.events)
+            with self._lock:
+                # Picking the folder name and moving in are one step, so two
+                # uploads of the same moment never pick the same folder.
+                paths = new_recording_paths(self.data_root, manifest["device_uid"], started_at)
+                shutil.move(str(staging / "data.part"), paths.data)
+                if "events" in files:
+                    shutil.move(str(staging / "events.part"), paths.events)
             source = dict(manifest.get("source") or {})
             uploaded_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
             meta["format"] = meta.get("format") or META_FORMAT
@@ -302,9 +342,10 @@ class RecordingSyncStore:
                 "source": source,
                 "completed_at_ms": _now_ms(),
             }
-            index = self._load_index()
-            index[recording_id] = entry
-            self._save_index(index)
+            with self._lock:
+                index = self._load_index()
+                index[recording_id] = entry
+                self._save_index(index)
             shutil.rmtree(staging, ignore_errors=True)
             return self._complete_payload(recording_id, entry)
 

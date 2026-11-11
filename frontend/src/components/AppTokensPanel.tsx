@@ -21,6 +21,7 @@ export function AppTokensPanel() {
   const reload = useCallback(async () => {
     try {
       setItems((await api.appTokens()).items);
+      setError("");
     } catch (err) {
       setError(`${t("appTokenError")} ${err instanceof Error ? err.message : String(err)}`);
     }

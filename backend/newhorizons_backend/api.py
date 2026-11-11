@@ -6,9 +6,11 @@ import re
 import secrets
 import shutil
 import tempfile
+import threading
 import time
 import uuid
 import zipfile
+from datetime import timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
@@ -455,8 +457,11 @@ def create_blueprint(
         client_type = str(data.get("client_type") or "").strip()
         if client_type not in {"studio", "pocket"}:
             return json_response({"error": "invalid_client_type"}), 400
+        if _login_throttled(request.remote_addr or ""):
+            return json_response({"error": "too_many_attempts"}), 429
         user = auth_manager.authenticate(username, password)
         if user is None:
+            _note_login_failure(request.remote_addr or "")
             return json_response({"error": "invalid_credentials"}), 401
         label = "NH Studio" if client_type == "studio" else "NH Pocket"
         device = str(data.get("device_name") or "").strip()[:64]
@@ -529,6 +534,8 @@ def create_blueprint(
             data = _request_json_data({})
         except ValueError:
             return json_response({"error": "invalid_json"}), 400
+        if not isinstance(data, dict):
+            return json_response({"error": "invalid_json"}), 400
         existing = {
             str(item.get("gateway_id") or "").strip().lower()
             for item in svc.gateway_snapshot()
@@ -545,6 +552,14 @@ def create_blueprint(
             if candidate.lower() not in existing:
                 return json_response({"gateway_id": candidate})
         return json_response({"error": "gateway_id_unavailable"}), 409
+
+    # Removes every relay that is offline now (old installs, reset Hubs).
+    @bp.post("/api/gateways/prune-offline")
+    @auth
+    @_require_roles("admin")
+    def gateway_prune_offline() -> Response:
+        removed = svc.prune_offline_gateways(timedelta(0))
+        return json_response({"status": "pruned", "removed": removed})
 
     @bp.delete("/api/gateways/<gateway_id>")
     @auth
@@ -911,21 +926,15 @@ def create_blueprint(
             return json_response({"error": "invalid_json"}), 400
         if data is None:
             return json_response({"error": "invalid_json"}), 400
-        path = _profiles_dir() / f"{_sanitize_name(name)}.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-        ProfileSyncStore(_profiles_dir()).note_saved(path.stem)
-        return json_response({"status": "saved", "name": path.stem})
+        saved = ProfileSyncStore(_profiles_dir()).save_local(_sanitize_name(name), data)
+        return json_response({"status": "saved", "name": saved})
 
     @bp.delete("/api/profiles/<name>")
     @auth
     @_require_roles("admin", "user")
     def profile_delete(name: str) -> Response:
-        path = _profiles_dir() / f"{_sanitize_name(name)}.json"
-        if not path.exists():
+        if not ProfileSyncStore(_profiles_dir()).delete_local(_sanitize_name(name)):
             return json_response({"error": "profile_not_found"}), 404
-        path.unlink()
-        ProfileSyncStore(_profiles_dir()).note_deleted(path.stem)
         return json_response({"status": "deleted"})
 
     # ── Sync (NH Studio / NH Pocket) ───────────────────────────────────────
@@ -1017,7 +1026,12 @@ def create_blueprint(
             offset = _int_arg("offset", -1, -1)
             if offset < 0:
                 raise SyncError("offset_required")
-            return json_response(_recording_store().write_chunk(recording_id, role, offset, request.get_data(cache=False)))
+            # Read at most one byte past the limit: a chunked body (no
+            # Content-Length) must not be pulled into memory whole first.
+            data = request.stream.read(MAX_CHUNK_BYTES + 1)
+            if len(data) > MAX_CHUNK_BYTES:
+                return json_response({"error": "chunk_too_large", "max_chunk_bytes": MAX_CHUNK_BYTES}), 413
+            return json_response(_recording_store().write_chunk(recording_id, role, offset, data))
         except SyncError as exc:
             return _sync_error(exc)
 
@@ -1376,6 +1390,39 @@ def create_blueprint(
         return json_response(result)
 
     return bp
+
+
+# App sign-in (/api/app-tokens/login): at most this many wrong passwords
+# per address in the window, then 429 until the window passes.
+_LOGIN_FAILURE_LIMIT = 10
+_LOGIN_FAILURE_WINDOW_S = 300.0
+_login_failures: dict[str, list[float]] = {}
+_login_failures_lock = threading.Lock()
+
+
+def _recent_login_failures(address: str, now: float) -> list[float]:
+    recent = [at for at in _login_failures.get(address, []) if now - at < _LOGIN_FAILURE_WINDOW_S]
+    if recent:
+        _login_failures[address] = recent
+    else:
+        _login_failures.pop(address, None)
+    return recent
+
+
+def _login_throttled(address: str) -> bool:
+    with _login_failures_lock:
+        return len(_recent_login_failures(address, time.monotonic())) >= _LOGIN_FAILURE_LIMIT
+
+
+def _note_login_failure(address: str) -> None:
+    with _login_failures_lock:
+        now = time.monotonic()
+        _recent_login_failures(address, now)
+        _login_failures.setdefault(address, []).append(now)
+        if len(_login_failures) > 4096:
+            # Bounded: forget the addresses with the oldest failures.
+            for stale in sorted(_login_failures, key=lambda key: _login_failures[key][-1])[:1024]:
+                _login_failures.pop(stale, None)
 
 
 def _sanitize_name(name: str) -> str:

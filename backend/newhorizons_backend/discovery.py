@@ -101,8 +101,9 @@ def load_findme_policy(path: Path) -> FindmePolicy:
 
 
 def save_findme_policy(path: Path, policy: FindmePolicy) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(policy.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+    from .profile_sync import write_atomic
+
+    write_atomic(path, json.dumps(policy.to_dict(), indent=2, sort_keys=True).encode("utf-8"))
 
 
 def decide_findme(request: dict[str, Any], *, gateway_id: str, policy: FindmePolicy) -> tuple[bool, str, bool]:

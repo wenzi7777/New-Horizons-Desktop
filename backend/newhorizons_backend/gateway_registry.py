@@ -9,8 +9,9 @@ state and has no __init__ of its own.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+import os
 import time
 import uuid
 
@@ -32,9 +33,29 @@ RELAY_DEFAULT_NAMES = {
 }
 
 
+# A relay that has been offline this long is dropped from the list. Relay
+# ids are made per install (NH Studio / Pocket / Hub), so a reinstall, a
+# factory reset or a dev run leaves its old id behind for good otherwise.
+# NEWHORIZONS_RELAY_OFFLINE_TTL_DAYS=0 keeps them forever.
+DEFAULT_RELAY_OFFLINE_TTL_DAYS = 7.0
+
+
+def relay_offline_ttl() -> timedelta | None:
+    raw = os.getenv("NEWHORIZONS_RELAY_OFFLINE_TTL_DAYS", "")
+    try:
+        days = float(raw) if raw.strip() else DEFAULT_RELAY_OFFLINE_TTL_DAYS
+    except ValueError:
+        days = DEFAULT_RELAY_OFFLINE_TTL_DAYS
+    return timedelta(days=days) if days > 0 else None
+
+
 def normalize_relay_client_type(value: Any) -> str:
     client_type = str(value or "").strip().lower()
     return client_type if client_type in RELAY_CLIENT_TYPES else "gateway"
+
+
+def _offline_sender(_payload: dict[str, Any]) -> None:
+    """The sender of a relay entry no session backs (see record_gateway_summary)."""
 
 
 def _channel_or(value: Any, fallback: Any) -> int:
@@ -279,8 +300,45 @@ class GatewayRegistryMixin:
         self._emit_event({"type": "gateway_update", "item": event_item})
         return gateway_id
 
-    def record_gateway_summary(self, gateway_id: str, payload: dict[str, Any]) -> None:
+    def gateway_takeover_allowed(self, gateway_id: str, sender: Callable[[dict[str, Any]], None], hello: dict[str, Any]) -> bool:
+        """Whether a session may register as `gateway_id`.
+
+        A relay that reconnects before its old socket closed takes its own
+        id over, as always. What is refused: a relay without an app token
+        taking the id of a signed-in NH Studio / Pocket that is online
+        through another socket."""
+        gateway_id = str(gateway_id or "").strip()
+        if not gateway_id:
+            return True
+        with self._lock:
+            owner = self._gateway_session_senders.get(gateway_id)
+            entry = self._gateways.get(gateway_id) or {}
+            if owner is None or owner is sender or owner == sender or entry.get("status") != "online":
+                return True
+            return not bool(entry.get("authenticated")) or bool(hello.get("authenticated"))
+
+    def record_gateway_summary(
+        self,
+        gateway_id: str,
+        payload: dict[str, Any],
+        sender: Callable[[dict[str, Any]], None] | None = None,
+        identity: dict[str, Any] | None = None,
+    ) -> None:
         payload = dict(payload or {})
+        if sender is not None:
+            with self._lock:
+                owner = self._gateway_session_senders.get(gateway_id)
+                registered = gateway_id in self._gateways
+            if owner is not None and owner is not sender and owner != sender:
+                # Another session holds this id: its status must not be
+                # overwritten by a stale or foreign one.
+                return
+            if owner is None or not registered:
+                # The entry was deleted (or its session dropped) while this
+                # socket stayed open: put the relay back as itself, with its
+                # real sender, so it goes offline when the socket closes
+                # instead of staying "online" behind a do-nothing sender.
+                self.register_gateway(gateway_id, sender, dict(identity or {}))
         now = datetime.now(timezone.utc).isoformat()
         state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
         devices = state.get("devices") if isinstance(state.get("devices"), list) else []
@@ -330,9 +388,14 @@ class GatewayRegistryMixin:
                 self._gateway_claims[claim_id] = claim
                 if previous.get("state") != claim.get("state") or previous.get("last_error") != claim.get("last_error"):
                     claim_events.append({"type": "gateway_claim_update", **claim})
+        live_sender = self._gateway_session_senders.get(gateway_id)
+        if live_sender is None:
+            # No session (direct calls, tests): keep the entry without
+            # recording a sender that would keep it "online" forever.
+            live_sender = sender or _offline_sender
         self.register_gateway(
             gateway_id,
-            self._gateway_session_senders.get(gateway_id, lambda _payload: None),
+            live_sender,
             {
                 "gateway_name": payload.get("gateway_name"),
                 "version": payload.get("version", ""),
@@ -622,6 +685,37 @@ class GatewayRegistryMixin:
             self._emit_event({"type": "device_update", "item": device})
         for gateway in gateway_updates:
             self._emit_event({"type": "gateway_update", "item": gateway})
+
+    def prune_offline_gateways(self, older_than: timedelta | None = None) -> list[str]:
+        """Drops relays offline for longer than `older_than` (default: the
+        configured TTL; timedelta(0) drops every offline relay). Returns
+        their ids; emits a fresh gateway_snapshot when any went."""
+        ttl = relay_offline_ttl() if older_than is None else older_than
+        if ttl is None:
+            return []
+        with self._lock:
+            removed = self._prune_offline_gateways_locked(ttl)
+            snapshot = [dict(self._gateways[key]) for key in sorted(self._gateways.keys())] if removed else []
+        if removed:
+            self._emit_event({"type": "gateway_snapshot", "items": snapshot})
+        return removed
+
+    def _prune_offline_gateways_locked(self, ttl: timedelta) -> list[str]:
+        cutoff = datetime.now(timezone.utc) - ttl
+        removed: list[str] = []
+        for gateway_id, entry in list(self._gateways.items()):
+            if entry.get("status") == "online" or gateway_id in self._gateway_session_senders:
+                continue
+            last_seen = self._parse_iso_datetime(str(entry.get("last_seen") or ""))
+            if last_seen is not None and last_seen > cutoff:
+                continue
+            if any(mapped == gateway_id for mapped in self._gateway_device_ids.values()):
+                continue
+            self._gateways.pop(gateway_id, None)
+            for claim_id in [cid for cid, claim in self._gateway_claims.items() if claim.get("gateway_id") == gateway_id]:
+                self._gateway_claims.pop(claim_id, None)
+            removed.append(gateway_id)
+        return removed
 
     def delete_gateway(self, gateway_id: str) -> bool:
         gateway_id = str(gateway_id or "").strip()

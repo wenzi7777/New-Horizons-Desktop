@@ -8,6 +8,11 @@ other change. An incoming change wins only when its time is later than the
 stored one (last writer wins; a tie keeps what is here). Labels from before
 sync have time 0, so any synced change replaces them.
 
+A reader's `since_ms` is compared with when a change reached this server
+(`<label>_received`, server time), not with the writer's own time: an edit
+made offline arrives late with an old time and must still reach every app
+that synced in between.
+
 A mixin of NewHorizonsService (service.py): it shares the service's lock and
 state and has no __init__ of its own.
 """
@@ -18,6 +23,8 @@ from typing import Any
 import json
 import re
 import time
+
+from .profile_sync import write_atomic
 
 LABEL_FIELDS = ("nickname", "group")
 _LABEL_MAX_LEN = 64
@@ -82,7 +89,7 @@ class DeviceLabelsMixin:
             items = []
             for uid in sorted(uids):
                 item = self._label_item_locked(uid)
-                if since_ms and max(item["nickname_updated_ms"], item["group_updated_ms"]) <= since_ms:
+                if since_ms and self._label_received_ms_locked(uid) <= since_ms:
                     continue
                 items.append(item)
         return {"server_time_ms": _now_ms(), "items": items}
@@ -91,30 +98,38 @@ class DeviceLabelsMixin:
         """Applies each field whose time is later than the stored one."""
         if not isinstance(items, list):
             raise ValueError("items_required")
+        # Checked in full before anything changes: a bad item must not leave
+        # the ones before it applied in memory but unsaved.
+        parsed: list[tuple[str, list[tuple[str, str, int]]]] = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                raise ValueError("item_invalid")
+            uid = str(raw.get("device_uid") or "").strip().upper().replace(":", "")
+            if not _SYNC_UID_PATTERN.fullmatch(uid):
+                raise ValueError("device_uid_invalid")
+            fields: list[tuple[str, str, int]] = []
+            for label in LABEL_FIELDS:
+                if label not in raw:
+                    continue
+                value = str(raw.get(label) or "").strip()
+                if len(value) > _LABEL_MAX_LEN:
+                    raise ValueError(f"{label}_too_long")
+                try:
+                    incoming_ms = int(raw.get(f"{label}_updated_ms") or 0)
+                except (TypeError, ValueError):
+                    raise ValueError(f"{label}_updated_ms_invalid") from None
+                if incoming_ms <= 0:
+                    raise ValueError(f"{label}_updated_ms_required")
+                fields.append((label, value, incoming_ms))
+            parsed.append((uid, fields))
         results: list[dict[str, Any]] = []
         changed: list[str] = []
         with self._lock:
             nicknames_dirty = groups_dirty = False
-            for raw in items:
-                if not isinstance(raw, dict):
-                    raise ValueError("item_invalid")
-                uid = str(raw.get("device_uid") or "").strip().upper().replace(":", "")
-                if not _SYNC_UID_PATTERN.fullmatch(uid):
-                    raise ValueError("device_uid_invalid")
-                uid = self._device_id_to_uid.get(uid, uid)
+            for raw_uid, fields in parsed:
+                uid = self._device_id_to_uid.get(raw_uid, raw_uid)
                 applied: list[str] = []
-                for label in LABEL_FIELDS:
-                    if label not in raw:
-                        continue
-                    value = str(raw.get(label) or "").strip()
-                    if len(value) > _LABEL_MAX_LEN:
-                        raise ValueError(f"{label}_too_long")
-                    try:
-                        incoming_ms = int(raw.get(f"{label}_updated_ms") or 0)
-                    except (TypeError, ValueError):
-                        raise ValueError(f"{label}_updated_ms_invalid") from None
-                    if incoming_ms <= 0:
-                        raise ValueError(f"{label}_updated_ms_required")
+                for label, value, incoming_ms in fields:
                     stored_ms = int(self._label_times.get(uid, {}).get(label, 0) or 0)
                     if incoming_ms <= stored_ms:
                         continue
@@ -158,9 +173,16 @@ class DeviceLabelsMixin:
         }
 
     def _stamp_label_locked(self, uid: str, label: str, at_ms: int, *, save: bool = True) -> None:
-        self._label_times.setdefault(uid, {})[label] = int(at_ms)
+        times = self._label_times.setdefault(uid, {})
+        times[label] = int(at_ms)
+        times[f"{label}_received"] = _now_ms()
         if save:
             self._save_string_map_times()
+
+    def _label_received_ms_locked(self, uid: str) -> int:
+        times = self._label_times.get(uid, {})
+        # Labels stamped before received times existed: their own time.
+        return max(int(times.get(f"{label}_received") or times.get(label) or 0) for label in LABEL_FIELDS)
 
     def _load_label_times(self) -> dict[str, dict[str, int]]:
         try:
@@ -174,18 +196,18 @@ class DeviceLabelsMixin:
             if not isinstance(times, dict):
                 continue
             clean = {}
-            for label in LABEL_FIELDS:
+            for key in (*LABEL_FIELDS, *(f"{label}_received" for label in LABEL_FIELDS)):
+                if key not in times and key not in LABEL_FIELDS:
+                    continue
                 try:
-                    clean[label] = int(times.get(label) or 0)
+                    clean[key] = int(times.get(key) or 0)
                 except (TypeError, ValueError):
                     continue
             result[str(uid)] = clean
         return result
 
     def _save_string_map_times(self) -> None:
-        path = self._label_times_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self._label_times, indent=2, sort_keys=True), encoding="utf-8")
+        write_atomic(self._label_times_path, json.dumps(self._label_times, indent=2, sort_keys=True).encode("utf-8"))
 
     def _load_nicknames(self) -> dict[str, str]:
         return self._load_string_map(self._nicknames_path)
@@ -217,5 +239,4 @@ class DeviceLabelsMixin:
 
     @staticmethod
     def _save_string_map(path: Path, values: dict[str, str]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(dict(sorted(values.items())), indent=2, sort_keys=True), encoding="utf-8")
+        write_atomic(path, json.dumps(dict(sorted(values.items())), indent=2, sort_keys=True).encode("utf-8"))

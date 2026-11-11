@@ -2183,15 +2183,7 @@ export function DeviceSettingsPage() {
                   <p>{t("vrefCopy")}</p>
                 </div>
               </div>
-              <FactList
-                items={[
-                  [t("vrefMv"), vrefStatus.ok === false ? t("batteryUnknown") : `${vrefStatus.mv ?? "-"} mV`],
-                  [t("vrefLimitMv"), `${vrefStatus.limit_mv ?? "-"} mV`],
-                  [t("vrefEepromMv"), `${vrefStatus.eeprom_mv ?? "-"} mV${vrefStatus.eeprom_ok === false ? " ⚠" : ""}`],
-                  [t("vrefCalibrationSwitch"), vrefStatus.calibration_available === false ? t("batteryUnknown") : boolString(vrefStatus.calibration_on)],
-                ]}
-              />
-              <VrefPanel disabled={!deviceUid || isDeviceOffline} vref={vrefStatus} range={rangeStatus} run={run} />
+              <VrefPanel key={deviceUid} disabled={!deviceUid || isDeviceOffline} vref={vrefStatus} range={rangeStatus} run={run} />
             </div>
           ) : null}
 

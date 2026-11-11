@@ -42,7 +42,7 @@ from .command_gating import CommandGatingMixin
 from .datagram_ingest import DatagramIngestMixin
 from .device_identity import DeviceIdentityMixin
 from .device_labels import DeviceLabelsMixin
-from .gateway_registry import GatewayRegistryMixin
+from .gateway_registry import GatewayRegistryMixin, relay_offline_ttl
 from .mock_device import MockDeviceMixin
 from .update_state import UpdateStateMixin
 
@@ -444,7 +444,11 @@ class NewHorizonsService(
         return None
 
     def gateway_snapshot(self) -> list[dict[str, Any]]:
+        ttl = relay_offline_ttl()
         with self._lock:
+            if ttl is not None:
+                # Relays long gone (old installs, reset Hubs) leave the list.
+                self._prune_offline_gateways_locked(ttl)
             return [dict(self._gateways[key]) for key in sorted(self._gateways.keys())]
 
     def add_event_listener(self, listener: Callable[[dict[str, Any]], None]) -> None:

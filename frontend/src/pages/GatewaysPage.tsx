@@ -255,6 +255,8 @@ export function GatewaysPage() {
   const [manageGatewayId, setManageGatewayId] = useState("");
   // The relay waiting on the delete confirmation.
   const [confirmDelete, setConfirmDelete] = useState<GatewayEntry | null>(null);
+  const [confirmPrune, setConfirmPrune] = useState(false);
+  const offlineCount = gateways.filter((gateway) => gatewayStatus(gateway) !== "online").length;
 
   useEffect(() => {
     requestGatewaySnapshot();
@@ -283,6 +285,21 @@ export function GatewaysPage() {
     }
   }
 
+  async function pruneOffline() {
+    setNotice("");
+    setNoticeClass("");
+    try {
+      const result = await api.pruneOfflineGateways();
+      setNotice(`${t("pruneOfflineDone")} ${result.removed.length}`);
+      setNoticeClass("success");
+      requestGatewaySnapshot();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setNotice(`${t("gatewayDeleteFailed")} ${detail}`);
+      setNoticeClass("error");
+    }
+  }
+
   return (
     <>
       <section className="page-header">
@@ -294,6 +311,11 @@ export function GatewaysPage() {
           <span className={`status-pill ${status === "connected" ? "live" : "waiting"}`}>
             {t("wsStatus")}: {status}
           </span>
+          {offlineCount ? (
+            <button className="button" type="button" onClick={() => setConfirmPrune(true)}>
+              {t("pruneOfflineRelays")} ({offlineCount})
+            </button>
+          ) : null}
           <button className="button" type="button" onClick={requestGatewaySnapshot}>
             {t("refreshGateways")}
           </button>
@@ -425,6 +447,20 @@ export function GatewaysPage() {
             void deleteRelay(gateway);
           }}
           onCancel={() => setConfirmDelete(null)}
+        />
+      ) : null}
+      {confirmPrune ? (
+        <ConfirmModal
+          title={t("pruneOfflineConfirm")}
+          message={t("pruneOfflineCopy")}
+          confirmLabel={t("pruneOfflineRelays")}
+          cancelLabel={t("cancel")}
+          destructive
+          onConfirm={() => {
+            setConfirmPrune(false);
+            void pruneOffline();
+          }}
+          onCancel={() => setConfirmPrune(false)}
         />
       ) : null}
     </>

@@ -404,9 +404,25 @@ def register_websocket_routes(
         if auth_manager is not None and user is None:
             ws.send(json.dumps({"type": "error", "code": "unauthorized", "message": "unauthorized"}, separators=(",", ":")))
             return
-        hub.handle_socket(ws, user)
+        # An app token revoked while this socket is open ends it.
+        untrack = (
+            auth_manager.track_app_session(user.app_id, lambda: _close_quietly(ws))
+            if auth_manager is not None and user is not None and user.is_app
+            else (lambda: None)
+        )
+        try:
+            hub.handle_socket(ws, user)
+        finally:
+            untrack()
 
     return hub
+
+
+def _close_quietly(ws: Any) -> None:
+    try:
+        ws.close()
+    except Exception:
+        pass
 
 
 def _normalize_url_prefix(value: str) -> str:

@@ -12062,3 +12062,47 @@ button.cal-matrix-cell:active {
   gap: 6px;
   min-width: 0;
 }
+
+/* v2.0.F Vref card: status tiles, the slider with its strap-risk bar. */
+.vref-status .metric {
+  flex: 1 1 150px;
+}
+
+.vref-status .metric.vref-zone-near {
+  border-color: var(--warning, #b18435);
+}
+
+.vref-status .metric.vref-zone-risk {
+  border-color: var(--danger, #c0392b);
+}
+
+.vref-needs-rfb {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.vref-slider {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.vref-zone-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-right: calc(90px + 10px + 2.5em);
+}
+
+.vref-zone-bar span {
+  flex-basis: 0;
+}
+
+.vref-zone-bar .safe { background: #3f9b5a; }
+.vref-zone-bar .near { background: #d9a531; }
+.vref-zone-bar .risk { background: #c64b3c; }

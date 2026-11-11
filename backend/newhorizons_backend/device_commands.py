@@ -111,6 +111,7 @@ NORMAL_COMMANDS = SHARED_COMMANDS | {
     "set_range",
     "rfb_measure",
     "vref_sweep",
+    "matrix_sample",
     "i2c_scan",
     "power_set_state",
     "set_action_button",

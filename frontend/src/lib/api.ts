@@ -538,6 +538,8 @@ export const api = {
   appTokens: () => request<{ items: AppTokenEntry[] }>("/app-tokens"),
   revokeAppToken: (tokenId: string) =>
     request<{ status: string; item: AppTokenEntry }>(`/app-tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }),
+  pruneOfflineGateways: () =>
+    request<{ status: string; removed: string[] }>("/gateways/prune-offline", { method: "POST" }),
   deleteGateway: (gatewayId: string) =>
     request<{ status: string; gateway_id: string }>(`/gateways/${encodeURIComponent(gatewayId)}`, {
       method: "DELETE",

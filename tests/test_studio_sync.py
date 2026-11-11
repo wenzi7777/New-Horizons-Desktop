@@ -2,6 +2,7 @@
 apps, recording upload, label and profile sync, and the FindMe policy."""
 import hashlib
 import json
+import time
 import sys
 import tempfile
 import unittest
@@ -149,9 +150,13 @@ class AppTokenTest(_Env):
 class _FakeWs:
     def __init__(self):
         self.sent = []
+        self.closed = False
 
     def send(self, payload):
         self.sent.append(json.loads(payload))
+
+    def close(self):
+        self.closed = True
 
 
 class RelayClientTypeTest(_Env):
@@ -248,6 +253,173 @@ class RelayClientTypeTest(_Env):
         result = self.service.publish_gateway_command("nh-studio-c", {"command": next(iter(self.service.GATEWAY_COMMANDS))})
         self.assertEqual(result["status"], "queued")
         self.assertEqual(sent[0]["type"], "gateway_command")
+
+
+class RelayListHygieneTest(_Env):
+    """Relays that are gone leave the list; a deleted or foreign id never
+    leaves a relay that stays "online" forever."""
+
+    session = RelayClientTypeTest.session
+    hello = RelayClientTypeTest.hello
+    relay = RelayClientTypeTest.relay
+
+    def status(self, session, **fields):
+        session._handle_json(json.dumps({"type": "gateway_status", "payload": {"state": {"devices": []}, **fields}}))
+
+    def test_offline_relays_older_than_the_ttl_are_pruned(self):
+        session, _ = self.session()
+        self.hello(session, gateway_id="pocket-old", client_type="pocket")
+        self.service.unregister_gateway_sender(session.sender)
+        self.assertEqual(self.relay("pocket-old")["status"], "offline")
+        # Still listed within the TTL ...
+        self.assertIn("pocket-old", [i["gateway_id"] for i in self.service.gateway_snapshot()])
+        # ... and gone once it has been offline longer.
+        with self.service._lock:
+            self.service._gateways["pocket-old"]["last_seen"] = "2020-01-01T00:00:00+00:00"
+        self.assertNotIn("pocket-old", [i["gateway_id"] for i in self.service.gateway_snapshot()])
+        # TTL 0 keeps everything.
+        session, _ = self.session()
+        self.hello(session, gateway_id="pocket-keep", client_type="pocket")
+        self.service.unregister_gateway_sender(session.sender)
+        with self.service._lock:
+            self.service._gateways["pocket-keep"]["last_seen"] = "2020-01-01T00:00:00+00:00"
+        with patch.dict("os.environ", {"NEWHORIZONS_RELAY_OFFLINE_TTL_DAYS": "0"}):
+            self.assertIn("pocket-keep", [i["gateway_id"] for i in self.service.gateway_snapshot()])
+
+    def test_prune_offline_api_removes_every_offline_relay(self):
+        online, _ = self.session()
+        self.hello(online, gateway_id="studio-on", client_type="studio")
+        gone, _ = self.session()
+        self.hello(gone, gateway_id="studio-gone", client_type="studio")
+        self.service.unregister_gateway_sender(gone.sender)
+        reply = self.admin_client().post(f"{PREFIX}/gateways/prune-offline")
+        self.assertEqual(reply.status_code, 200)
+        self.assertEqual(reply.get_json()["removed"], ["studio-gone"])
+        self.assertEqual([i["gateway_id"] for i in self.service.gateway_snapshot()], ["studio-on"])
+
+    def test_deleting_an_online_relay_does_not_leave_a_ghost(self):
+        session, _ = self.session()
+        self.hello(session, gateway_id="studio-del", client_type="studio")
+        self.assertTrue(self.service.delete_gateway("studio-del"))
+        # Its next status puts it back as itself, with its real sender ...
+        self.status(session)
+        entry = self.relay("studio-del")
+        self.assertEqual((entry["status"], entry["client_type"], entry["legacy"]), ("online", "studio", False))
+        # ... so it goes offline when its socket closes.
+        self.service.unregister_gateway_sender(session.sender)
+        self.assertEqual(self.relay("studio-del")["status"], "offline")
+
+    def test_status_cannot_write_another_relays_entry(self):
+        a, _ = self.session()
+        self.hello(a, gateway_id="studio-a", client_type="studio")
+        b, _ = self.session()
+        self.hello(b, gateway_id="studio-b", client_type="studio")
+        # A status naming another id is still this session's relay's.
+        b._handle_json(json.dumps({"type": "gateway_status", "gateway_id": "studio-a", "payload": {"version": "evil"}}))
+        self.assertNotEqual(self.relay("studio-a").get("version"), "evil")
+        self.service.unregister_gateway_sender(a.sender)
+        self.assertEqual(self.relay("studio-a")["status"], "offline")
+
+    def test_unauthenticated_relay_cannot_take_a_signed_in_apps_id(self):
+        _, item = self.app_token("studio")
+        user = AuthUser(username=f"app:{item['id']}", role="admin", app_id=item["id"], client_type="studio")
+        owner, _ = self.session(app_user=user)
+        self.hello(owner, gateway_id="studio-mine")
+        intruder, ws = self.session()
+        self.hello(intruder, gateway_id="studio-mine", client_type="studio")
+        self.assertEqual(ws.sent[-1]["code"], "gateway_id_in_use")
+        self.assertTrue(self.relay("studio-mine")["authenticated"])
+        self.assertIs(self.service._gateway_session_senders["studio-mine"], owner.sender)
+        # A claim cannot fake the signed-in identity either.
+        faker, _ = self.session()
+        faker._handle_json(json.dumps({"type": "gateway_claim_request", "gateway_id": "fake-1", "client_type": "studio", "app_id": "x", "authenticated": True, "device_uid": UID, "claim_id": "c9"}))
+        fake = self.relay("fake-1")
+        self.assertFalse(fake["authenticated"])
+        self.assertEqual(fake["app_id"], "")
+        # The same app reconnecting (its old socket not closed yet) still works.
+        again, ws = self.session(app_user=user)
+        self.hello(again, gateway_id="studio-mine")
+        self.assertIs(self.service._gateway_session_senders["studio-mine"], again.sender)
+
+
+class AppTokenSessionTest(_Env):
+    def test_revoking_a_token_closes_its_open_sockets(self):
+        _, item = self.app_token("pocket")
+        ws = _FakeWs()
+        other = _FakeWs()
+        untrack = self.auth.track_app_session(item["id"], ws.close)
+        self.auth.track_app_session("someone-else", other.close)
+        self.assertEqual(self.admin_client().delete(f"{PREFIX}/app-tokens/{item['id']}").status_code, 200)
+        self.assertTrue(ws.closed)
+        self.assertFalse(other.closed)
+        untrack()  # after the socket ended: harmless
+
+    def test_signed_in_token_follows_its_account(self):
+        client = self.app.test_client()
+        body = client.post(f"{PREFIX}/app-tokens/login", json={"username": "user", "password": "9227f4f37950df", "client_type": "studio"}).get_json()
+        token = body["token"]
+        self.assertEqual(self.auth.authenticate_app_token(token).role, "user")
+        with self.auth._connect() as connection:
+            # An admin-role row cannot outrank a "user" account.
+            connection.execute("UPDATE app_tokens SET role = 'admin' WHERE id = ?", (body["item"]["id"],))
+            connection.commit()
+        self.assertEqual(self.auth.authenticate_app_token(token).role, "user")
+        with self.auth._connect() as connection:
+            connection.execute("UPDATE users SET active = 0 WHERE username = 'user'")
+            connection.commit()
+        self.assertIsNone(self.auth.authenticate_app_token(token))
+
+
+class AppLoginThrottleTest(_Env):
+    def test_wrong_passwords_are_throttled_per_address(self):
+        from newhorizons_backend import api as api_module
+
+        self.addCleanup(api_module._login_failures.clear)
+        api_module._login_failures.clear()
+        client = self.app.test_client()
+        login = lambda password: client.post(f"{PREFIX}/app-tokens/login", json={"username": "admin", "password": password, "client_type": "studio"})
+        for _ in range(api_module._LOGIN_FAILURE_LIMIT):
+            self.assertEqual(login("nope").status_code, 401)
+        self.assertEqual(login("admin").status_code, 429)
+
+
+class LateOfflineEditTest(_Env):
+    def setUp(self):
+        super().setUp()
+        self.token, _ = self.app_token()
+        self.client = self.app.test_client()
+        self.headers = self.bearer(self.token)
+
+    def test_an_offline_edit_that_arrives_late_still_reaches_readers(self):
+        # Reader A syncs; then B pushes an edit it made earlier, offline.
+        cut = self.client.get(f"{PREFIX}/sync/profiles", headers=self.headers).get_json()["server_time_ms"]
+        time.sleep(0.005)
+        self.client.put(f"{PREFIX}/sync/profiles", headers=self.headers, json={"items": [
+            {"name": "offline", "updated_ms": cut - 60_000, "profile": {"name": "Offline"}},
+        ]})
+        since = [i["name"] for i in self.client.get(f"{PREFIX}/sync/profiles?since_ms={cut}", headers=self.headers).get_json()["items"]]
+        self.assertEqual(since, ["offline"])
+        cut = self.client.get(f"{PREFIX}/sync/labels", headers=self.headers).get_json()["server_time_ms"]
+        time.sleep(0.005)
+        self.client.put(f"{PREFIX}/sync/labels", headers=self.headers, json={"items": [
+            {"device_uid": UID, "nickname": "Offline", "nickname_updated_ms": cut - 60_000},
+        ]})
+        since = self.client.get(f"{PREFIX}/sync/labels?since_ms={cut}", headers=self.headers).get_json()["items"]
+        self.assertEqual([(i["device_uid"], i["nickname"]) for i in since], [(UID, "Offline")])
+
+    def test_a_bad_item_applies_nothing(self):
+        bad = self.client.put(f"{PREFIX}/sync/labels", headers=self.headers, json={"items": [
+            {"device_uid": UID, "nickname": "First", "nickname_updated_ms": 5},
+            {"device_uid": "zz", "nickname": "x", "nickname_updated_ms": 5},
+        ]})
+        self.assertEqual(bad.status_code, 400)
+        self.assertNotIn(UID, self.service._nicknames)
+        bad = self.client.put(f"{PREFIX}/sync/profiles", headers=self.headers, json={"items": [
+            {"name": "first", "updated_ms": 5, "profile": {"name": "First"}},
+            {"name": "../x", "updated_ms": 5, "profile": {}},
+        ]})
+        self.assertEqual(bad.status_code, 400)
+        self.assertFalse((self.profiles_root / "first.json").exists())
 
 
 class RecordingUploadTest(_Env):
@@ -425,9 +597,12 @@ class LabelSyncTest(_Env):
         self.assertEqual(item["nickname"], "Left glove")
         server_ms = item["nickname_updated_ms"]
         self.assertGreater(server_ms, 0)
-        older = self.client.put(f"{PREFIX}/sync/labels", headers=self.headers, json={"items": [
+        older_reply = self.client.put(f"{PREFIX}/sync/labels", headers=self.headers, json={"items": [
             {"device_uid": UID, "nickname": "Old", "nickname_updated_ms": server_ms - 1, "group": "Lab A", "group_updated_ms": server_ms + 5},
-        ]}).get_json()["items"][0]
+        ]}).get_json()
+        older = older_reply["items"][0]
+        cut = older_reply["server_time_ms"]
+        time.sleep(0.005)
         self.assertEqual(older["nickname"], "Left glove")
         self.assertEqual(older["group"], "Lab A")
         self.assertEqual(older["applied"], ["group"])
@@ -436,7 +611,8 @@ class LabelSyncTest(_Env):
         ]}).get_json()["items"][0]
         self.assertEqual((newer["nickname"], newer["applied"]), ("", ["nickname"]))
         # A cleared label is still listed (a tombstone) so others clear it too.
-        since = self.client.get(f"{PREFIX}/sync/labels?since_ms={server_ms + 6}", headers=self.headers).get_json()["items"]
+        # `since_ms` is the server time of the reader's last sync.
+        since = self.client.get(f"{PREFIX}/sync/labels?since_ms={cut}", headers=self.headers).get_json()["items"]
         self.assertEqual([(i["device_uid"], i["nickname"], i["nickname_updated_ms"]) for i in since], [(UID, "", server_ms + 10)])
         self.assertEqual(self.service._device_groups[UID], "Lab A")
         # Persisted across a restart.
@@ -470,10 +646,13 @@ class ProfileSyncTest(_Env):
         # The listing still shows only real profiles.
         self.assertEqual([i["name"] for i in admin.get(f"{PREFIX}/profiles").get_json()["items"]], ["glove"])
 
-        result = self.client.put(f"{PREFIX}/sync/profiles", headers=self.headers, json={"items": [
+        reply = self.client.put(f"{PREFIX}/sync/profiles", headers=self.headers, json={"items": [
             {"name": "glove", "updated_ms": server_ms - 1, "profile": {"name": "Stale"}},
             {"name": "insole", "updated_ms": server_ms + 1, "profile": {"name": "Insole", "rows": 7}},
-        ]}).get_json()["items"]
+        ]}).get_json()
+        result = reply["items"]
+        cut = reply["server_time_ms"]
+        time.sleep(0.005)
         self.assertEqual([(r["name"], r["applied"]) for r in result], [("glove", False), ("insole", True)])
         self.assertEqual(result[0]["profile"], {"name": "Glove", "rows": 5})
         self.assertEqual(admin.get(f"{PREFIX}/profiles/insole").get_json()["rows"], 7)
@@ -483,7 +662,7 @@ class ProfileSyncTest(_Env):
         ]}).get_json()["items"][0]
         self.assertTrue(deleted["applied"] and deleted["deleted"])
         self.assertEqual(admin.get(f"{PREFIX}/profiles/glove").status_code, 404)
-        since = {i["name"]: i for i in self.snapshot(server_ms + 1)["items"]}
+        since = {i["name"]: i for i in self.snapshot(cut)["items"]}
         self.assertEqual(since["glove"], {"name": "glove", "updated_ms": server_ms + 2, "deleted": True})
         self.assertNotIn("insole", since)
 

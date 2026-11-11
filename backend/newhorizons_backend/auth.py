@@ -5,10 +5,11 @@ import hmac
 import re
 import secrets
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Callable, Final
 
 from flask import session
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -27,6 +28,8 @@ APP_TOKEN_PREFIX: Final[str] = "nhapp_"
 APP_CLIENT_TYPES: Final[tuple[str, ...]] = ("studio", "pocket")
 APP_TOKEN_ROLES: Final[tuple[str, ...]] = ("admin", "user")
 _APP_TOKEN_PATTERN = re.compile(r"^nhapp_([a-f0-9]{12})_([A-Za-z0-9_-]{32,64})$")
+# Revoked tokens stay listed this long, then are deleted.
+_REVOKED_TOKEN_KEEP_MS: Final[int] = 30 * 24 * 60 * 60 * 1000
 # A token in use is stamped at most this often, not on every request.
 _LAST_USED_WRITE_INTERVAL_MS: Final[int] = 60_000
 
@@ -74,7 +77,45 @@ class AuthManager:
     def __init__(self, db_path: Path) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Open WebSockets per app token, closed when the token is revoked:
+        # a token is only checked when a socket connects, so revoking it
+        # must also end the sockets it already opened.
+        self._sessions_lock = threading.Lock()
+        self._app_sessions: dict[str, dict[int, Callable[[], None]]] = {}
+        self._session_seq = 0
         self._initialize()
+
+    def track_app_session(self, app_id: str, close: Callable[[], None]) -> Callable[[], None]:
+        """Remember an open socket of app token `app_id`; returns the
+        function that forgets it (call it when the socket ends)."""
+        app_id = str(app_id or "")
+        if not app_id:
+            return lambda: None
+        with self._sessions_lock:
+            self._session_seq += 1
+            key = self._session_seq
+            self._app_sessions.setdefault(app_id, {})[key] = close
+
+        def untrack() -> None:
+            with self._sessions_lock:
+                sessions = self._app_sessions.get(app_id)
+                if sessions is not None:
+                    sessions.pop(key, None)
+                    if not sessions:
+                        self._app_sessions.pop(app_id, None)
+
+        return untrack
+
+    def close_app_sessions(self, app_id: str) -> int:
+        """Closes every open socket of app token `app_id`; returns how many."""
+        with self._sessions_lock:
+            closers = list((self._app_sessions.pop(str(app_id or ""), None) or {}).values())
+        for close in closers:
+            try:
+                close()
+            except Exception:
+                pass
+        return len(closers)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
@@ -256,6 +297,13 @@ class AuthManager:
 
     def list_app_tokens(self) -> list[dict[str, object]]:
         with self._connect() as connection:
+            # Each sign-in makes a token and signing out revokes it, so the
+            # revoked ones pile up: they are dropped after a month.
+            connection.execute(
+                "DELETE FROM app_tokens WHERE revoked_at_ms IS NOT NULL AND revoked_at_ms < ?",
+                (_now_ms() - _REVOKED_TOKEN_KEEP_MS,),
+            )
+            connection.commit()
             rows = connection.execute("SELECT * FROM app_tokens ORDER BY created_at_ms DESC, id").fetchall()
         return [self._app_token_item(row) for row in rows]
 
@@ -266,10 +314,13 @@ class AuthManager:
                 (_now_ms(), str(token_id or "")),
             )
             connection.commit()
-            if cursor.rowcount:
-                return True
-            # Revoking twice is not an error, revoking nothing is.
-            return connection.execute("SELECT 1 FROM app_tokens WHERE id = ?", (str(token_id or ""),)).fetchone() is not None
+            found = bool(cursor.rowcount) or (
+                # Revoking twice is not an error, revoking nothing is.
+                connection.execute("SELECT 1 FROM app_tokens WHERE id = ?", (str(token_id or ""),)).fetchone() is not None
+            )
+        if found:
+            self.close_app_sessions(str(token_id or ""))
+        return found
 
     def authenticate_app_token(self, token: str) -> AuthUser | None:
         match = _APP_TOKEN_PATTERN.fullmatch(str(token or "").strip())
@@ -282,13 +333,26 @@ class AuthManager:
                 return None
             if not hmac.compare_digest(str(row["token_hash"]), _hash_token(match.group(0))):
                 return None
+            role = str(row["role"])
+            created_by = str(row["created_by"] or "")
+            if created_by:
+                # A token made by signing in is that account's: it ends when
+                # the account is deactivated or gone, and never outranks it.
+                owner = connection.execute(
+                    "SELECT role, active FROM users WHERE username = ?",
+                    (created_by,),
+                ).fetchone()
+                if owner is None or not bool(owner["active"]):
+                    return None
+                if str(owner["role"]) != "admin":
+                    role = "user"
             now = _now_ms()
             if row["last_used_at_ms"] is None or now - int(row["last_used_at_ms"]) >= _LAST_USED_WRITE_INTERVAL_MS:
                 connection.execute("UPDATE app_tokens SET last_used_at_ms = ? WHERE id = ?", (now, token_id))
                 connection.commit()
         return AuthUser(
             username=f"app:{token_id}",
-            role=str(row["role"]),
+            role=role,
             app_id=token_id,
             client_type=str(row["client_type"]),
         )

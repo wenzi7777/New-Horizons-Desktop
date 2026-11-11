@@ -161,6 +161,9 @@ class GatewaySocketSession:
         self.service = service
         self.ws = ws
         self.gateway_id = ""
+        # The identity this session registered with (its hello), so the relay
+        # can be put back as itself if its entry was deleted while online.
+        self._hello: dict[str, Any] = {}
         # Set when the relay connected with an app token (NH Studio / NH
         # Pocket): the token, not hello, then says which app this is.
         self.app_user = app_user
@@ -215,7 +218,14 @@ class GatewaySocketSession:
             hello = self._identified_hello(message)
             if hello is None:
                 return
-            self.gateway_id = str(hello.get("gateway_id") or "")
+            gateway_id = str(hello.get("gateway_id") or "")
+            if not self.service.gateway_takeover_allowed(gateway_id, self.sender, hello):
+                # An unauthenticated relay may not take the id of a signed-in
+                # NH Studio / Pocket that is online right now.
+                self._send_json({"type": "error", "code": "gateway_id_in_use", "message": "This relay id is in use by a signed-in app"})
+                return
+            self.gateway_id = gateway_id
+            self._hello = hello
             self.service.register_gateway(self.gateway_id, self.sender, hello)
             ack = {
                 "type": "gateway_hello_ack",
@@ -264,21 +274,34 @@ class GatewaySocketSession:
             return
         if msg_type == "gateway_status":
             payload = _payload_from_message(message)
-            gateway_id = str(message.get("gateway_id") or self.gateway_id or "")
+            # Once hello named this session's relay, a status is always that
+            # relay's: a different id in the message must not create (or
+            # overwrite) another relay's entry.
+            gateway_id = self.gateway_id or str(message.get("gateway_id") or "")
             if gateway_id:
                 if not self.gateway_id:
+                    hello = self._identified_hello({**message, "gateway_id": gateway_id})
+                    if hello is None or not self.service.gateway_takeover_allowed(gateway_id, self.sender, hello):
+                        return
                     self.gateway_id = gateway_id
-                self.service.record_gateway_summary(gateway_id, payload)
+                    self._hello = hello
+                self.service.record_gateway_summary(gateway_id, payload, sender=self.sender, identity=self._hello)
             return
 
         if msg_type == "gateway_claim_request":
-            gateway_id = str(message.get("gateway_id") or self.gateway_id or "")
-            if gateway_id:
-                if not self.gateway_id:
-                    self.gateway_id = gateway_id
-                claim_hello = dict(message)
-                if self.app_user is not None:
-                    claim_hello.update(client_type=self.app_user.client_type, app_id=self.app_user.app_id, authenticated=True)
+            gateway_id = self.gateway_id or str(message.get("gateway_id") or "")
+            if gateway_id and not self.gateway_id:
+                # A claim before hello registers the relay, with the same
+                # identity rules as hello (client_type / authenticated come
+                # from the token, never from the message).
+                claim_hello = self._identified_hello({**message, "gateway_id": gateway_id})
+                if claim_hello is None:
+                    return
+                if not self.service.gateway_takeover_allowed(gateway_id, self.sender, claim_hello):
+                    self._send_json({"type": "gateway_claim_update", "state": "failed", "error": "gateway_id_in_use", "claim_id": message.get("claim_id", ""), "device_uid": message.get("device_uid", "")})
+                    return
+                self.gateway_id = gateway_id
+                self._hello = claim_hello
                 self.service.register_gateway(gateway_id, self.sender, claim_hello)
             try:
                 claim = self.service.handle_gateway_claim_request(gateway_id, message)
@@ -306,7 +329,7 @@ class GatewaySocketSession:
             # Manage Hub panel -> service.py::publish_gateway_command()) --
             # see service.py::record_gateway_command_result()'s docstring
             # for why this is just a broadcast, not a device-entry merge.
-            gateway_id = str(message.get("gateway_id") or self.gateway_id or "")
+            gateway_id = self.gateway_id or str(message.get("gateway_id") or "")
             self.service.record_gateway_command_result(gateway_id, message)
             return
 
@@ -444,10 +467,10 @@ def register_gateway_websocket_routes(
     def newhorizons_gateway_ws(ws: Any) -> None:
         token = _token_from_request()
         app_user: AuthUser | None = None
+        manager = auth_manager or app.config.get("NEWHORIZONS_AUTH_MANAGER")
         if token.startswith(APP_TOKEN_PREFIX):
             # An app token is checked whatever else is configured: a wrong
             # or revoked one is refused, never silently downgraded.
-            manager = auth_manager or app.config.get("NEWHORIZONS_AUTH_MANAGER")
             app_user = manager.authenticate_app_token(token) if manager is not None else None
             if app_user is None:
                 ws.send(json.dumps({"type": "error", "code": "unauthorized", "message": "unauthorized"}, separators=(",", ":")))
@@ -457,9 +480,21 @@ def register_gateway_websocket_routes(
             if expected_token and token != expected_token:
                 ws.send(json.dumps({"type": "error", "code": "unauthorized", "message": "unauthorized"}, separators=(",", ":")))
                 return
-        GatewaySocketSession(service, ws, app_user=app_user).handle()
+        # A revoked token ends this socket too (AuthManager.revoke_app_token).
+        untrack = manager.track_app_session(app_user.app_id, lambda: _close_quietly(ws)) if app_user is not None and manager is not None else (lambda: None)
+        try:
+            GatewaySocketSession(service, ws, app_user=app_user).handle()
+        finally:
+            untrack()
 
     return sock
+
+
+def _close_quietly(ws: Any) -> None:
+    try:
+        ws.close()
+    except Exception:
+        pass
 
 
 def _normalize_url_prefix(value: str) -> str:
