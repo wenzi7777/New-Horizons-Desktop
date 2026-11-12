@@ -228,6 +228,7 @@ class NewHorizonsService(
                         udp_port=lambda: self._udp_ingest.bound_port if self._udp_ingest else self._udp_port,
                         priority=self._discovery_priority,
                         policy=lambda: self._findme_policy,
+                        served_devices=self._direct_device_count,
                     )
                     self._discovery.start()
                 self._transport_error = ""
@@ -358,6 +359,15 @@ class NewHorizonsService(
             return self._ws_stats_provider()
         except Exception as exc:
             return {"error": str(exc)}
+
+    def _direct_device_count(self) -> int:
+        """Devices streaming to this server directly (no relay): its FindMe offer's load."""
+        with self._lock:
+            return sum(
+                1
+                for entry in self._devices.values()
+                if entry.get("gateway_connected") is True and str(entry.get("gateway_id") or "") == self._gateway_id
+            )
 
     def list_devices(self) -> list[dict[str, Any]]:
         with self._lock:

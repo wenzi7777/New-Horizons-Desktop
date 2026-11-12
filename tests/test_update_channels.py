@@ -101,10 +101,9 @@ class HubLatestVersionTest(unittest.TestCase):
         self.assertNotIn("latest_gateway_version", ack)
         self.assertTrue(any(url.endswith("/releases/hub-gcu-v23d-lts-beta.json") for url in seen), seen)
 
-    def test_gateway_hello_ack_does_not_carry_a_hub_version(self):
-        replies, _ = self.session_replies([{"type": "hello", "gateway_id": "gw-1"}])
+    def test_relay_hello_ack_carries_no_hub_version(self):
+        replies, _ = self.session_replies([{"type": "hello", "gateway_id": "gw-1", "client_type": "relay"}])
         ack = [r for r in replies if r.get("type") == "gateway_hello_ack" and r.get("gateway_id")][0]
-        self.assertEqual(ack.get("latest_gateway_version"), "v0.6.0")
         self.assertNotIn("latest_hub_version", ack)
 
     def test_hub_version_check_answers_with_the_latest_stable(self):

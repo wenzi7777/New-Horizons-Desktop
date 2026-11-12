@@ -31,6 +31,8 @@ from typing import Any, Callable
 
 FINDME_DISCOVER_TYPE = "findme_discover"
 FINDME_OFFER_TYPE = "findme_offer"
+# FindMe offer format; 2 adds served_devices. Same as @nhgw/core OFFER_VERSION.
+OFFER_VERSION = 2
 OFFER_POLICIES = ("all", "managed")
 DENIED_COOLDOWN_MS = 30000
 _UID_PATTERN = re.compile(r"^[0-9A-F]{4,32}$")
@@ -137,8 +139,10 @@ class DiscoveryResponder:
         priority: int = 100,
         gateway_name: str = "NH Gateway",
         policy: Callable[[], FindmePolicy] | None = None,
+        served_devices: Callable[[], int] | None = None,
     ) -> None:
         self._policy = policy or FindmePolicy
+        self._served_devices = served_devices or (lambda: 0)
         self.host = host
         self.port = int(port)
         self.gateway_id = gateway_id
@@ -245,8 +249,14 @@ class DiscoveryResponder:
         return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
     def _offer_payload(self, request: dict[str, object]) -> dict[str, object]:
+        # Version 2 adds served_devices (the load a device weighs offers by);
+        # current firmware ignores offers below 2 (the retired Python Gateway's).
+        try:
+            served = max(0, int(self._served_devices()))
+        except Exception:
+            served = 0
         return {
-            "version": 1,
+            "version": OFFER_VERSION,
             "gateway_name": self.gateway_name,
             "gateway_id": self.gateway_id,
             "udp_port": self._value(self._udp_port),
@@ -255,6 +265,7 @@ class DiscoveryResponder:
             "upstream_status": "online",
             "ttl_ms": 10000,
             "server_time": int(time.time() * 1000),
+            "served_devices": served,
         }
 
     @staticmethod

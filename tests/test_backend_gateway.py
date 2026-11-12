@@ -1000,7 +1000,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
     def test_gateway_ws_accepts_json_status_and_registers_device(self):
         service = NewHorizonsService(mock_mode=False)
         ws = FakeGatewayWebSocket([
-            json_text({"type": "hello", "gateway_id": "gw-main", "gateway_name": "Bench Gateway"}),
+            json_text({"type": "hello", "gateway_id": "gw-main", "gateway_name": "Bench Gateway", "client_type": "relay"}),
             json_text({
                 "type": "device_status",
                 "gateway_id": "gw-main",
@@ -1036,12 +1036,12 @@ class IndependentNewHorizonsTest(unittest.TestCase):
 
         hello_ack = json.loads(ws.sent[1])
         self.assertEqual(hello_ack["type"], "gateway_hello_ack")
-        self.assertEqual(hello_ack.get("latest_gateway_version"), "v0.4.0")
+        self.assertEqual(hello_ack.get("client_type"), "relay")
 
     def test_gateway_ws_accepts_json_bytes_status_and_registers_device(self):
         service = NewHorizonsService(mock_mode=False)
         ws = FakeGatewayWebSocket([
-            json_text({"type": "hello", "gateway_id": "gw-main", "gateway_name": "Bench Gateway"}).encode(),
+            json_text({"type": "hello", "gateway_id": "gw-main", "gateway_name": "Bench Gateway", "client_type": "relay"}).encode(),
             json_text({
                 "type": "device_status",
                 "gateway_id": "gw-main",
@@ -1817,20 +1817,22 @@ class IndependentNewHorizonsTest(unittest.TestCase):
                 self.assertEqual(gateway["gateway_name"], "NH Hub")
                 self.assertEqual(gateway["version"], "v0.1.0")
 
-    def test_gateway_hello_without_client_type_defaults_to_gateway(self):
-        # A real Gateway's hello (upstream_wss.py) never sends client_type
-        # -- must default to "gateway" for backward compatibility.
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
-                service = NewHorizonsService(mock_mode=False)
-                ws = FakeGatewayWebSocket([
-                    json_text({"type": "hello", "gateway_id": "gw-a", "version": "v1.2.3"}),
-                ])
-                GatewaySocketSession(service, ws).handle()
-
-                gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "gw-a")
-                self.assertEqual(gateway["client_type"], "gateway")
-                self.assertEqual(gateway["gateway_name"], "NH Gateway")
+    def test_legacy_gateway_hello_is_refused_and_the_socket_closed(self):
+        # The Python NH Gateway (its hello has no client_type, or "gateway")
+        # is retired: refused with legacy_gateway_unsupported, never listed.
+        for hello in (
+            {"type": "hello", "gateway_id": "gw-a", "version": "v1.2.3"},
+            {"type": "hello", "gateway_id": "gw-b", "client_type": "gateway"},
+            {"type": "hello", "gateway_id": "gw-c", "client_type": "toaster"},
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
+                    service = NewHorizonsService(mock_mode=False)
+                    ws = FakeGatewayWebSocket([json_text(hello), json_text({"type": "gateway_status", "payload": {}})])
+                    GatewaySocketSession(service, ws).handle()
+                    errors = [json.loads(m) for m in ws.sent if json.loads(m).get("type") == "error"]
+                    self.assertEqual([e["code"] for e in errors], ["legacy_gateway_unsupported"])
+                    self.assertEqual([g for g in service.gateway_snapshot() if g["gateway_id"] == hello["gateway_id"]], [])
 
     def test_hub_mac_reported_via_gateway_status_is_visible_on_gateway(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1863,12 +1865,12 @@ class IndependentNewHorizonsTest(unittest.TestCase):
                 device = service.get_device("3CDC75413DC0")
                 self.assertEqual(device.get("client_type"), "hub")
 
-    def test_device_relayed_via_real_gateway_is_stamped_with_client_type_gateway(self):
+    def test_device_relayed_via_headless_relay_is_stamped_with_client_type_relay(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"NEWHORIZONS_DATA_ROOT": tmpdir}, clear=False):
                 service = NewHorizonsService(mock_mode=False)
                 session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
-                session._handle_json(json_text({"type": "hello", "gateway_id": "gw-a"}))
+                session._handle_json(json_text({"type": "hello", "gateway_id": "gw-a", "client_type": "relay"}))
                 session._handle_json(json_text({
                     "type": "device_hello",
                     "gateway_id": "gw-a",
@@ -1877,7 +1879,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
                 }))
 
                 device = service.get_device("3CDC75413DC1")
-                self.assertEqual(device.get("client_type"), "gateway")
+                self.assertEqual(device.get("client_type"), "relay")
 
     def test_gateway_status_channel_reported_and_visible_on_gateway(self):
         # A Hub reports its channel on the gateway_status heartbeat.
@@ -1889,7 +1891,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
                 # the just-reported channel again (see
                 # unregister_gateway_sender()), defeating this test.
                 session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
-                session._handle_json(json_text({"type": "hello", "gateway_id": "hub-a"}))
+                session._handle_json(json_text({"type": "hello", "gateway_id": "hub-a", "client_type": "hub"}))
                 session._handle_json(json_text({"type": "gateway_status", "gateway_id": "hub-a", "payload": {"channel": 9, "paired_device_count": 0}}))
 
                 gateway = next(g for g in service.gateway_snapshot() if g["gateway_id"] == "hub-a")
@@ -2086,7 +2088,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         session._handle_json(json_text({
             "type": "hello",
             "gateway_id": "LabGateway",
-            "client_type": "gateway",
+            "client_type": "relay",
             "capabilities": ["gateway_command", "auto_update"],
         }))
 
@@ -2114,8 +2116,8 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         service = NewHorizonsService(mock_mode=False)
         ws = FakeGatewayWebSocket([])
         session = GatewaySocketSession(service, ws)
-        # A pre-v1.0.0 Gateway: no client_type, no capabilities.
-        session._handle_json(json_text({"type": "hello", "gateway_id": "OldGateway"}))
+        # A relay without the gateway_command capability.
+        session._handle_json(json_text({"type": "hello", "gateway_id": "OldGateway", "client_type": "relay"}))
 
         with self.assertRaisesRegex(ValueError, "unsupported_by_relay"):
             service.publish_gateway_command("OldGateway", {"command": "check_update"})
@@ -2136,7 +2138,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         session._handle_json(json_text({
             "type": "hello",
             "gateway_id": "LabGateway",
-            "client_type": "gateway",
+            "client_type": "relay",
             "capabilities": ["gateway_command"],
         }))
         session._handle_json(json_text({"type": "gateway_status", "gateway_id": "LabGateway", "payload": {"version": "1.0.0"}}))
@@ -2150,7 +2152,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         session._handle_json(json_text({
             "type": "hello",
             "gateway_id": "LabGateway",
-            "client_type": "gateway",
+            "client_type": "relay",
             "capabilities": ["gateway_command", "auto_update"],
             "update_channel": "beta",
         }))
@@ -2193,7 +2195,7 @@ class IndependentNewHorizonsTest(unittest.TestCase):
     def test_gateway_summary_tracks_remote_management(self):
         service = NewHorizonsService(mock_mode=False)
         session = GatewaySocketSession(service, FakeGatewayWebSocket([]))
-        session._handle_json(json_text({"type": "hello", "gateway_id": "LabGateway", "client_type": "gateway", "capabilities": ["gateway_command"]}))
+        session._handle_json(json_text({"type": "hello", "gateway_id": "LabGateway", "client_type": "relay", "capabilities": ["gateway_command"]}))
 
         def entry():
             return next(item for item in service.gateway_snapshot() if item["gateway_id"] == "LabGateway")

@@ -169,6 +169,9 @@ class GatewaySocketSession:
         self.app_user = app_user
         self.sender = self.send_command
         self._send_lock = threading.RLock()
+        # Set when this socket is refused for good (a legacy Python Gateway):
+        # the receive loop closes it after the error went out.
+        self._refused = False
 
     def send_command(self, payload: dict[str, Any]) -> None:
         self._send_json(payload)
@@ -200,6 +203,9 @@ class GatewaySocketSession:
                         self.service.record_gateway_packet(packet)
                         continue
                 self._handle_json(raw)
+                if self._refused:
+                    _close_quietly(self.ws)
+                    break
         finally:
             self.service.unregister_gateway_sender(self.sender)
 
@@ -376,6 +382,20 @@ class GatewaySocketSession:
         tokens for apps (NEWHORIZONS_REQUIRE_APP_TOKEN=1). "relay" (NH
         Studio headless) and "hub" never need one: they only relay."""
         hello = dict(message)
+        raw_type = str(hello.get("client_type") or "").strip().lower()
+        if self.app_user is None and raw_type not in ("hub", "studio", "pocket", "relay"):
+            # The Python NH Gateway (no client_type, or "gateway") is retired:
+            # NH Studio / headless replaced it, and current firmware ignores
+            # its FindMe offers. Refuse it for good rather than relay for it.
+            self._send_json(
+                {
+                    "type": "error",
+                    "code": "legacy_gateway_unsupported",
+                    "message": "NH Gateway is no longer supported. Install NH Studio (or NH Studio headless) instead.",
+                }
+            )
+            self._refused = True
+            return None
         claimed = normalize_relay_client_type(hello.get("client_type"))
         if self.app_user is not None:
             hello["client_type"] = self.app_user.client_type

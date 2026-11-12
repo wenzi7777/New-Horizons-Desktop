@@ -203,21 +203,21 @@ class RelayClientTypeTest(_Env):
             self.assertEqual(result["status"], "queued")
             self.assertEqual(sent[0]["type"], "gateway_command")
 
-    def test_old_gateway_and_hub_keep_working_and_gateway_is_legacy(self):
+    def test_legacy_gateway_is_refused_hub_and_headless_keep_working(self):
         session, ws = self.session()
         self.hello(session, gateway_id="nh-gateway-abc")
-        entry = self.relay("nh-gateway-abc")
-        self.assertEqual(entry["client_type"], "gateway")
-        self.assertEqual(entry["gateway_name"], "NH Gateway")
-        self.assertTrue(entry["legacy"])
-        self.assertEqual(ws.sent[-1]["latest_gateway_version"], "v9.9.9")
+        self.assertEqual(ws.sent[-1]["code"], "legacy_gateway_unsupported")
+        self.assertEqual([i for i in self.service.gateway_snapshot() if i["gateway_id"] == "nh-gateway-abc"], [])
         session, ws = self.session()
         self.hello(session, gateway_id="hub-1", client_type="hub")
         self.assertEqual(self.relay("hub-1")["client_type"], "hub")
         self.assertEqual(ws.sent[-1]["latest_hub_version"], "v0.9.9")
         session, _ = self.session()
+        self.hello(session, gateway_id="nh-studio-rpi", client_type="relay")
+        self.assertEqual(self.relay("nh-studio-rpi")["client_type"], "relay")
+        session, ws = self.session()
         self.hello(session, gateway_id="odd-1", client_type="toaster")
-        self.assertEqual(self.relay("odd-1")["client_type"], "gateway")
+        self.assertEqual(ws.sent[-1]["code"], "legacy_gateway_unsupported")
 
     def test_app_token_sets_identity_and_default_gateway_id(self):
         _, item = self.app_token("pocket")
@@ -242,8 +242,8 @@ class RelayClientTypeTest(_Env):
             self.assertEqual(ws.sent[-1]["code"], "app_token_required")
             self.assertEqual([i for i in self.service.gateway_snapshot() if i["gateway_id"] == "nh-studio-x"], [])
             session, _ = self.session()
-            self.hello(session, gateway_id="nh-gateway-y")
-            self.assertEqual(self.relay("nh-gateway-y")["client_type"], "gateway")
+            self.hello(session, gateway_id="nh-relay-y", client_type="relay")
+            self.assertEqual(self.relay("nh-relay-y")["client_type"], "relay")
 
     def test_studio_relay_takes_gateway_commands_when_capable(self):
         session, _ = self.session()
