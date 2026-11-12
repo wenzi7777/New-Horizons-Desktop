@@ -165,7 +165,7 @@ class FirmwareFindMeStaticTest(unittest.TestCase):
         self.assertIn("findme_discover", source)
         self.assertIn("extractJsonString", source)
         self.assertIn("extractJsonBool", source)
-        self.assertIn("String encodeDiscoverJson() const;", header)
+        self.assertIn("String encodeDiscoverJson(bool withCurrentGateway) const;", header)
 
     def test_findme_discovery_uses_limited_directed_and_known_gateway_targets(self):
         source = FINDME_CPP.read_text()
