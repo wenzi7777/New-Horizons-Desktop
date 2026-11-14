@@ -15,6 +15,7 @@ hand-edited, stale, or served by something other than the library.
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import os
 import re
@@ -261,9 +262,21 @@ def validate_package(doc: Any) -> dict[str, Any]:
         }
 
     _require("readout" not in doc and "panel" not in doc, "flow_must_not_declare_a_readout")
-    nodes = doc.get("nodes")
-    _require(isinstance(nodes, list), "missing_nodes")
-    _require(len(nodes) > 0, "empty_graph")
+    # Since Library 3.0.0 a flow package is its NHVM/1 image ("vm", base64)
+    # alone; 2.0.0 packages carry the graph ("nodes") beside it. The device
+    # verifies the image itself; here it only has to be there and decode.
+    vm = doc.get("vm")
+    nodes = doc.get("nodes", [])
+    _require(isinstance(nodes, list), "invalid_node")
+    if vm is None:
+        _require(len(nodes) > 0, "missing_vm")
+    else:
+        _require(isinstance(vm, str) and len(vm) > 0, "invalid_vm")
+        try:
+            image = base64.b64decode(vm, validate=True)
+        except (ValueError, TypeError):
+            raise AppPackageError("invalid_vm")
+        _require(image[:2] == b"NV", "invalid_vm")
     _require(len(nodes) <= MAX_RULE_NODES, "too_many_nodes")
 
     for index, node in enumerate(nodes):
@@ -402,7 +415,7 @@ class AppLibrary:
         """The source an app's package was built from, for the SDK page to open.
 
         The catalog has no URL for it, so it is found where the library keeps
-        it: `apps/<id>/app.nhs` (or `readout.json` / `panel.json`) under the same base as the
+        it: `apps/<id>/app.ts` (or `readout.json` / `panel.json`) under the same base as the
         package. There is no checksum for source; the SDK page recompiles it
         and compares the result against the package's sha256 instead, which is
         a stronger check than a second hash would be.
@@ -410,7 +423,7 @@ class AppLibrary:
         _require(bool(APP_ID_RE.match(app_id)), "invalid_id")
         entry = self.entry(app_id)
         kind = entry.get("kind") if entry.get("kind") in ("readout", "panel") else "flow"
-        filename = {"readout": "readout.json", "panel": "panel.json"}.get(kind, "app.nhs")
+        filename = {"readout": "readout.json", "panel": "panel.json"}.get(kind, "app.ts")
         package_url = str((entry.get("package") or {}).get("url") or "")
         if "/dist/" not in package_url:
             raise AppLibraryError("source_unavailable")

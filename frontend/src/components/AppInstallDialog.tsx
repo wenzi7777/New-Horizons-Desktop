@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Check, Circle, Loader2, X } from "lucide-react";
 
+import { CapabilityConsent } from "./CapabilityConsent";
 import { DevicePickCard } from "./DevicePickCard";
 import { PanelPermissionList } from "./PanelView";
 import { useI18n } from "../i18n";
 import { api, type DeviceEntry } from "../lib/api";
+import { dangerousCapabilities, unsupportedCapabilities } from "../lib/appGrant";
 import { compareVersionCores, useLocalised, type AppCatalogEntry, type AppPackage } from "../lib/appLibrary";
 import { normalizeDevice, type NormalizedDevice } from "../lib/device";
 import { appErrorKey } from "../lib/deviceApps";
@@ -63,6 +65,8 @@ export function AppInstallDialog({
   const [skipMaintenance, setSkipMaintenance] = useState(false);
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [error, setError] = useState("");
+  const [agreed, setAgreed] = useState(false);
+  const dangerous = useMemo(() => dangerousCapabilities(app.capabilities), [app.capabilities]);
   const abortRef = useRef({ current: false });
   const { queue } = useDeviceCommand(selectedUid);
 
@@ -73,10 +77,11 @@ export function AppInstallDialog({
       let blocker = "";
       if (device.isControlUnavailable) blocker = "appInstallBlockedOffline";
       else if (!device.firmwareVersion || compareVersionCores(device.firmwareVersion, minFirmware) < 0) blocker = "appInstallBlockedFirmware";
+      else if (unsupportedCapabilities(app.capabilities, device.hardwareModel).length) blocker = "appInstallBlockedBoard";
       return { entry, device, blocker };
     });
     return list.sort((a, b) => Number(Boolean(a.blocker)) - Number(Boolean(b.blocker)) || a.device.displayName.localeCompare(b.device.displayName));
-  }, [devices, minFirmware]);
+  }, [devices, minFirmware, app.capabilities]);
   const usable = candidates.filter((item) => !item.blocker);
   const shown = showAll ? candidates : usable;
   const selected = candidates.find((item) => item.entry.device_uid === selectedUid) ?? null;
@@ -122,6 +127,7 @@ export function AppInstallDialog({
         // See DeviceAppsPage: the upload has already replaced the file by the
         // time app_install runs, so the index must follow it.
         replace: true,
+        grant: dangerous,
         onPhase: (phase) => {
           if (phase === "upload" || phase === "install") setStep(phase);
         },
@@ -231,9 +237,10 @@ export function AppInstallDialog({
             </p>
             {/* A panel can act on the device: say what it may do before it is installed. */}
             <PanelPermissionList permissions={app.permissions ?? []} />
+            <CapabilityConsent capabilities={dangerous} agreed={agreed} onAgree={setAgreed} />
             <div className="actions compact app-install-dialog-actions">
               <button className="button" type="button" onClick={() => setStage("pick")}>{t("appInstallBack")}</button>
-              <button className="button primary" type="button" onClick={() => void install()}>{t("appInstallStart")}</button>
+              <button className="button primary" type="button" disabled={dangerous.length > 0 && !agreed} onClick={() => void install()}>{t("appInstallStart")}</button>
             </div>
           </>
         ) : null}

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { cssColorForValue, type PressureRange } from "../../lib/pressureColor";
-import type { Frame, Region } from "../../sdk/lib/index.mjs";
+import type { Frame } from "../../sdk/lib/index.mjs";
+import type { HeatmapRegion } from "../../lib/sdkEmulator";
 
 type Props = {
   frame: Frame | null;
@@ -9,7 +10,7 @@ type Props = {
   cols: number;
   range: PressureRange;
   /** The app's regions, drawn in device coordinates -- row 0 at the top. */
-  regions: Record<string, Region>;
+  regions: Record<string, HeatmapRegion>;
   ariaLabel: string;
   /**
    * Makes the matrix pressable: called with the cell under a held pointer as

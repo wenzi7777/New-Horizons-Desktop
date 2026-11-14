@@ -104,6 +104,26 @@ class PackageValidationTests(unittest.TestCase):
         self.assertEqual(summary["id"], "demo")
         self.assertEqual(summary["device_path"], "apps/demo.nha")
 
+    def test_a_3_0_0_package_is_its_image_alone(self):
+        # Library 3.0.0 (firmware v2.1.0): no graph, only the NHVM/1 image.
+        doc = json.loads(json.dumps(GOOD_PACKAGE))
+        del doc["nodes"]
+        doc["vm"] = "TlYBAAAAAAA="  # "NV\x01\x00..."; the device verifies the rest
+        doc["manifest"]["capabilities"] = ["read_matrix", "storage", "io_i2c"]
+        self.assertEqual(validate_package(doc)["nodes"], 0)
+
+    def test_a_flow_without_image_or_graph_is_refused(self):
+        doc = json.loads(json.dumps(GOOD_PACKAGE))
+        del doc["nodes"]
+        self.assertRejects(doc, "missing_vm")
+
+    def test_an_image_that_is_not_one_is_refused(self):
+        doc = json.loads(json.dumps(GOOD_PACKAGE))
+        doc["vm"] = "not base64!"
+        self.assertRejects(doc, "invalid_vm")
+        doc["vm"] = "aGVsbG8="  # "hello"
+        self.assertRejects(doc, "invalid_vm")
+
     def test_ids_are_capped_at_the_spiffs_path_limit(self):
         doc = json.loads(json.dumps(GOOD_PACKAGE))
         doc["manifest"]["id"] = "a" * 16
@@ -311,7 +331,7 @@ class SourceTests(LibraryTestCase):
             urlopen.side_effect = [FakeResponse(json.dumps(index).encode()), FakeResponse(b"app demo {}\n")]
             source = self.lib.fetch_source("demo")
         self.assertEqual(urlopen.call_args_list[1].args[0],
-                         "https://raw.githubusercontent.com/x/y/main/apps/demo/app.nhs")
+                         "https://raw.githubusercontent.com/x/y/main/apps/demo/app.ts")
         self.assertEqual(source["kind"], "flow")
         self.assertEqual(source["source"], "app demo {}\n")
         # The page recompiles the source and checks it against this.

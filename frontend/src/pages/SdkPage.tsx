@@ -66,7 +66,7 @@ function templateFor(kind: SdkKind): (appId: string, author: string) => string {
   return kind === "flow" ? flowTemplate : kind === "panel" ? panelTemplate : readoutTemplate;
 }
 
-const KIND_LABEL: Record<SdkKind, string> = { flow: ".nhs", readout: "readout", panel: "panel" };
+const KIND_LABEL: Record<SdkKind, string> = { flow: "app.ts", readout: "readout", panel: "panel" };
 
 function LibraryPicker({ onOpen, onClose }: { onOpen: (entry: AppCatalogEntry) => Promise<void>; onClose: () => void }) {
   const { t } = useI18n();
@@ -319,7 +319,7 @@ export function SdkPage() {
           <input
             ref={fileInput}
             type="file"
-            accept=".nhs,.json"
+            accept=".ts,.json"
             hidden
             onChange={(event) => {
               const file = event.target.files?.[0];
@@ -372,7 +372,7 @@ export function SdkPage() {
             ref={editorRef}
             docKey={active.id}
             value={active.source}
-            language={active.kind === "flow" ? "nhs" : "json"}
+            language={active.kind === "flow" ? "ts" : "json"}
             diagnostics={pending.id === active.id && pending.source === active.source ? analysis.diagnostics : []}
             symbols={lastGoodReport.current}
             markedLines={tab === "emulator" ? markedLines : undefined}
@@ -402,6 +402,7 @@ export function SdkPage() {
             <EmulatorPanel
               key={active.id}
               analysis={analysis}
+              source={active.source}
               target={target}
               targets={targets}
               devices={normalized}

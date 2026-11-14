@@ -14,5 +14,8 @@
     "strict": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // app.ts examples and their API declare device globals (on, event, led...)
+  // that would leak into the page; they are checked in the App Library.
+  "exclude": ["src/sdk/examples", "src/sdk/types"]
 }

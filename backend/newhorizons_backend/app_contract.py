@@ -17,8 +17,14 @@ KNOWN_OPS = {
 
 # Capabilities a package may declare.
 CAPABILITIES = {
-    "button", "display", "drive_ext_led", "drive_led", "emit_event", "link", "persist",
-    "power", "read_imu", "read_mag", "read_matrix", "tick", "write_file",
+    "app_ipc", "button", "device_config", "device_stream", "display", "drive_ext_led",
+    "drive_led", "emit_event", "io_i2c", "io_uart", "link", "persist", "power",
+    "read_imu", "read_mag", "read_matrix", "storage", "tick", "write_file",
+}
+
+# Capabilities the operator must agree to before install (sent as `grant`).
+DANGEROUS_CAPABILITIES = {
+    "device_config", "device_stream", "io_i2c", "io_uart", "storage",
 }
 
 MAX_NODES = 24

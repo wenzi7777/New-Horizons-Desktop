@@ -31,7 +31,7 @@ if [[ ! -f "${SOURCE}/lib/index.mjs" ]]; then
   exit 1
 fi
 for app in "${EXAMPLE_FLOWS[@]}"; do
-  [[ -f "${LIBRARY}/apps/${app}/app.nhs" ]] || { echo "No example app ${LIBRARY}/apps/${app}/app.nhs" >&2; exit 1; }
+  [[ -f "${LIBRARY}/apps/${app}/app.ts" ]] || { echo "No example app ${LIBRARY}/apps/${app}/app.ts" >&2; exit 1; }
 done
 for app in "${EXAMPLE_READOUTS[@]}"; do
   [[ -f "${LIBRARY}/apps/${app}/readout.json" ]] || { echo "No example readout ${LIBRARY}/apps/${app}/readout.json" >&2; exit 1; }
@@ -47,10 +47,14 @@ cp "${SOURCE}"/lib/*.mjs "${TARGET}/lib/"
 # allowJs, and the implementation stays plain JavaScript.
 cp "${SOURCE}/index.d.ts" "${TARGET}/lib/index.d.mts"
 cp "${SOURCE}/package.json" "${TARGET}/package.json"
+# The app API's declarations: App Studio's Reference and editor read them, and
+# the AI prompt quotes them.
+mkdir -p "${TARGET}/types"
+cp "${SOURCE}/types/nhos.d.ts" "${TARGET}/types/nhos.d.ts"
 mkdir -p "${TARGET}/docs" "${TARGET}/examples"
 cp "${LIBRARY}/docs/authoring.md" "${TARGET}/docs/authoring.md"
 for app in "${EXAMPLE_FLOWS[@]}"; do
-  cp "${LIBRARY}/apps/${app}/app.nhs" "${TARGET}/examples/${app}.nhs"
+  cp "${LIBRARY}/apps/${app}/app.ts" "${TARGET}/examples/${app}.ts"
 done
 for app in "${EXAMPLE_READOUTS[@]}"; do
   cp "${LIBRARY}/apps/${app}/readout.json" "${TARGET}/examples/${app}.readout.json"
@@ -66,7 +70,7 @@ if [[ -n "$(git -C "${LIBRARY}" status --porcelain -- sdk docs apps 2>/dev/null)
 fi
 cat > "${TARGET}/SOURCE" <<EOF
 Vendored from NHOS-App-Library at ${commit}${dirty}: lib/ from sdk/,
-docs/ from docs/, examples/ from apps/.
+types/ from sdk/types/, docs/ from docs/, examples/ from apps/.
 Do not edit these files here: change the library, then run scripts/sync_app_sdk.sh.
 EOF
 

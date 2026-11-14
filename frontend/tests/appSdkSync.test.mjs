@@ -31,6 +31,11 @@ test("the vendored SDK matches the App Library", { skip }, () => {
     readFileSync(join(LIBRARY_SDK, "index.d.ts"), "utf8"),
     "index.d.ts differs; run scripts/sync_app_sdk.sh",
   );
+  assert.equal(
+    readFileSync(join(VENDORED, "types", "nhos.d.ts"), "utf8"),
+    readFileSync(join(LIBRARY_SDK, "types", "nhos.d.ts"), "utf8"),
+    "types/nhos.d.ts differs; run scripts/sync_app_sdk.sh",
+  );
 });
 
 test("the vendored authoring guide and example apps match the App Library", { skip }, () => {
@@ -41,13 +46,13 @@ test("the vendored authoring guide and example apps match the App Library", { sk
   for (const name of readdirSync(join(VENDORED, "examples")).sort()) {
     const readout = name.match(/^(.+)\.readout\.json$/);
     const panel = name.match(/^(.+)\.panel\.json$/);
-    const flow = name.match(/^(.+)\.nhs$/);
+    const flow = name.match(/^(.+)\.ts$/);
     assert.ok(readout || panel || flow, `unexpected example ${name}`);
     const original = readout
       ? join(library, "apps", readout[1], "readout.json")
       : panel
         ? join(library, "apps", panel[1], "panel.json")
-        : join(library, "apps", flow[1], "app.nhs");
+        : join(library, "apps", flow[1], "app.ts");
     copies.push([`examples/${name}`, original]);
   }
   assert.ok(copies.length > 1, "no examples; run scripts/sync_app_sdk.sh");
@@ -62,7 +67,7 @@ test("the vendored SDK compiles every library app to its published bytes", { ski
   const sdk = await import(join(VENDORED, "lib", "index.mjs"));
   const apps = join(LIBRARY_SDK, "..", "apps");
   for (const id of readdirSync(apps)) {
-    const source = join(apps, id, "app.nhs");
+    const source = join(apps, id, "app.ts");
     if (!existsSync(source)) continue;
     const analysis = sdk.analyzeFlow(readFileSync(source, "utf8"));
     assert.ok(analysis.ok, `${id}: ${JSON.stringify(analysis.diagnostics)}`);

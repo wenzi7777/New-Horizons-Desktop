@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Download, FileText, Gauge, PanelRight, RefreshCw, ScrollText, Trash2, Upload, UserRound, type LucideIcon } from "lucide-react";
+import { Database, Download, FileText, Gauge, PanelRight, RefreshCw, ScrollText, Trash2, Upload, UserRound, type LucideIcon } from "lucide-react";
 
 import { useI18n } from "../i18n";
 import { type DeviceFileEntry } from "../lib/api";
@@ -20,10 +20,11 @@ import {
 import { storageSnapshotFromResult } from "../lib/storageStatus";
 import { ConfirmModal } from "../components/ConfirmModal";
 
-const SCOPES = ["user", "logs", "calibration"] as const;
+// appdata: the CSV files apps write with store.append, /a/<app id>/<file>.csv.
+const SCOPES = ["user", "appdata", "logs", "calibration"] as const;
 type FileScope = typeof SCOPES[number];
 
-const SCOPE_ICONS: Record<FileScope, LucideIcon> = { user: UserRound, logs: ScrollText, calibration: Gauge };
+const SCOPE_ICONS: Record<FileScope, LucideIcon> = { user: UserRound, appdata: Database, logs: ScrollText, calibration: Gauge };
 
 // How much a preview reads: the end of a log, the start of anything else.
 const LOG_PREVIEW_BYTES = 32768;
@@ -116,6 +117,7 @@ export function DeviceFilesPage() {
   const [activeScope, setActiveScope] = useState<FileScope>("logs");
   const [itemsByScope, setItemsByScope] = useState<Record<FileScope, DeviceFileEntry[]>>({
     user: [],
+    appdata: [],
     logs: [],
     calibration: [],
   });

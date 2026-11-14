@@ -1,7 +1,7 @@
 {
   "name": "@nhos/app-sdk",
-  "version": "1.0.0",
-  "description": "Compiler, validator and simulator for New Horizons OS apps. Zero dependencies; runs in Node and in the browser.",
+  "version": "3.0.0",
+  "description": "Compiler (app.ts to NHVM/1), validator and simulator for New Horizons OS apps. Zero dependencies; runs in Node and in the browser.",
   "type": "module",
   "license": "MPL-2.0",
   "main": "./lib/index.mjs",

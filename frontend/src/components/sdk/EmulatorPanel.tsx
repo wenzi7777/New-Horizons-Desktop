@@ -16,6 +16,7 @@ import {
   isSidecar,
   linesForEvents,
   peakOf,
+  regionsOf,
   sidecarPathFor,
   simulateAll,
 } from "../../lib/sdkEmulator";
@@ -26,6 +27,7 @@ import {
   boardById,
   clampShape,
   downloadFile,
+  emittedEvents,
   type BoardSpec,
   type MatrixTarget,
   type SynthPattern,
@@ -42,6 +44,7 @@ import {
   parseEventsCsv,
   parseSamplesCsv,
   type Analysis,
+  type AppSymbol,
   type Frame,
   type NodeValue,
   type OledRow,
@@ -54,6 +57,8 @@ import { Select } from "../Select";
 
 type Props = {
   analysis: Analysis;
+  /** The app's source, for the lines to mark and the regions to outline. */
+  source: string;
   /** The device the app runs on here, and the Build tab judges it against. */
   target: MatrixTarget;
   /** Real devices with a known matrix, to pick from. */
@@ -62,18 +67,16 @@ type Props = {
   virtual: VirtualDevice;
   onVirtualChange: (device: VirtualDevice) => void;
   onSelectTarget: (key: string) => void;
-  /** Source lines whose statements emitted on the frame being shown. */
+  /** Source lines whose emit()/event() calls fired on the frame being shown. */
   onMarkLines: (lines: Set<number>) => void;
 };
 
 /** What each way of running an app needs from the panel. */
-type RunProps = Pick<Props, "analysis" | "target" | "devices" | "onMarkLines">;
+type RunProps = Pick<Props, "analysis" | "source" | "target" | "devices" | "onMarkLines">;
 
 type DeviceSource = "live" | "recording";
 const SPEEDS = [0.25, 1, 4, 16] as const;
 const MAX_EVENTS_SHOWN = 200;
-/** Nodes with an effect but no value of their own. */
-const OUTPUT_OPS = new Set(["emit", "emit_value", "led"]);
 
 function shapeOf(device: NormalizedDevice | undefined): { rows: number; cols: number } | null {
   const raw = device?.raw as Record<string, any> | undefined;
@@ -100,29 +103,25 @@ function reshape(frames: Frame[], candidates: ({ rows: number; cols: number } | 
   return fit ? frames.map((frame) => ({ ...frame, rows: fit.rows, cols: fit.cols })) : frames;
 }
 
-/** Every node's value, labelled with the signal or event it is, if any. */
-function NodeTrace({ values, labels }: { values: NodeValue[]; labels: Map<number, string> }) {
+/** Every stateful object and top-level `let`, by name, as the app holds it now. */
+function NodeTrace({ values, symbols }: { values: NodeValue[]; symbols: readonly AppSymbol[] }) {
   const { t } = useI18n();
   return (
     <table className="sdk-table sdk-trace">
       <thead>
-        <tr><th>#</th><th>{t("sdkOp")}</th><th>{t("sdkEmuName")}</th><th className="num">{t("sdkEmuValue")}</th></tr>
+        <tr><th>{t("sdkEmuName")}</th><th>{t("sdkOp")}</th><th className="num">{t("sdkEmuValue")}</th></tr>
       </thead>
       <tbody>
-        {values.map((value, index) => (
-          <tr key={index} className={value.skipped ? "skipped" : value.bool ? "on" : undefined}>
-            <td className="sdk-mono">{index}</td>
-            <td className="sdk-mono">{value.op}</td>
-            <td className="sdk-mono">{labels.get(index) ?? ""}</td>
-            <td className="num sdk-mono">
-              {value.skipped
-                ? t("sdkEmuSkipped")
-                : ["threshold", "debounce", "gate", "button"].includes(value.op)
-                  ? (value.bool ? "true" : "false")
-                  : OUTPUT_OPS.has(value.op) ? "" : value.result.toFixed(3)}
-            </td>
-          </tr>
-        ))}
+        {values.map((value, index) => {
+          const boolean = symbols[index]?.type === "boolean";
+          return (
+            <tr key={index} className={boolean && value.result !== 0 ? "on" : undefined}>
+              <td className="sdk-mono">{value.name}</td>
+              <td className="sdk-mono">{symbols[index]?.kind ?? value.op}</td>
+              <td className="num sdk-mono">{boolean ? (value.result !== 0 ? "true" : "false") : value.result.toFixed(3)}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
@@ -234,29 +233,19 @@ function useStablePackage(analysis: Analysis): Record<string, any> | null {
   return useMemo(() => pkg, [key]);
 }
 
-const NO_REGIONS: Record<string, never> = {};
 
 /** How often the live view redraws; every frame is still evaluated. */
 const LIVE_PAINT_MS = 50;
 
-function useLabels(analysis: Analysis) {
-  return useMemo(() => {
-    const labels = new Map<number, string>();
-    const report = analysis.report;
-    if (!report) return labels;
-    for (const [name, index] of Object.entries(report.signals)) labels.set(index, name);
-    for (const [name, index] of Object.entries(report.events)) if (!labels.has(index)) labels.set(index, name);
-    (analysis.package?.nodes ?? []).forEach((node: { op: string; event?: string; row?: number; label?: string }, index: number) => {
-      if (node.event && !labels.has(index)) labels.set(index, `→ ${node.event}`);
-      if (node.row !== undefined && !labels.has(index)) labels.set(index, `▭ ${node.row} "${node.label ?? ""}"`);
-    });
-    return labels;
-  }, [analysis]);
+const NO_SYMBOLS: AppSymbol[] = [];
+
+function useSymbols(analysis: Analysis): readonly AppSymbol[] {
+  return analysis.report?.symbols ?? NO_SYMBOLS;
 }
 
 // --- recordings ---------------------------------------------------------------
 
-function RecordingEmulator({ analysis, target, devices, onMarkLines, deviceUid: fixedUid, onShape }: RunProps & {
+function RecordingEmulator({ analysis, source, target, devices, onMarkLines, deviceUid: fixedUid, onShape }: RunProps & {
   /** Only this device's recordings; otherwise any device's, or a local file. */
   deviceUid?: string;
   /** The loaded recording's shape, for a virtual device to take on. */
@@ -264,7 +253,7 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines, deviceUid: 
 }) {
   const { t } = useI18n();
   const pkg = useStablePackage(analysis);
-  const labels = useLabels(analysis);
+  const symbols = useSymbols(analysis);
   const [browseUid, setBrowseUid] = useState(devices[0]?.uid ?? "");
   const deviceUid = fixedUid ?? browseUid;
   const upload = useRef<HTMLInputElement | null>(null);
@@ -344,8 +333,8 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines, deviceUid: 
     cursor.setBudget(budget.load, budget.grace);
     const frameEvents = cursor.seek(index);
     setShown({ values: cursor.simulator.nodeValues(), frameEvents, led: cursor.simulator.led, oled: cursor.simulator.oledRows(), strip: cursor.simulator.extLeds(stripLength(target.board)) });
-    onMarkLines(pkg && analysis.report ? linesForEvents(pkg, analysis.report.nodeLines, frameEvents) : new Set());
-  }, [cursor, index, budget, pkg, analysis.report, onMarkLines, target.board]);
+    onMarkLines(pkg ? linesForEvents(source, frameEvents) : new Set());
+  }, [cursor, index, budget, pkg, source, onMarkLines, target.board]);
 
   useEffect(() => () => onMarkLines(new Set()), [onMarkLines]);
 
@@ -383,9 +372,9 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines, deviceUid: 
   const comparison = useMemo(() => {
     if (!recorded || !pkg) return null;
     const names = new Set<string>(["degraded"]);
-    for (const node of pkg.nodes as { event?: string }[]) if (node.event) names.add(node.event);
+    for (const name of emittedEvents(source)) names.add(name);
     return compareEvents(allEvents, recorded, { events: names, toleranceFrames: 1 });
-  }, [allEvents, recorded, pkg]);
+  }, [allEvents, recorded, pkg, source]);
 
   const range = useMemo(() => ({ min: 0, max: Math.max(peakOf(frames), 1) || PRESSURE_FULL_SCALE }), [frames]);
   const frame = frames[index] ?? null;
@@ -476,7 +465,7 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines, deviceUid: 
             </div>
           </div>
 
-          <EmulatorHeatmap frame={frame} rows={frame?.rows ?? shape.rows} cols={frame?.cols ?? shape.cols} range={range} regions={analysis.report?.regions ?? NO_REGIONS} ariaLabel={t("sdkEmuHeatmap")} />
+          <EmulatorHeatmap frame={frame} rows={frame?.rows ?? shape.rows} cols={frame?.cols ?? shape.cols} range={range} regions={regionsOf(source, frame?.rows ?? shape.rows, frame?.cols ?? shape.cols)} ariaLabel={t("sdkEmuHeatmap")} />
           {frame && frame.rows * frame.cols !== target.rows * target.cols ? (
             <p className="notice warning">{t("sdkEmuShapeMismatch").replace("{rec}", `${frame.rows} × ${frame.cols}`).replace("{target}", `${target.rows} × ${target.cols}`)}</p>
           ) : null}
@@ -506,7 +495,7 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines, deviceUid: 
 
           <section className="sdk-section">
             <h3>{t("sdkEmuNodes")}</h3>
-            {shown ? <NodeTrace values={shown.values} labels={labels} /> : null}
+            {shown ? <NodeTrace values={shown.values} symbols={symbols} /> : null}
           </section>
 
           {comparison ? (
@@ -542,17 +531,17 @@ function RecordingEmulator({ analysis, target, devices, onMarkLines, deviceUid: 
 
 // --- live ---------------------------------------------------------------------
 
-function LiveEmulator({ analysis, target, devices, onMarkLines, deviceUid }: RunProps & { deviceUid: string }) {
+function LiveEmulator({ analysis, source, target, devices, onMarkLines, deviceUid }: RunProps & { deviceUid: string }) {
   const { t } = useI18n();
   const pkg = useStablePackage(analysis);
   // Read by the stream listener, which is subscribed once per start/stop.
   const pkgRef = useRef(pkg);
   pkgRef.current = pkg;
-  const reportRef = useRef(analysis.report);
-  reportRef.current = analysis.report;
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
   const onMarkLinesRef = useRef(onMarkLines);
   onMarkLinesRef.current = onMarkLines;
-  const labels = useLabels(analysis);
+  const symbols = useSymbols(analysis);
   const [running, setRunning] = useState(false);
   const [budget, setBudget] = useState({ load: 0, grace: 0 });
   const [view, setView] = useState<{ frame: Frame | null; values: NodeValue[]; events: SimEvent[]; led: readonly [number, number, number]; oled: (OledRow | null)[]; strip: number[][] | null; coverage: number; missed: number; received: number } | null>(null);
@@ -604,9 +593,8 @@ function LiveEmulator({ analysis, target, devices, onMarkLines, deviceUid }: Run
       pending.current = null;
       const gaps = gapsRef.current;
       setView({ frame: latest.frame, values: sim.nodeValues(), events: sim.events.slice(-MAX_EVENTS_SHOWN), led: sim.led, oled: sim.oledRows(), strip: sim.extLeds(stripRef.current), coverage: gaps.coverage, missed: gaps.missed, received: gaps.received });
-      const report = reportRef.current;
       const currentPkg = pkgRef.current;
-      if (currentPkg && report && latest.events.length) onMarkLinesRef.current(linesForEvents(currentPkg, report.nodeLines, latest.events));
+      if (currentPkg && latest.events.length) onMarkLinesRef.current(linesForEvents(sourceRef.current, latest.events));
     }, LIVE_PAINT_MS);
     return () => {
       off();
@@ -644,7 +632,7 @@ function LiveEmulator({ analysis, target, devices, onMarkLines, deviceUid }: Run
 
       {view ? (
         <>
-          <EmulatorHeatmap frame={view.frame} rows={view.frame?.rows ?? shape.rows} cols={view.frame?.cols ?? shape.cols} range={range} regions={analysis.report?.regions ?? NO_REGIONS} ariaLabel={t("sdkEmuHeatmap")} />
+          <EmulatorHeatmap frame={view.frame} rows={view.frame?.rows ?? shape.rows} cols={view.frame?.cols ?? shape.cols} range={range} regions={regionsOf(source, view.frame?.rows ?? shape.rows, view.frame?.cols ?? shape.cols)} ariaLabel={t("sdkEmuHeatmap")} />
           <p className="sdk-hint sdk-mono">{t("sdkEmuReceived").replace("{n}", String(view.received))} · f{view.frame?.seq}</p>
           {/* Delivered to the next frame the stream brings, as a real press is. */}
           <OledSection sim={simRef.current} board={target.board} rows={view.oled} onPress={() => simRef.current?.pressButton()} />
@@ -652,7 +640,7 @@ function LiveEmulator({ analysis, target, devices, onMarkLines, deviceUid }: Run
           <BudgetControls load={budget.load} grace={budget.grace} onChange={(load, grace) => setBudget({ load, grace })} />
           <section className="sdk-section">
             <h3>{t("sdkEmuNodes")}</h3>
-            <NodeTrace values={view.values} labels={labels} />
+            <NodeTrace values={view.values} symbols={symbols} />
           </section>
           <section className="sdk-section">
             <h3>{t("sdkEmuEvents").replace("{count}", String(view.events.length))}</h3>
@@ -675,7 +663,7 @@ const PATTERN_LABELS: Record<SynthPattern, string> = {
 };
 
 /** A virtual device's own frames: a preset pattern, the mouse, and noise. */
-function GeneratedEmulator({ analysis, target, onMarkLines, virtual, onVirtualChange }: RunProps & {
+function GeneratedEmulator({ analysis, source, target, onMarkLines, virtual, onVirtualChange }: RunProps & {
   virtual: VirtualDevice;
   onVirtualChange: (device: VirtualDevice) => void;
 }) {
@@ -683,11 +671,11 @@ function GeneratedEmulator({ analysis, target, onMarkLines, virtual, onVirtualCh
   const pkg = useStablePackage(analysis);
   const pkgRef = useRef(pkg);
   pkgRef.current = pkg;
-  const reportRef = useRef(analysis.report);
-  reportRef.current = analysis.report;
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
   const onMarkLinesRef = useRef(onMarkLines);
   onMarkLinesRef.current = onMarkLines;
-  const labels = useLabels(analysis);
+  const symbols = useSymbols(analysis);
   // Nothing to wait for or disturb, so it runs as soon as it is shown.
   const [running, setRunning] = useState(true);
   const [budget, setBudget] = useState({ load: 0, grace: 0 });
@@ -735,9 +723,8 @@ function GeneratedEmulator({ analysis, target, onMarkLines, virtual, onVirtualCh
       if (clock < now) clock = now;
       if (!frame) return;
       setView({ frame, values: sim.nodeValues(), events: sim.events.slice(-MAX_EVENTS_SHOWN), led: sim.led, oled: sim.oledRows(), strip: sim.extLeds(stripLength(boardRef.current)), frames: framesRef.current });
-      const report = reportRef.current;
       const currentPkg = pkgRef.current;
-      if (currentPkg && report && events.length) onMarkLinesRef.current(linesForEvents(currentPkg, report.nodeLines, events));
+      if (currentPkg && events.length) onMarkLinesRef.current(linesForEvents(sourceRef.current, events));
     }, LIVE_PAINT_MS);
     return () => {
       window.clearInterval(timer);
@@ -776,7 +763,7 @@ function GeneratedEmulator({ analysis, target, onMarkLines, virtual, onVirtualCh
         <p className="sdk-hint">{t("sdkEmuPressMatrix")}</p>
       </section>
 
-      <EmulatorHeatmap frame={view?.frame ?? null} rows={target.rows} cols={target.cols} range={range} regions={analysis.report?.regions ?? NO_REGIONS} ariaLabel={t("sdkEmuHeatmap")} onPress={running ? press : undefined} />
+      <EmulatorHeatmap frame={view?.frame ?? null} rows={target.rows} cols={target.cols} range={range} regions={regionsOf(source, target.rows, target.cols)} ariaLabel={t("sdkEmuHeatmap")} onPress={running ? press : undefined} />
       {view ? <p className="sdk-hint sdk-mono">{t("sdkEmuReceived").replace("{n}", String(view.frames))} · {SYNTH_FPS} fps</p> : null}
 
       {view ? (
@@ -786,7 +773,7 @@ function GeneratedEmulator({ analysis, target, onMarkLines, virtual, onVirtualCh
           <BudgetControls load={budget.load} grace={budget.grace} onChange={(load, grace) => setBudget({ load, grace })} />
           <section className="sdk-section">
             <h3>{t("sdkEmuNodes")}</h3>
-            <NodeTrace values={view.values} labels={labels} />
+            <NodeTrace values={view.values} symbols={symbols} />
           </section>
           <section className="sdk-section">
             <h3>{t("sdkEmuEvents").replace("{count}", String(view.events.length))}</h3>
@@ -881,7 +868,7 @@ function VirtualSetup({ virtual, onChange }: { virtual: VirtualDevice; onChange:
 }
 
 /** What the app uses that the chosen board does not have. */
-function BoardFit({ analysis, board }: { analysis: Analysis; board: BoardSpec | undefined }) {
+function BoardFit({ analysis, source, board }: { analysis: Analysis; source: string; board: BoardSpec | undefined }) {
   const { t } = useI18n();
   if (!board) return null;
   const caps = new Set<string>(analysis.package?.manifest?.capabilities ?? []);
@@ -894,9 +881,9 @@ function BoardFit({ analysis, board }: { analysis: Analysis; board: BoardSpec | 
   ].filter(Boolean);
   // Accepted by the device and never shown: past this board's own strip.
   const unseen = board.externalLeds
-    ? [...new Set<number>((analysis.package?.nodes ?? [])
-      .filter((node: { op: string; index?: number }) => node.op === "ext_pixel" && Number(node.index) >= board.externalLeds)
-      .map((node: { index: number }) => Number(node.index)))].sort((a, b) => a - b)
+    ? [...new Set<number>([...source.matchAll(/\bstrip\.pixel\(\s*(\d+)/g)]
+      .map((match) => Number(match[1]))
+      .filter((index) => index >= board.externalLeds))].sort((a, b) => a - b)
     : [];
   if (!missing.length && !unseen.length) return null;
   return (
@@ -919,7 +906,7 @@ export function EmulatorPanel(props: Props) {
   const deviceUid = target.key === VIRTUAL_TARGET_KEY ? null : target.key.replace(/^device:/, "");
   const device = devices.find((item) => item.uid === deviceUid);
   const [deviceSource, setDeviceSource] = useState<DeviceSource>(device?.connectionState === "online" ? "live" : "recording");
-  const run: RunProps = { analysis, target, devices, onMarkLines: props.onMarkLines };
+  const run: RunProps = { analysis, source: props.source, target, devices, onMarkLines: props.onMarkLines };
 
   // Readouts and panels poll a real device; there is nothing to emulate.
   const isView = analysis.kind === "readout" || analysis.kind === "panel";
@@ -953,7 +940,7 @@ export function EmulatorPanel(props: Props) {
   return (
     <div className="sdk-panel-body">
       {picker}
-      <BoardFit analysis={analysis} board={target.board} />
+      <BoardFit analysis={analysis} source={props.source} board={target.board} />
       {deviceUid ? (
         <Segmented
           value={deviceSource}
