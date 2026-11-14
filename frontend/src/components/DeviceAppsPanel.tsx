@@ -298,6 +298,8 @@ export function DeviceAppsPanel({
             <span className="app-row-version">v{entry.version}</span>
             {entry.state === "load_failed" ? (
               <span className="app-pill danger">{t("appLoadFailed")}</span>
+            ) : entry.state === "needs_update" ? (
+              <span className="app-pill danger" title={t("appNeedsUpdateHint")}>{t("appNeedsUpdate")}</span>
             ) : null}
           </div>
           {summaryOf(entry) ? <div className="app-row-summary">{summaryOf(entry)}</div> : null}
