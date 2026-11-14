@@ -21,15 +21,19 @@ SESSION_ROLE_KEY: Final[str] = "newhorizons_role"
 DEFAULT_SESSION_LIFETIME_SEC: Final[int] = 12 * 60 * 60
 DEFAULT_TOKEN_EXPIRY_SEC: Final[int] = 24 * 60 * 60
 TOKEN_SALT: Final[str] = "newhorizons-api-token"
-# App tokens: one per NH Studio / NH Pocket install, made by an admin. The
-# token is `nhapp_<id>_<secret>`; only a SHA-256 of the whole string is
-# stored, the id is there so a lookup needs no scan.
+# App tokens: NH Studio / NH Pocket sign in with a Desktop account and get a
+# token for that sign-in (an internal session, not managed by hand: the app
+# keeps the account and signs in again on every start). The token is
+# `nhapp_<id>_<secret>`; only a SHA-256 of the whole string is stored, the id
+# is there so a lookup needs no scan.
 APP_TOKEN_PREFIX: Final[str] = "nhapp_"
 APP_CLIENT_TYPES: Final[tuple[str, ...]] = ("studio", "pocket")
 APP_TOKEN_ROLES: Final[tuple[str, ...]] = ("admin", "user")
 _APP_TOKEN_PATTERN = re.compile(r"^nhapp_([a-f0-9]{12})_([A-Za-z0-9_-]{32,64})$")
-# Revoked tokens stay listed this long, then are deleted.
+# Revoked tokens are kept this long, then deleted.
 _REVOKED_TOKEN_KEEP_MS: Final[int] = 30 * 24 * 60 * 60 * 1000
+# A token not used for this long no longer works (the app signs in again).
+APP_TOKEN_IDLE_MS: Final[int] = 30 * 24 * 60 * 60 * 1000
 # A token in use is stamped at most this often, not on every request.
 _LAST_USED_WRITE_INTERVAL_MS: Final[int] = 60_000
 
@@ -43,6 +47,8 @@ class AuthUser:
     # identity; these are.
     app_id: str = ""
     client_type: str = ""
+    # The Desktop account an app signed in with ('' for an older hand-made token).
+    account: str = ""
 
     @property
     def is_app(self) -> bool:
@@ -158,6 +164,10 @@ class AuthManager:
                 )
                 """
             )
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(app_tokens)").fetchall()}
+            if "relay_id" not in columns:
+                # The install a sign-in is for: its next sign-in replaces it.
+                connection.execute("ALTER TABLE app_tokens ADD COLUMN relay_id TEXT NOT NULL DEFAULT ''")
             for username, config in self.DEFAULT_USERS.items():
                 connection.execute(
                     """
@@ -266,9 +276,18 @@ class AuthManager:
 
     # ── App tokens ────────────────────────────────────────────────────────
 
-    def create_app_token(self, name: str, client_type: str, role: str = "admin", created_by: str = "") -> tuple[str, dict[str, object]]:
-        """A new token and its listing entry. The token itself is returned
-        only here; afterwards only its hash exists."""
+    def create_app_token(
+        self,
+        name: str,
+        client_type: str,
+        role: str = "admin",
+        created_by: str = "",
+        relay_id: str = "",
+    ) -> tuple[str, dict[str, object]]:
+        """A new token and its entry. The token itself is returned only
+        here; afterwards only its hash exists. With a relay_id, the install's
+        earlier tokens end (a sign-in replaces the last one, so they never
+        pile up); its open sockets are left to reconnect on their own."""
         name = str(name or "").strip()
         client_type = str(client_type or "").strip().lower()
         role = str(role or "admin").strip().lower()
@@ -280,32 +299,30 @@ class AuthManager:
             raise ValueError("client_type_invalid")
         if role not in APP_TOKEN_ROLES:
             raise ValueError("role_invalid")
+        relay_id = str(relay_id or "").strip()[:64]
         token_id = secrets.token_hex(6)
         token = f"{APP_TOKEN_PREFIX}{token_id}_{secrets.token_urlsafe(32)}"
         now = _now_ms()
         with self._connect() as connection:
             connection.execute(
+                "DELETE FROM app_tokens WHERE revoked_at_ms IS NOT NULL AND revoked_at_ms < ?",
+                (now - _REVOKED_TOKEN_KEEP_MS,),
+            )
+            if relay_id:
+                connection.execute(
+                    "UPDATE app_tokens SET revoked_at_ms = ? WHERE relay_id = ? AND revoked_at_ms IS NULL",
+                    (now, relay_id),
+                )
+            connection.execute(
                 """
-                INSERT INTO app_tokens (id, name, client_type, role, token_hash, created_at_ms, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO app_tokens (id, name, client_type, role, token_hash, created_at_ms, created_by, relay_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (token_id, name, client_type, role, _hash_token(token), now, str(created_by or "")),
+                (token_id, name, client_type, role, _hash_token(token), now, str(created_by or ""), relay_id),
             )
             connection.commit()
             row = connection.execute("SELECT * FROM app_tokens WHERE id = ?", (token_id,)).fetchone()
         return token, self._app_token_item(row)
-
-    def list_app_tokens(self) -> list[dict[str, object]]:
-        with self._connect() as connection:
-            # Each sign-in makes a token and signing out revokes it, so the
-            # revoked ones pile up: they are dropped after a month.
-            connection.execute(
-                "DELETE FROM app_tokens WHERE revoked_at_ms IS NOT NULL AND revoked_at_ms < ?",
-                (_now_ms() - _REVOKED_TOKEN_KEEP_MS,),
-            )
-            connection.commit()
-            rows = connection.execute("SELECT * FROM app_tokens ORDER BY created_at_ms DESC, id").fetchall()
-        return [self._app_token_item(row) for row in rows]
 
     def revoke_app_token(self, token_id: str) -> bool:
         with self._connect() as connection:
@@ -333,6 +350,13 @@ class AuthManager:
                 return None
             if not hmac.compare_digest(str(row["token_hash"]), _hash_token(match.group(0))):
                 return None
+            now = _now_ms()
+            last_used = int(row["last_used_at_ms"] if row["last_used_at_ms"] is not None else row["created_at_ms"])
+            if now - last_used > APP_TOKEN_IDLE_MS:
+                # Idle too long: it ends; the app signs in again with its account.
+                connection.execute("UPDATE app_tokens SET revoked_at_ms = ? WHERE id = ?", (now, token_id))
+                connection.commit()
+                return None
             role = str(row["role"])
             created_by = str(row["created_by"] or "")
             if created_by:
@@ -346,7 +370,6 @@ class AuthManager:
                     return None
                 if str(owner["role"]) != "admin":
                     role = "user"
-            now = _now_ms()
             if row["last_used_at_ms"] is None or now - int(row["last_used_at_ms"]) >= _LAST_USED_WRITE_INTERVAL_MS:
                 connection.execute("UPDATE app_tokens SET last_used_at_ms = ? WHERE id = ?", (now, token_id))
                 connection.commit()
@@ -355,6 +378,7 @@ class AuthManager:
             role=role,
             app_id=token_id,
             client_type=str(row["client_type"]),
+            account=created_by,
         )
 
     def app_token_info(self, token_id: str) -> dict[str, object] | None:
@@ -371,6 +395,7 @@ class AuthManager:
             "role": str(row["role"]),
             "created_at_ms": int(row["created_at_ms"]),
             "created_by": str(row["created_by"] or ""),
+            "relay_id": str(row["relay_id"] or "") if "relay_id" in row.keys() else "",
             "last_used_at_ms": None if row["last_used_at_ms"] is None else int(row["last_used_at_ms"]),
             "revoked_at_ms": None if row["revoked_at_ms"] is None else int(row["revoked_at_ms"]),
             "active": row["revoked_at_ms"] is None,

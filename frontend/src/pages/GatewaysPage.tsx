@@ -1,12 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import { AppTokensPanel } from "../components/AppTokensPanel";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { GatewayManageModal } from "../components/GatewayManageModal";
 import { HubManageModal } from "../components/HubManageModal";
 import { useI18n } from "../i18n";
 import { api, type GatewayClaimEntry, type GatewayEntry } from "../lib/api";
-import { NH_STUDIO_DOWNLOAD_URL, isAppRelay, relayDisplayName, splitRelays } from "../lib/relayKind";
+import { NH_STUDIO_DOWNLOAD_URL, isAppRelay, relayDisplayName, relayKind, splitRelays } from "../lib/relayKind";
 import { requestGatewaySnapshot, useWsState } from "../lib/wsClient";
 
 const HUB_REPO_URL = "https://github.com/wenzi7777/New-Horizons-Hub";
@@ -63,9 +62,13 @@ function RelayCardHeader({ relay, children }: { relay: GatewayEntry; children: R
         <span className={`relay-status-dot ${status === "online" ? "online" : ""}`} title={status} aria-label={status} />
         <h3>{relayDisplayName(relay)}</h3>
         {relay.gateway_id ? <span className="relay-card-id">{relay.gateway_id}</span> : null}
-        {isAppRelay(relay) ? (
-          <span className={`relay-badge ${relay.authenticated ? "" : "muted"}`.trim()}>
-            {relay.authenticated ? t("relayAuthenticated") : t("relayNotAuthenticated")}
+        {relayKind(relay) === "studio" || relayKind(relay) === "pocket" ? (
+          <span className={`relay-badge ${relay.authenticated ? "" : "muted"}`.trim()} title={relay.account || undefined}>
+            {relay.authenticated
+              ? relay.account
+                ? t("relaySignedInAs").replace("{account}", relay.account)
+                : t("relayAuthenticated")
+              : t("relayNotAuthenticated")}
           </span>
         ) : null}
       </div>
@@ -429,8 +432,6 @@ export function GatewaysPage() {
           </div>
         </div>
       </section>
-
-      <AppTokensPanel />
 
       {manageHubId ? <HubManageModal gatewayId={manageHubId} onClose={() => setManageHubId("")} /> : null}
       {manageGatewayId ? <GatewayManageModal gatewayId={manageGatewayId} onClose={() => setManageGatewayId("")} /> : null}

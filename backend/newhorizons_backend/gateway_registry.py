@@ -233,6 +233,8 @@ class GatewayRegistryMixin:
             # with (NH Studio / Pocket); sticky like client_type.
             app_id = str(payload.get("app_id") if "app_id" in payload else existing.get("app_id", "") or "")
             authenticated = bool(payload.get("authenticated") if "authenticated" in payload else existing.get("authenticated", False))
+            # The Desktop account a signed-in app uses (set with authenticated, by gateway_ws.py).
+            account = str(payload.get("account") or "") if "authenticated" in payload else str(existing.get("account") or "")
             # Sticky like client_type: hello carries it, later messages
             # (gateway_status, claim requests) usually don't.
             capabilities = payload.get("capabilities")
@@ -256,6 +258,7 @@ class GatewayRegistryMixin:
                 "client_type": client_type,
                 "app_id": app_id,
                 "authenticated": authenticated,
+                "account": account if authenticated else "",
                 # The Python Gateway is superseded by NH Studio; the Relays
                 # page shows it as legacy.
                 "legacy": client_type == "gateway",

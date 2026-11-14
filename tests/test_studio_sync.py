@@ -55,36 +55,52 @@ class _Env(unittest.TestCase):
         return client
 
     def app_token(self, client_type="studio", role="admin", name="Lab Mac"):
-        response = self.admin_client().post(f"{PREFIX}/app-tokens", json={"name": name, "client_type": client_type, "role": role})
-        self.assertEqual(response.status_code, 200, response.get_json())
-        return response.get_json()["token"], response.get_json()["item"]
+        return self.auth.create_app_token(name, client_type, role, created_by="admin")
 
     def bearer(self, token):
         return {"Authorization": f"Bearer {token}"}
 
 
 class AppTokenTest(_Env):
-    def test_admin_creates_lists_and_revokes_tokens_only_hash_is_stored(self):
+    def test_only_the_hash_is_stored_and_revoking_ends_the_token(self):
         token, item = self.app_token("pocket", name="Factory phone")
         self.assertTrue(token.startswith("nhapp_"))
-        self.assertEqual(item["client_type"], "pocket")
-        self.assertTrue(item["active"])
         self.assertNotIn(token, (self.tmp / "auth.sqlite3").read_bytes().decode("latin-1"))
-        listing = self.admin_client().get(f"{PREFIX}/app-tokens").get_json()["items"]
-        self.assertEqual([entry["id"] for entry in listing], [item["id"]])
-        self.assertNotIn("token", listing[0])
-
         client = self.app.test_client()
         me = client.get(f"{PREFIX}/auth/me", headers=self.bearer(token)).get_json()
         self.assertEqual(me["app_id"], item["id"])
         self.assertEqual(me["client_type"], "pocket")
         self.assertEqual(client.get(f"{PREFIX}/devices", headers=self.bearer(token)).status_code, 200)
-
-        revoked = self.admin_client().delete(f"{PREFIX}/app-tokens/{item['id']}")
-        self.assertEqual(revoked.status_code, 200)
-        self.assertFalse(revoked.get_json()["item"]["active"])
+        self.assertTrue(self.auth.revoke_app_token(item["id"]))
         self.assertEqual(client.get(f"{PREFIX}/devices", headers=self.bearer(token)).status_code, 401)
-        self.assertEqual(self.admin_client().delete(f"{PREFIX}/app-tokens/nope").status_code, 404)
+        self.assertFalse(self.auth.revoke_app_token("nope"))
+
+    def test_token_admin_routes_are_gone(self):
+        admin = self.admin_client()
+        self.assertIn(admin.get(f"{PREFIX}/app-tokens").status_code, (404, 405))
+        self.assertIn(admin.post(f"{PREFIX}/app-tokens", json={"name": "x", "client_type": "studio"}).status_code, (404, 405))
+        self.assertIn(admin.delete(f"{PREFIX}/app-tokens/abc").status_code, (404, 405))
+
+    def test_signing_in_again_replaces_the_installs_token(self):
+        client = self.app.test_client()
+        login = lambda: client.post(f"{PREFIX}/app-tokens/login", json={"username": "admin", "password": "admin", "client_type": "studio", "relay_id": "studio-12345678"}).get_json()["token"]
+        first = login()
+        second = login()
+        self.assertEqual(client.get(f"{PREFIX}/devices", headers=self.bearer(first)).status_code, 401)
+        self.assertEqual(client.get(f"{PREFIX}/devices", headers=self.bearer(second)).status_code, 200)
+        # Another install's token is untouched.
+        other = client.post(f"{PREFIX}/app-tokens/login", json={"username": "admin", "password": "admin", "client_type": "pocket", "relay_id": "pocket-87654321"}).get_json()["token"]
+        self.assertEqual(client.get(f"{PREFIX}/devices", headers=self.bearer(second)).status_code, 200)
+        self.assertEqual(client.get(f"{PREFIX}/devices", headers=self.bearer(other)).status_code, 200)
+
+    def test_an_idle_token_ends(self):
+        from newhorizons_backend.auth import APP_TOKEN_IDLE_MS
+
+        token, item = self.app_token()
+        with self.auth._connect() as connection:
+            connection.execute("UPDATE app_tokens SET last_used_at_ms = ? WHERE id = ?", (int(time.time() * 1000) - APP_TOKEN_IDLE_MS - 1000, item["id"]))
+            connection.commit()
+        self.assertIsNone(self.auth.authenticate_app_token(token))
 
     def test_app_signs_in_with_a_desktop_account_and_signs_out(self):
         client = self.app.test_client()
@@ -119,16 +135,6 @@ class AppTokenTest(_Env):
         client = self.app.test_client()
         self.assertEqual(client.get(f"{PREFIX}/devices", headers=self.bearer(token)).status_code, 200)
         self.assertEqual(client.get(f"{PREFIX}/gateways", headers=self.bearer(token)).status_code, 403)
-
-    def test_tokens_cannot_mint_tokens_and_bad_input_is_rejected(self):
-        token, _ = self.app_token()
-        client = self.app.test_client()
-        self.assertEqual(client.get(f"{PREFIX}/app-tokens", headers=self.bearer(token)).status_code, 403)
-        self.assertEqual(client.post(f"{PREFIX}/app-tokens", headers=self.bearer(token), json={"name": "x", "client_type": "studio"}).status_code, 403)
-        self.assertEqual(client.get(f"{PREFIX}/app-tokens").status_code, 401)
-        admin = self.admin_client()
-        self.assertEqual(admin.post(f"{PREFIX}/app-tokens", json={"name": "x", "client_type": "gateway"}).get_json()["error"], "client_type_invalid")
-        self.assertEqual(admin.post(f"{PREFIX}/app-tokens", json={"client_type": "studio"}).get_json()["error"], "name_required")
 
     def test_cookie_login_is_unchanged(self):
         client = self.admin_client()
@@ -221,14 +227,16 @@ class RelayClientTypeTest(_Env):
 
     def test_app_token_sets_identity_and_default_gateway_id(self):
         _, item = self.app_token("pocket")
-        user = AuthUser(username=f"app:{item['id']}", role="admin", app_id=item["id"], client_type="pocket")
+        user = AuthUser(username=f"app:{item['id']}", role="admin", app_id=item["id"], client_type="pocket", account="admin")
         session, ws = self.session(app_user=user)
         # A relay claiming to be something else is the token's kind anyway.
-        self.hello(session, client_type="studio")
+        self.hello(session, client_type="studio", account="mallory")
         gateway_id = f"nh-pocket-{item['id']}"
         entry = self.relay(gateway_id)
         self.assertEqual(entry["client_type"], "pocket")
         self.assertTrue(entry["authenticated"])
+        # The Relays page shows who it signed in as: from the token, not the hello.
+        self.assertEqual(entry["account"], "admin")
         self.assertEqual(entry["app_id"], item["id"])
         self.assertEqual(ws.sent[-1]["app_id"], item["id"])
         # Later messages without client_type keep it.
@@ -349,7 +357,7 @@ class AppTokenSessionTest(_Env):
         other = _FakeWs()
         untrack = self.auth.track_app_session(item["id"], ws.close)
         self.auth.track_app_session("someone-else", other.close)
-        self.assertEqual(self.admin_client().delete(f"{PREFIX}/app-tokens/{item['id']}").status_code, 200)
+        self.assertTrue(self.auth.revoke_app_token(item["id"]))
         self.assertTrue(ws.closed)
         self.assertFalse(other.closed)
         untrack()  # after the socket ended: harmless

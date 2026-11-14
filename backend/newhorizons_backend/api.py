@@ -377,68 +377,12 @@ def create_blueprint(
         token = auth_manager.issue_token(user, str(current_app.secret_key or ""))
         return json_response({"token": token, "expires_in": DEFAULT_TOKEN_EXPIRY_SEC, "token_type": "Bearer"})
 
-    # ── App tokens (NH Studio / NH Pocket) ─────────────────────────────────
-    # Made, listed and revoked by an admin signed in to this page; an app
-    # holding a token cannot mint more of them.
-
-    def _session_admin() -> tuple[Response, int] | None:
-        if auth_manager is None:
-            return json_response({"error": "auth_unavailable"}), 503
-        user = _auth_user()
-        if user is None:
-            return _auth_response(401, "unauthorized")
-        if user.role != "admin" or getattr(user, "is_app", False):
-            return _auth_response(403, "forbidden")
-        return None
-
-    @bp.get("/api/app-tokens")
-    @auth
-    def app_tokens_list() -> tuple[Response, int] | Response:
-        denied = _session_admin()
-        if denied is not None:
-            return denied
-        assert auth_manager is not None
-        return json_response({"items": auth_manager.list_app_tokens()})
-
-    @bp.post("/api/app-tokens")
-    @auth
-    def app_tokens_create() -> tuple[Response, int] | Response:
-        denied = _session_admin()
-        if denied is not None:
-            return denied
-        assert auth_manager is not None
-        try:
-            data = _request_json_data({})
-        except ValueError:
-            return json_response({"error": "invalid_json"}), 400
-        if not isinstance(data, dict):
-            return json_response({"error": "invalid_json"}), 400
-        try:
-            token, item = auth_manager.create_app_token(
-                str(data.get("name") or ""),
-                str(data.get("client_type") or ""),
-                str(data.get("role") or "admin"),
-                created_by=_auth_user().username,
-            )
-        except ValueError as exc:
-            return json_response({"error": str(exc)}), 400
-        return json_response({"token": token, "token_type": "Bearer", "item": item})
-
-    @bp.delete("/api/app-tokens/<token_id>")
-    @auth
-    def app_tokens_revoke(token_id: str) -> tuple[Response, int] | Response:
-        denied = _session_admin()
-        if denied is not None:
-            return denied
-        assert auth_manager is not None
-        if not auth_manager.revoke_app_token(token_id):
-            return json_response({"error": "app_token_not_found"}), 404
-        return json_response({"status": "revoked", "item": auth_manager.app_token_info(token_id)})
-
-    # NH Studio / NH Pocket sign in with a Desktop account: the password is
-    # checked once and exchanged for an app token of that user's role, made
-    # for this one install (listed and revocable on the Relays page). The app
-    # keeps only the token; no session cookie is set.
+    # ── App sign-in (NH Studio / NH Pocket) ──────────────────────────────
+    # NH Studio / NH Pocket sign in with a Desktop account and get an app
+    # token of that user's role for this install. The app keeps the account
+    # and signs in again on every start; its next sign-in (same relay_id)
+    # replaces this token, and an idle one ends by itself. Nothing to manage
+    # by hand. No session cookie is set.
     @bp.post("/api/app-tokens/login")
     @auth
     def app_tokens_login() -> tuple[Response, int] | Response:
@@ -467,7 +411,13 @@ def create_blueprint(
         device = str(data.get("device_name") or "").strip()[:64]
         name = f"{label} · {device}" if device else label
         try:
-            token, item = auth_manager.create_app_token(name, client_type, user.role, created_by=user.username)
+            token, item = auth_manager.create_app_token(
+                name,
+                client_type,
+                user.role,
+                created_by=user.username,
+                relay_id=str(data.get("relay_id") or "").strip(),
+            )
         except ValueError as exc:
             return json_response({"error": str(exc)}), 400
         return json_response({"token": token, "token_type": "Bearer", "item": item, "user": {"username": user.username, "role": user.role}})

@@ -139,9 +139,11 @@ export type GatewayEntry = {
   // "gateway" (the legacy NH Gateway software) -- absent/unknown default to
   // "gateway" server-side.
   client_type?: "studio" | "pocket" | "hub" | "gateway" | string;
-  // NH Studio / Pocket: the app token it connected with (its id), if any.
+  // NH Studio / Pocket: the sign-in it connected with (its token id), if any.
   app_id?: string;
   authenticated?: boolean;
+  // The Desktop account a signed-in app uses.
+  account?: string;
   // True for the legacy Python Gateway.
   legacy?: boolean;
   // From the relay's hello. A Gateway takes gateway_command only when this
@@ -158,20 +160,6 @@ export type GatewayEntry = {
   // included too (status "pending"), unlike serving_devices above which
   // is a routing table, not a display list.
   paired_devices?: HubPairedDeviceEntry[];
-};
-
-// One NH Studio / NH Pocket app token (never the token itself, only its id).
-export type AppTokenEntry = {
-  id: string;
-  name: string;
-  client_type: "studio" | "pocket" | string;
-  role: "admin" | "user" | string;
-  created_at_ms: number;
-  created_by: string;
-  last_used_at_ms: number | null;
-  revoked_at_ms: number | null;
-  active: boolean;
-  token_hint: string;
 };
 
 export type RelayUpdateState = {
@@ -535,9 +523,6 @@ export const api = {
   health: () => request<BackendHealth>("/health"),
   devices: () => request<{ items: DeviceEntry[] }>("/devices"),
   gateways: () => request<{ items: GatewayEntry[] }>("/gateways"),
-  appTokens: () => request<{ items: AppTokenEntry[] }>("/app-tokens"),
-  revokeAppToken: (tokenId: string) =>
-    request<{ status: string; item: AppTokenEntry }>(`/app-tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }),
   pruneOfflineGateways: () =>
     request<{ status: string; removed: string[] }>("/gateways/prune-offline", { method: "POST" }),
   deleteGateway: (gatewayId: string) =>

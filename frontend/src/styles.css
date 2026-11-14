@@ -4755,15 +4755,24 @@ input:-webkit-autofill:focus {
 
 .relay-card-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px 10px;
 }
 
+/* The title shrinks (name and id ellipsize) and the buttons wrap below it
+   when the card is too narrow, so they never stick out of the card. */
 .relay-card-title {
   display: flex;
+  flex: 1 1 14rem;
   align-items: baseline;
   gap: 8px;
+  min-width: 0;
+}
+
+.relay-card-title h3,
+.relay-card-id {
   min-width: 0;
 }
 
@@ -4803,7 +4812,9 @@ input:-webkit-autofill:focus {
 .relay-card-actions {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   gap: 6px;
+  margin-left: auto;
 }
 
 .relay-facts {
@@ -12023,45 +12034,11 @@ button.cal-matrix-cell:active {
   font-size: 13px;
 }
 
-.app-token-list {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
 
-.app-token-list li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-}
 
-.app-token-list li.revoked {
-  opacity: 0.6;
-}
 
-.app-token-list li > small {
-  grid-column: 1;
-  color: var(--text-muted);
-}
 
-.app-token-list li > button {
-  grid-column: 2;
-  grid-row: 1 / span 3;
-  align-self: center;
-}
 
-.app-token-main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
 
 /* v2.0.F Vref card: status tiles, the slider with its strap-risk bar. */
 .vref-status .metric {

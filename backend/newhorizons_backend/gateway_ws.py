@@ -401,12 +401,14 @@ class GatewaySocketSession:
             hello["client_type"] = self.app_user.client_type
             hello["app_id"] = self.app_user.app_id
             hello["authenticated"] = True
+            hello["account"] = self.app_user.account
             if not str(hello.get("gateway_id") or "").strip():
                 hello["gateway_id"] = f"nh-{self.app_user.client_type}-{self.app_user.app_id}"
             return hello
         hello["client_type"] = claimed
         hello["app_id"] = ""
         hello["authenticated"] = False
+        hello["account"] = ""
         if claimed in ("studio", "pocket") and _app_token_required():
             self._send_json({"type": "error", "code": "app_token_required", "message": "NH Studio / NH Pocket must connect with an app token"})
             return None
