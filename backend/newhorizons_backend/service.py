@@ -881,6 +881,23 @@ class NewHorizonsService(
                     status_payload.get("update_state"), update_result_state)
                 self._latest_status[device_uid] = status_payload
                 merged["last_status"] = status_payload
+            if not is_status_snapshot and not self._result_failed(payload) and self._latest_status.get(device_uid):
+                # A setting command's reply (set_range, set_vref, set_imu ...)
+                # carries the new state of its block. Without folding it into
+                # the status, the page showed the new value only while that
+                # reply was the last result; the next command's reply made it
+                # fall back to the status from the last poll -- the old value --
+                # until a reload polled status again.
+                blocks = {
+                    key: value
+                    for key in self.SETTING_REPLY_BLOCKS
+                    for value in (inner.get(key, payload.get(key)),)
+                    if isinstance(value, dict)
+                }
+                if blocks:
+                    status_payload = {**self._latest_status[device_uid], **blocks}
+                    self._latest_status[device_uid] = status_payload
+                    merged["last_status"] = status_payload
             self._clear_incompatible_visualization_locked(device_uid, merged)
             if merged.get("mode"):
                 merged["last_direct_mode_at"] = payload.get("received_at")
@@ -1256,6 +1273,12 @@ class NewHorizonsService(
     # (The relay's snapshot drops its blank values before it gets here; the
     # device's own blanks are authoritative and do clear a field.)
     MERGED_DEVICE_BLOCKS = ("findme", "gateway_state")
+    # Status blocks a setting command's reply carries whole and current; a
+    # relayed reply folds them into last_status (see _record_result).
+    SETTING_REPLY_BLOCKS = (
+        "vref", "range", "imu", "filter", "stream_buffer", "matrix_layout",
+        "action_button", "indicators", "battery", "power", "logging", "ota",
+    )
 
     @classmethod
     def _merge_device_entry(cls, existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:

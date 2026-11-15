@@ -104,6 +104,10 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const [rfbRows, setRfbRows] = useState<RfbRow[] | null>(null);
 
   const [refRfbDraft, setRefRfbDraft] = useState(String(refRfbNow));
+  const [leakDraft, setLeakDraft] = useState(leakNow);
+  // The reading mode as two on/off drafts, sent together with Apply.
+  const [convertDraft, setConvertDraft] = useState(modeNow !== "raw");
+  const [smartDraft, setSmartDraft] = useState(modeNow === "auto");
   const [sweepStart, setSweepStart] = useState("100");
   const [sweepStop, setSweepStop] = useState("700");
   const [sweepStep, setSweepStep] = useState("100");
@@ -111,7 +115,9 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const [sweepSolderedRfb, setSweepSolderedRfb] = useState("");
   const [sweep, setSweep] = useState<SweepResult | null>(null);
 
-  useEffect(() => { setRefRfbDraft(String(refRfbNow)); }, [modeNow, refRfbNow]);
+  useEffect(() => { setRefRfbDraft(String(refRfbNow)); }, [refRfbNow]);
+  useEffect(() => { setLeakDraft(leakNow); }, [leakNow]);
+  useEffect(() => { setConvertDraft(modeNow !== "raw"); setSmartDraft(modeNow === "auto"); }, [modeNow]);
   useEffect(() => { if (currentMv !== null) setVrefDraft(String(currentMv)); }, [currentMv]);
   useEffect(() => { if (limitMv !== null) setLimitDraft(String(limitMv)); }, [limitMv]);
 
@@ -162,19 +168,13 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   }
 
   // A mode applies at once, with the reference Rfb and leak setting in force.
-  async function applyMode(mode: string) {
-    if (mode !== "raw" && !rfbValid) return;
-    if (mode === modeNow) return;
+  // Off/off is raw, the old boards' way of reading; smart needs conversion.
+  const modeDraft = !convertDraft ? "raw" : smartDraft ? "auto" : "virtual";
 
-    const refRfb = fieldNumber(refRfbDraft) ?? refRfbNow;
-    await send("set_range", t("rangeApply"), { mode, ref_rfb_ohm: refRfb });
-  }
-
-  // Leak compensation is a switch like the others: it applies at once and
-  // touches nothing else (the device keeps its mode and reference Rfb).
-  async function applyLeak(on: boolean) {
-    if (on === leakNow) return;
-    await send("set_range", t("rangeLeak"), { leak_comp: on });
+  async function applyMode() {
+    if (modeDraft !== "raw" && !rfbValid) return;
+    if (modeDraft === modeNow) return;
+    await send("set_range", t("rangeApply"), { mode: modeDraft });
   }
 
   async function clearRfb() {
@@ -222,9 +222,6 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const draftMv = fieldNumber(vrefDraft) ?? SAFE_VREF_MV;
   const span = sliderMax - MIN_VREF_MV;
   const share = (from: number, to: number) => Math.max(0, Math.min(to, sliderMax) - Math.max(from, MIN_VREF_MV)) / span;
-  // Three firmware modes as two switches: conversion (virtual) and, on top of
-  // it, smart Vref (auto). Off/off is raw, the old boards' way of reading.
-  const converting = modeNow !== "raw";
   const autoSteps = num(range.auto_steps);
   const legacyScale = modeNow === "raw" && currentMv === SAFE_VREF_MV;
 
@@ -252,19 +249,29 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
 
       <div className="settings-subsection">
         <h4>{t("vrefReadingTitle")}</h4>
-        <SwitchRow
-          checked={converting}
-          disabled={working || (!converting && !rfbValid)}
-          label={t("vrefConvertSwitch").replace("{ref}", kOhm(refRfbNow))}
-          onChange={(on) => void applyMode(on ? "virtual" : "raw")}
-        />
-        <p className="field-hint">{converting ? t("vrefConvertOnHint") : t("vrefConvertOffHint")}</p>
-        <SwitchRow
-          checked={modeNow === "auto"}
-          disabled={working || !converting}
-          label={t("vrefSmartSwitch")}
-          onChange={(on) => void applyMode(on ? "auto" : "virtual")}
-        />
+        <div className="field-grid">
+          <SwitchRow
+            checked={convertDraft}
+            disabled={working || (!convertDraft && !rfbValid)}
+            label={t("vrefConvertSwitch").replace("{ref}", kOhm(refRfbNow))}
+            onChange={(on) => {
+              setConvertDraft(on);
+              if (!on) setSmartDraft(false);
+            }}
+          />
+          <SwitchRow checked={smartDraft} disabled={working || !convertDraft} label={t("vrefSmartSwitch")} onChange={setSmartDraft} />
+          <div className="field settings-field-action">
+            <button
+              className="button primary"
+              type="button"
+              disabled={working || modeDraft === modeNow || (modeDraft !== "raw" && !rfbValid)}
+              onClick={() => void applyMode()}
+            >
+              {busy === "set_range" ? t("running") : t("rangeApply")}
+            </button>
+          </div>
+        </div>
+        <p className="field-hint">{convertDraft ? t("vrefConvertOnHint") : t("vrefConvertOffHint")}</p>
         <p className="field-hint">{t("vrefSmartHint")}</p>
         {!rfbValid ? (
           <div className="notice vref-needs-rfb">
@@ -322,9 +329,9 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
                 <label>{t("rangeRefRfb")}</label>
                 <input type="number" min="1000" max="1000000" step="1000" value={refRfbDraft} onChange={(event) => setRefRfbDraft(event.target.value)} />
               </div>
-              <SwitchRow checked={leakNow} disabled={working} label={t("rangeLeak")} onChange={(on) => void applyLeak(on)} />
+              <SwitchRow checked={leakDraft} disabled={working} label={t("rangeLeak")} onChange={setLeakDraft} />
               <div className="field settings-field-action">
-                <button className="button" type="button" disabled={working} onClick={() => void sendNumbers("set_range", t("rangeApply"), { ref_rfb_ohm: refRfbDraft }, { mode: modeNow })}>{t("rangeApply")}</button>
+                <button className="button" type="button" disabled={working} onClick={() => void sendNumbers("set_range", t("rangeApply"), { ref_rfb_ohm: refRfbDraft }, { leak_comp: leakDraft })}>{t("rangeApply")}</button>
               </div>
             </div>
           </div>

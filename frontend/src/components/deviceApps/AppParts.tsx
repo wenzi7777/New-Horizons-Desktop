@@ -1,6 +1,6 @@
 import { Gauge, SlidersHorizontal, Workflow } from "lucide-react";
 import { useI18n } from "../../i18n";
-import { Switch } from "../Switch";
+import { OnOffApply } from "../Switch";
 import type { AppLoadLevel } from "../../lib/deviceApps";
 
 /** Readouts and panels: drawn by the Desktop, never run on the device. */
@@ -27,15 +27,15 @@ export function AppGlyph({ kind, colour, size = 18 }: { kind: string; colour?: n
   );
 }
 
-/** The shared switch; inside an app card a click must not open the card. */
-export function AppSwitch(props: {
+/** On/off with an Apply button; inside an app card a click must not open the card. */
+export function AppSwitch({ onChange, ...props }: {
   checked: boolean;
   disabled?: boolean;
   pending?: boolean;
   label: string;
   onChange: (checked: boolean) => void;
 }) {
-  return <Switch {...props} stopPropagation />;
+  return <OnOffApply {...props} stopPropagation onApply={onChange} />;
 }
 
 /** The last minute of an app's load (0..100), one point per poll. */

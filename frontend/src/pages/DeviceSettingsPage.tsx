@@ -2258,11 +2258,10 @@ export function DeviceSettingsPage() {
                 <div className="field-grid">
                   <div className="field">
                     <label>{t("externalLedMode")}</label>
-                    <SwitchRow
-                      checked={externalLedMode !== "off"}
-                      label={t(externalLedMode !== "off" ? "indicatorMode_enabled" : "indicatorMode_off")}
-                      onChange={(on) => setExternalLedMode(on ? "enabled" : "off")}
-                    />
+                    <Select value={externalLedMode} onChange={(event) => setExternalLedMode(event.target.value)}>
+                      <option value="off">{t("indicatorMode_off")}</option>
+                      <option value="enabled">{t("indicatorMode_enabled")}</option>
+                    </Select>
                   </div>
                   <div className="field">
                     <label>{t("externalLedPreset")}</label>

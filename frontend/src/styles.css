@@ -12295,3 +12295,20 @@ button.cal-matrix-cell:active {
 .switch-row { cursor: pointer; user-select: none; }
 .switch-row.disabled { cursor: default; opacity: 0.6; }
 .field > .switch-row { min-height: 36px; }
+
+/* On/off as a select plus its own Apply (apps on a device). */
+.onoff-apply {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.onoff-apply > :first-child {
+  min-width: 92px;
+}
+.onoff-apply.pending {
+  opacity: 0.6;
+}
+.onoff-row.disabled {
+  opacity: 0.55;
+}
