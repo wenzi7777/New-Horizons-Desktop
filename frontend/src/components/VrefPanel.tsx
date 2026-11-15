@@ -104,7 +104,6 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const [rfbRows, setRfbRows] = useState<RfbRow[] | null>(null);
 
   const [refRfbDraft, setRefRfbDraft] = useState(String(refRfbNow));
-  const [leakDraft, setLeakDraft] = useState(leakNow);
   const [sweepStart, setSweepStart] = useState("100");
   const [sweepStop, setSweepStop] = useState("700");
   const [sweepStep, setSweepStep] = useState("100");
@@ -112,7 +111,7 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const [sweepSolderedRfb, setSweepSolderedRfb] = useState("");
   const [sweep, setSweep] = useState<SweepResult | null>(null);
 
-  useEffect(() => { setRefRfbDraft(String(refRfbNow)); setLeakDraft(leakNow); }, [modeNow, refRfbNow, leakNow]);
+  useEffect(() => { setRefRfbDraft(String(refRfbNow)); }, [modeNow, refRfbNow]);
   useEffect(() => { if (currentMv !== null) setVrefDraft(String(currentMv)); }, [currentMv]);
   useEffect(() => { if (limitMv !== null) setLimitDraft(String(limitMv)); }, [limitMv]);
 
@@ -168,7 +167,14 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
     if (mode === modeNow) return;
 
     const refRfb = fieldNumber(refRfbDraft) ?? refRfbNow;
-    await send("set_range", t("rangeApply"), { mode, ref_rfb_ohm: refRfb, leak_comp: leakDraft });
+    await send("set_range", t("rangeApply"), { mode, ref_rfb_ohm: refRfb });
+  }
+
+  // Leak compensation is a switch like the others: it applies at once and
+  // touches nothing else (the device keeps its mode and reference Rfb).
+  async function applyLeak(on: boolean) {
+    if (on === leakNow) return;
+    await send("set_range", t("rangeLeak"), { leak_comp: on });
   }
 
   async function clearRfb() {
@@ -316,9 +322,9 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
                 <label>{t("rangeRefRfb")}</label>
                 <input type="number" min="1000" max="1000000" step="1000" value={refRfbDraft} onChange={(event) => setRefRfbDraft(event.target.value)} />
               </div>
-              <SwitchRow checked={leakDraft} label={t("rangeLeak")} onChange={setLeakDraft} />
+              <SwitchRow checked={leakNow} disabled={working} label={t("rangeLeak")} onChange={(on) => void applyLeak(on)} />
               <div className="field settings-field-action">
-                <button className="button" type="button" disabled={working} onClick={() => void sendNumbers("set_range", t("rangeApply"), { ref_rfb_ohm: refRfbDraft }, { mode: modeNow, leak_comp: leakDraft })}>{t("rangeApply")}</button>
+                <button className="button" type="button" disabled={working} onClick={() => void sendNumbers("set_range", t("rangeApply"), { ref_rfb_ohm: refRfbDraft }, { mode: modeNow })}>{t("rangeApply")}</button>
               </div>
             </div>
           </div>

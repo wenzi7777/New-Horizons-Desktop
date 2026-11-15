@@ -477,3 +477,23 @@ export function wikiSlugFromHardwareModel(value: string | null | undefined): str
   const matched = KNOWN_PROFILES.find((profile) => normalizeHardwareModel(profile.hardwareModel) === normalized);
   return matched?.wikiSlug ?? slugifyHardwareModel(input);
 }
+
+/**
+ * The silkscreen name of each scanned pin, in scan order: rows are the
+ * analog pins (A..), columns the select pins (D..). A GPIO the board's
+ * header doesn't show is named by its number.
+ */
+export function matrixPinLabels(
+  profile: BoardProfile,
+  analogPins: readonly number[],
+  selectPins: readonly number[],
+): { rows: string[]; cols: string[] } {
+  const slots = [...profile.analogPinSlots, ...profile.digitalPinSlots];
+  const nameOf = (gpio: number, role: "analog" | "select") =>
+    (slots.find((slot) => slot.gpio === gpio && slot.role === role) ?? slots.find((slot) => slot.gpio === gpio))?.label
+    ?? `GPIO${gpio}`;
+  return {
+    rows: analogPins.map((gpio) => nameOf(gpio, "analog")),
+    cols: selectPins.map((gpio) => nameOf(gpio, "select")),
+  };
+}

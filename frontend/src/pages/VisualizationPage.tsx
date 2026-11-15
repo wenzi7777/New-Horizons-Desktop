@@ -8,7 +8,7 @@ import { streamSensorLabel } from "../lib/sensorLabel";
 import { DeviceBatteryChip } from "../components/DeviceBatteryChip";
 import { DevicePickCard } from "../components/DevicePickCard";
 import { deviceBatteryReadout } from "../lib/batteryProfile";
-import { boardProfileForHardwareModel } from "../lib/boardProfile";
+import { boardProfileForHardwareModel, matrixPinLabels } from "../lib/boardProfile";
 import { isHubRelayed, normalizeDevice } from "../lib/device";
 import { connectionRank } from "../lib/deviceStatus";
 import { fitProfileRect, profilePointToScreen, profilePointToWorld, type FittedProfileRect } from "../lib/profileLayout";
@@ -92,9 +92,30 @@ type MatrixView = {
   // The stream index shown in each grid cell, after any mirroring -- what
   // its P label (lib/sensorLabel.ts) is made from.
   indices: number[][];
+  // The pin each displayed row (A..) and column (D..) is scanned on, after
+  // any mirroring; null when the device hasn't reported its layout.
+  rowLabels: string[] | null;
+  colLabels: string[] | null;
   points: DisplayPoint[];
   usesProfileSensors: boolean;
 };
+
+function pinNumbers(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const pins = value.map((pin) => Number(pin));
+  return pins.every((pin) => Number.isInteger(pin) && pin >= 0) ? pins : null;
+}
+
+/** A label per stream row / column, or null if the layout doesn't match the frame. */
+function devicePinLabels(device: DeviceEntry | undefined, rows: number, cols: number) {
+  const status = (device?.last_status ?? {}) as Record<string, unknown>;
+  const lastResult = (device?.last_result ?? {}) as Record<string, unknown>;
+  const layout = (status.matrix_layout ?? lastResult.matrix_layout ?? {}) as Record<string, unknown>;
+  const analog = pinNumbers(layout.analog_pins ?? layout.active_rows);
+  const select = pinNumbers(layout.select_pins ?? layout.active_cols);
+  if (!analog || !select || analog.length !== rows || select.length !== cols) return null;
+  return matrixPinLabels(boardProfileForHardwareModel(normalizeDevice(device as DeviceEntry).hardwareModel), analog, select);
+}
 
 type CalibrationSummary = {
   level: number;
@@ -488,6 +509,8 @@ function buildMatrixView(
       values: [],
       rawValues: null,
       indices: [],
+      rowLabels: null,
+      colLabels: null,
       points: enabledSensors,
       usesProfileSensors: true,
     };
@@ -525,7 +548,15 @@ function buildMatrixView(
     })),
   );
 
-  return { rows, cols, values, rawValues, indices, points, usesProfileSensors: false };
+  const pinLabels = devicePinLabels(device, rows, cols);
+  const rowLabels = pinLabels
+    ? Array.from({ length: rows }, (_, row) => pinLabels.rows[rowMirror ? rows - 1 - row : row])
+    : null;
+  const colLabels = pinLabels
+    ? Array.from({ length: cols }, (_, col) => pinLabels.cols[colMirror ? cols - 1 - col : col])
+    : null;
+
+  return { rows, cols, values, rawValues, indices, rowLabels, colLabels, points, usesProfileSensors: false };
 }
 
 function computeCop(points: DisplayPoint[], rows: number, cols: number) {
@@ -656,8 +687,29 @@ function PressureHeatmap2D({
       context.fillStyle = "#101317";
       context.fillRect(0, 0, cssWidth, cssHeight);
       const gap = 2;
-      const cellWidth = Math.max(1, (cssWidth - gap * (currentMatrix.cols + 1)) / Math.max(currentMatrix.cols, 1));
-      const cellHeight = Math.max(1, (cssHeight - gap * (currentMatrix.rows + 1)) / Math.max(currentMatrix.rows, 1));
+      // Pin names (A.. per row, D.. per column) in a gutter left and above.
+      const rowLabels = currentMatrix.rowLabels;
+      const colLabels = currentMatrix.colLabels;
+      const hasPins = rowLabels !== null && colLabels !== null;
+      const gutterLeft = hasPins ? 30 : 0;
+      const gutterTop = hasPins ? 16 : 0;
+      const cellWidth = Math.max(1, (cssWidth - gutterLeft - gap * (currentMatrix.cols + 1)) / Math.max(currentMatrix.cols, 1));
+      const cellHeight = Math.max(1, (cssHeight - gutterTop - gap * (currentMatrix.rows + 1)) / Math.max(currentMatrix.rows, 1));
+      if (hasPins) {
+        context.save();
+        context.font = `600 ${Math.max(8, Math.min(11, cellHeight * 0.4, cellWidth * 0.4))}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
+        context.fillStyle = "rgba(235, 238, 242, 0.72)";
+        context.textBaseline = "middle";
+        context.textAlign = "center";
+        colLabels.forEach((label, col) => {
+          context.fillText(label, gutterLeft + gap + col * (cellWidth + gap) + cellWidth / 2, gutterTop / 2 + 1);
+        });
+        context.textAlign = "right";
+        rowLabels.forEach((label, row) => {
+          context.fillText(label, gutterLeft - 4, gutterTop + gap + row * (cellHeight + gap) + cellHeight / 2);
+        });
+        context.restore();
+      }
       const showText = cellWidth >= 34 && cellHeight >= 22;
       // Too small to read means too small to draw: no labels on dense grids.
       const showLabels = cellWidth >= 24 && cellHeight >= 16;
@@ -670,8 +722,8 @@ function PressureHeatmap2D({
       for (let row = 0; row < currentMatrix.rows; row += 1) {
         for (let col = 0; col < currentMatrix.cols; col += 1) {
           const value = asFiniteNumber(currentMatrix.values[row]?.[col], 0);
-          const x = gap + col * (cellWidth + gap);
-          const y = gap + row * (cellHeight + gap);
+          const x = gutterLeft + gap + col * (cellWidth + gap);
+          const y = gutterTop + gap + row * (cellHeight + gap);
           context.fillStyle = cssColorForValue(value, currentRange);
           context.beginPath();
           context.roundRect(x, y, cellWidth, cellHeight, Math.min(6, cellWidth * 0.18, cellHeight * 0.18));

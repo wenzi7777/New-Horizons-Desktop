@@ -120,3 +120,11 @@ test("v2.0.F shares the v1.5.F matrix and pins and has its own manifest and wiki
   assert.match(manifestUrlForHardwareModel("VD-CTL/R v2.0.F 2026.10"), /arduino-v20f-latest\.json$/);
   assert.match(manifestUrlForHardwareModel("TIA-CTL v2.0.F 2026.10", "beta"), /arduino-v20f-beta\.json$/);
 });
+
+test("matrix pin labels name rows by A pins and columns by D pins, in scan order", async () => {
+  const { boardProfileForHardwareModel, matrixPinLabels } = await loadBoardProfile();
+  const v20f = boardProfileForHardwareModel("TIA-CTL v2.0.F 2026.10");
+  const labels = matrixPinLabels(v20f, [1, 2, 14], [17, 18, 45, 99]);
+  assert.deepEqual(labels.rows, ["A0", "A1", "A13"]);
+  assert.deepEqual(labels.cols, ["D0", "D1", "D13", "GPIO99"]);
+});
