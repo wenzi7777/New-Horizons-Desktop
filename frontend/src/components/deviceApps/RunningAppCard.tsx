@@ -7,7 +7,8 @@ import {
   formatCpu,
   runtimeName,
 } from "../../lib/deviceApps";
-import { LedDot, OledPanel } from "../sdk/IndicatorViews";
+import { CAPABILITIES } from "../../sdk/lib/index.mjs";
+import { LedDot, OledPanel, StripPixels } from "../sdk/IndicatorViews";
 import { AppGlyph, AppSwitch, LoadBadge, LoadSparkline } from "./AppParts";
 
 /** What the card's status dot says. An idle "running" app has nothing to run. */
@@ -31,6 +32,7 @@ export function RunningAppCard({
   view,
   load,
   history,
+  stripShared = false,
   disabled,
   pending,
   onToggle,
@@ -42,6 +44,11 @@ export function RunningAppCard({
   /** Live from app_view when there is one, else from the last app_list. */
   load: AppLoadStats | null;
   history: readonly number[];
+  /**
+   * More than one running app may drive the external strip. The device
+   * reports one merged strip, not who lit which pixel, so the card says so.
+   */
+  stripShared?: boolean;
   disabled: boolean;
   pending: boolean;
   onToggle: () => void;
@@ -54,6 +61,11 @@ export function RunningAppCard({
   const drawsOled = rows.some(Boolean);
   const ledRequest = view?.statusLed.request && view.statusLed.request.app === name ? view.statusLed.request : null;
   const level = state === "running" ? load?.level ?? "low" : "low";
+  const extCap = (CAPABILITIES as Record<string, number>).drive_ext_led ?? 0;
+  const strip =
+    state === "running" && extCap && (app.capabilities & extCap) !== 0 && view?.extLed.pixels && view.extLed.count > 0
+      ? view.extLed
+      : null;
 
   return (
     <article
@@ -89,15 +101,25 @@ export function RunningAppCard({
         />
       </header>
 
-      <div className={`apps-card-preview${drawsOled || ledRequest ? "" : " empty"}`}>
+      <div className={`apps-card-preview${drawsOled || ledRequest || strip ? "" : " empty"}`}>
         {drawsOled ? <OledPanel rows={rows} /> : null}
         {ledRequest ? (
-          <div className="apps-card-led">
+          <div className="apps-card-led" title={t("appLiveStatusLed")}>
             <LedDot rgb={ledRequest.rgb} />
             {ledRequest.suppressed ? <small>{t("appsLedHeld")}</small> : null}
           </div>
         ) : null}
-        {!drawsOled && !ledRequest ? <span>{t("appsNoOutput")}</span> : null}
+        {strip && strip.pixels ? (
+          <div className="apps-card-strip">
+            <div className="apps-card-strip-head">
+              <span>{t("sdkEmuExtLed")}</span>
+              {stripShared ? <em>{t("appsStripShared")}</em> : null}
+            </div>
+            <StripPixels pixels={strip.pixels} />
+            {strip.owner !== "app" ? <small>{t("appsStripNotShown")}</small> : null}
+          </div>
+        ) : null}
+        {!drawsOled && !ledRequest && !strip ? <span>{t("appsNoOutput")}</span> : null}
       </div>
 
       {state === "running" && load ? (

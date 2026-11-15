@@ -497,7 +497,7 @@ class GatewayRegistryMixin:
             existing_findme = existing.get("findme") if isinstance(existing.get("findme"), dict) else {}
             device["connected"] = True
             device["findme_state"] = "attached"
-            device.setdefault("addr", existing_findme.get("host", ""))
+            device.setdefault("addr", existing_findme.get("device_addr", ""))
             device.setdefault("gateway_name", existing_findme.get("gateway_name", ""))
             device.setdefault("udp_port", existing_findme.get("udp_port", ""))
         device_name = str(device.get("device_name") or device.get("name") or existing.get("device_name") or device_uid)
@@ -512,10 +512,15 @@ class GatewayRegistryMixin:
             "state": str(device.get("findme_state") or ("attached" if connected else "disconnected")),
             "gateway_id": gateway_id,
             "gateway_name": device.get("gateway_name", ""),
-            "host": device.get("last_findme_addr") or device.get("addr") or "",
+            # Not "host" / "last_success_ms": the device's own status uses
+            # those for the relay's address and its own uptime ms, and the two
+            # writers took turns (the FindMe card flickered between the
+            # device's IP and the relay's). The relay's view of the device
+            # gets its own keys.
+            "device_addr": device.get("last_findme_addr") or device.get("addr") or "",
             "udp_port": device.get("udp_port", ""),
             "claim_id": device.get("claim_id", ""),
-            "last_success_ms": device.get("last_findme_at", ""),
+            "last_findme_at": device.get("last_findme_at", ""),
             "last_heartbeat_at": device.get("last_heartbeat_at", ""),
             "last_error": device.get("findme_reason", ""),
         }

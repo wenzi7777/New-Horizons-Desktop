@@ -29,6 +29,13 @@ properly::
             magnetometer}
     transport {path, relay (gateway | hub | direct), relay_id}
     clock               the device's clock status, as it reported it
+    range {mode, vref_mv, ref_rfb_ohm, leak_compensation, rfb_ohm, offset_mv}
+                        TIA-CTL v2.0.F only (null on boards without a Vref
+                        DAC): how the rows were read. mode "raw" at 330 mV
+                        reads like v1.5.F and earlier boards; "virtual" and
+                        "auto" re-express every reading at ref_rfb_ohm and
+                        330 mV, so with the default 20000 they compare with
+                        those boards too.
     battery_at_start {soc_percent, vbat_mv}
     status_received_at  when the status the fields above came from arrived;
                         null = no full status yet (fields filled in later)
@@ -180,6 +187,23 @@ def status_is_full(status: dict[str, Any]) -> bool:
     )
 
 
+def _range_meta(status: dict[str, Any]) -> dict[str, Any] | None:
+    """status.vref + status.range, on a board with a Vref DAC (v2.0.F)."""
+    vref = _dict(status.get("vref"))
+    if vref.get("supported") is not True:
+        return None
+    rng = _dict(status.get("range"))
+    leak = rng.get("leak_compensation")
+    return {
+        "mode": _known(rng.get("mode")),
+        "vref_mv": _known(vref.get("mv")),
+        "ref_rfb_ohm": _known(rng.get("ref_rfb_ohm")),
+        "leak_compensation": leak if isinstance(leak, bool) else None,
+        "rfb_ohm": copy.deepcopy(rng.get("rfb_ohm")) if isinstance(rng.get("rfb_ohm"), list) else None,
+        "offset_mv": copy.deepcopy(rng.get("offset_mv")) if isinstance(rng.get("offset_mv"), list) else None,
+    }
+
+
 def build_device_meta(
     device_uid: str,
     device: dict[str, Any],
@@ -252,6 +276,7 @@ def build_device_meta(
             "relay_id": gateway_id if relay != "direct" else None,
         },
         "clock": copy.deepcopy(status.get("clock")) if isinstance(status.get("clock"), dict) else None,
+        "range": _range_meta(status),
         "battery_at_start": (
             {"soc_percent": _known(stream_battery.get("soc_percent")), "vbat_mv": _known(stream_battery.get("vbat_mv"))}
             if stream_battery
@@ -290,6 +315,10 @@ class RecordingMeta:
         ("transport", "path"),
         ("transport", "relay_id"),
         ("device", "firmware_version"),
+        ("range", "mode"),
+        ("range", "vref_mv"),
+        ("range", "ref_rfb_ohm"),
+        ("range", "leak_compensation"),
     )
 
     def __init__(

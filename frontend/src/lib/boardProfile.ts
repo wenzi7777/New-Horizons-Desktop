@@ -1,5 +1,6 @@
 import v1OverviewAsset from "../assets/VDCTLRv10F20264OVERVIEW.png";
 import v15fOverviewAsset from "../assets/VDCTLRv15F20267OVERVIEW.png";
+import v20fOverviewAsset from "../assets/TIACTLAv20F202610OVERVIEW.png";
 import gcuOverviewAsset from "../assets/VDCTLV23DGCULTSOVERVIEW.png";
 import gcu21OverviewAsset from "../assets/VDCTLV21GCULTSOVERVIEW.png";
 import gcu22cOverviewAsset from "../assets/VDCTLV22CGCULTSOVERVIEW.png";
@@ -382,7 +383,7 @@ const V15F_PROFILE: BoardProfile = {
   digitalPinHeading: "Digital Pins",
 };
 
-// v2.0.F: same connector pins and matrix as v1.5.F; no overview artwork yet.
+// v2.0.F: same connector pins and matrix as v1.5.F, its own overview artwork.
 const V20F_PROFILE: BoardProfile = {
   hardwareModel: V20F_HARDWARE_MODEL,
   wikiSlug: "vd-ctl-r-v2-0-f",
@@ -392,14 +393,14 @@ const V20F_PROFILE: BoardProfile = {
   supportsIoVisualizer: true,
   supportsExternalLed: true,
   supportsOled: true,
-  supportsIoVisualizerArtwork: false,
+  supportsIoVisualizerArtwork: true,
   supportsLocalButtonWake: true,
   supportsChargeControl: true,
   supportsBatteryStatusLed: true,
   supportsBatteryPercentageIndicator: true,
   supportsActionButtonSettings: true,
   powerUx: "local_button",
-  overviewAsset: null,
+  overviewAsset: v20fOverviewAsset,
   analogPinOrder: V15F_ANALOG_PIN_SLOTS.map((pin) => pin.label),
   digitalPinOrder: V15F_DIGITAL_PIN_SLOTS.map((pin) => pin.label),
   analogPinSlots: V15F_ANALOG_PIN_SLOTS,

@@ -113,6 +113,9 @@ test("v2.0.F shares the v1.5.F matrix and pins and has its own manifest and wiki
   assert.deepEqual(v20.defaultSelectPins, v15.defaultSelectPins);
   assert.equal(v20.supportsActionButtonSettings, true);
   assert.equal(v20.supportsBatteryPercentageIndicator, true);
+  // Its own overview artwork (TIA-CTL/A v2.0.F), not the v1.5.F drawing.
+  assert.match(String(v20.overviewAsset), /TIACTLAv20F202610OVERVIEW/);
+  assert.equal(v20.supportsIoVisualizerArtwork, true);
   assert.equal(wikiSlugFromHardwareModel("TIA-CTL v2.0.F 2026.10"), "vd-ctl-r-v2-0-f");
   assert.match(manifestUrlForHardwareModel("VD-CTL/R v2.0.F 2026.10"), /arduino-v20f-latest\.json$/);
   assert.match(manifestUrlForHardwareModel("TIA-CTL v2.0.F 2026.10", "beta"), /arduino-v20f-beta\.json$/);

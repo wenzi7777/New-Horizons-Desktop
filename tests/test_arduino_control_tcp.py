@@ -185,7 +185,8 @@ class ArduinoControlTcpTest(unittest.TestCase):
         self.assertEqual(discovered["gateway_connected"], True)
         self.assertEqual(discovered["transport_path"], "arduino_heartbeat")
         self.assertEqual(discovered["findme"]["state"], "attached")
-        self.assertEqual(discovered["findme"]["host"], "192.168.50.44")
+        self.assertEqual(discovered["findme"]["device_addr"], "192.168.50.44")
+        self.assertNotIn("host", discovered["findme"])
         self.assertEqual(discovered["findme"]["udp_port"], 13250)
         self.assertEqual(service.latest_visualization("3CDC7545CCD0"), [])
 

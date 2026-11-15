@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 import { rsSpreadFraction, summarizeSweep, sweepCsv, type SweepCalibration, type SweepStep, type SweepSummary } from "../lib/vrefSweep";
 import { Select } from "./Select";
+import { SwitchRow } from "./Switch";
 
 // v2.0.F: the Vref DAC, the calibration switch, the measured Rfb per row, the
 // range mode and the Vref sweep. The firmware owns every rule (ceiling,
@@ -101,7 +102,7 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const [limitDraft, setLimitDraft] = useState("700");
   const [measureVref, setMeasureVref] = useState("");
   const [rfbRows, setRfbRows] = useState<RfbRow[] | null>(null);
-  const [modeDraft, setModeDraft] = useState(modeNow);
+
   const [refRfbDraft, setRefRfbDraft] = useState(String(refRfbNow));
   const [leakDraft, setLeakDraft] = useState(leakNow);
   const [sweepStart, setSweepStart] = useState("100");
@@ -111,7 +112,7 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const [sweepSolderedRfb, setSweepSolderedRfb] = useState("");
   const [sweep, setSweep] = useState<SweepResult | null>(null);
 
-  useEffect(() => { setModeDraft(modeNow); setRefRfbDraft(String(refRfbNow)); setLeakDraft(leakNow); }, [modeNow, refRfbNow, leakNow]);
+  useEffect(() => { setRefRfbDraft(String(refRfbNow)); setLeakDraft(leakNow); }, [modeNow, refRfbNow, leakNow]);
   useEffect(() => { if (currentMv !== null) setVrefDraft(String(currentMv)); }, [currentMv]);
   useEffect(() => { if (limitMv !== null) setLimitDraft(String(limitMv)); }, [limitMv]);
 
@@ -164,7 +165,8 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   // A mode applies at once, with the reference Rfb and leak setting in force.
   async function applyMode(mode: string) {
     if (mode !== "raw" && !rfbValid) return;
-    setModeDraft(mode);
+    if (mode === modeNow) return;
+
     const refRfb = fieldNumber(refRfbDraft) ?? refRfbNow;
     await send("set_range", t("rangeApply"), { mode, ref_rfb_ohm: refRfb, leak_comp: leakDraft });
   }
@@ -214,7 +216,11 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const draftMv = fieldNumber(vrefDraft) ?? SAFE_VREF_MV;
   const span = sliderMax - MIN_VREF_MV;
   const share = (from: number, to: number) => Math.max(0, Math.min(to, sliderMax) - Math.max(from, MIN_VREF_MV)) / span;
-  const modeHint = modeNow === "auto" ? t("rangeModeAutoHint") : modeNow === "virtual" ? t("rangeModeVirtualHint") : t("rangeModeRawHint");
+  // Three firmware modes as two switches: conversion (virtual) and, on top of
+  // it, smart Vref (auto). Off/off is raw, the old boards' way of reading.
+  const converting = modeNow !== "raw";
+  const autoSteps = num(range.auto_steps);
+  const legacyScale = modeNow === "raw" && currentMv === SAFE_VREF_MV;
 
   return (
     <>
@@ -239,76 +245,84 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
       </div>
 
       <div className="settings-subsection">
-        <h4>{t("rangeMode")}</h4>
-        <div className="segmented-control" role="group" aria-label={t("rangeMode")}>
-          {(["raw", "virtual", "auto"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={modeNow === mode ? "active" : ""}
-              disabled={working || (mode !== "raw" && !rfbValid)}
-              onClick={() => void applyMode(mode)}
-            >
-              {busy === "set_range" && modeDraft === mode ? t("running") : t(`rangeModeShort_${mode}`)}
-            </button>
-          ))}
-        </div>
-        <p className="field-hint">{modeHint}</p>
+        <h4>{t("vrefReadingTitle")}</h4>
+        <SwitchRow
+          checked={converting}
+          disabled={working || (!converting && !rfbValid)}
+          label={t("vrefConvertSwitch").replace("{ref}", kOhm(refRfbNow))}
+          onChange={(on) => void applyMode(on ? "virtual" : "raw")}
+        />
+        <p className="field-hint">{converting ? t("vrefConvertOnHint") : t("vrefConvertOffHint")}</p>
+        <SwitchRow
+          checked={modeNow === "auto"}
+          disabled={working || !converting}
+          label={t("vrefSmartSwitch")}
+          onChange={(on) => void applyMode(on ? "auto" : "virtual")}
+        />
+        <p className="field-hint">{t("vrefSmartHint")}</p>
         {!rfbValid ? (
           <div className="notice vref-needs-rfb">
             <span>{t("rangeNeedsRfb")}</span>
             <button className="button" type="button" disabled={working} onClick={() => void measureRfb()}>{busy === "rfb_measure" ? t("running") : t("rfbMeasure")}</button>
           </div>
         ) : null}
-        {modeNow !== "raw" ? (
-          <div className="field-grid">
-            <div className="field">
-              <label>{t("rangeRefRfb")}</label>
-              <input type="number" min="1000" max="1000000" step="1000" value={refRfbDraft} onChange={(event) => setRefRfbDraft(event.target.value)} />
-            </div>
-            <label className="switch-row">
-              <input type="checkbox" checked={leakDraft} onChange={(event) => setLeakDraft(event.target.checked)} />
-              <span>{t("rangeLeak")}</span>
-            </label>
-            <div className="field settings-field-action">
-              <button className="button" type="button" disabled={working} onClick={() => void sendNumbers("set_range", t("rangeApply"), { ref_rfb_ohm: refRfbDraft }, { mode: modeNow, leak_comp: leakDraft })}>{t("rangeApply")}</button>
-            </div>
-          </div>
-        ) : null}
+        {legacyScale ? <p className="notice success">{t("vrefLegacyMatch")}</p> : null}
       </div>
 
-      <div className="settings-subsection">
-        <h4>{t("vrefControlTitle")}</h4>
-        {modeNow === "auto" ? <p className="field-hint">{t("vrefAutoControlled")}</p> : null}
-        <div className="vref-slider">
-          <input
-            type="range"
-            min={MIN_VREF_MV}
-            max={sliderMax}
-            step="10"
-            value={Math.min(Math.max(draftMv, MIN_VREF_MV), sliderMax)}
-            disabled={working || modeNow === "auto"}
-            aria-label={t("vrefInputLabel")}
-            onChange={(event) => setVrefDraft(event.target.value)}
-          />
-          <input type="number" min={MIN_VREF_MV} max={sliderMax} step="10" value={vrefDraft} disabled={modeNow === "auto"} aria-label={t("vrefInputLabel")} onChange={(event) => setVrefDraft(event.target.value)} />
-          <span>mV</span>
+      {modeNow === "auto" ? (
+        <div className="settings-subsection">
+          <h4>{t("vrefControlTitle")}</h4>
+          <p className="field-hint">
+            {t("vrefSmartStatus").replace("{mv}", currentMv !== null ? String(currentMv) : "-").replace("{steps}", String(autoSteps ?? 0))}
+          </p>
         </div>
-        <div className="vref-zone-bar" aria-hidden="true">
-          <span className="safe" style={{ flexGrow: share(MIN_VREF_MV, STRAP_MARGIN_MV) }} />
-          <span className="near" style={{ flexGrow: share(STRAP_MARGIN_MV, STRAP_RISK_MV) }} />
-          <span className="risk" style={{ flexGrow: share(STRAP_RISK_MV, sliderMax) }} />
+      ) : (
+        <div className="settings-subsection">
+          <h4>{t("vrefControlTitle")}</h4>
+          <div className="vref-slider">
+            <input
+              type="range"
+              min={MIN_VREF_MV}
+              max={sliderMax}
+              step="10"
+              value={Math.min(Math.max(draftMv, MIN_VREF_MV), sliderMax)}
+              disabled={working}
+              aria-label={t("vrefInputLabel")}
+              onChange={(event) => setVrefDraft(event.target.value)}
+            />
+            <input type="number" min={MIN_VREF_MV} max={sliderMax} step="10" value={vrefDraft} aria-label={t("vrefInputLabel")} onChange={(event) => setVrefDraft(event.target.value)} />
+            <span>mV</span>
+          </div>
+          <div className="vref-zone-bar" aria-hidden="true">
+            <span className="safe" style={{ flexGrow: share(MIN_VREF_MV, STRAP_MARGIN_MV) }} />
+            <span className="near" style={{ flexGrow: share(STRAP_MARGIN_MV, STRAP_RISK_MV) }} />
+            <span className="risk" style={{ flexGrow: share(STRAP_RISK_MV, sliderMax) }} />
+          </div>
+          <p className="field-hint">{t("vrefZoneLegend")}</p>
+          <div className="actions compact">
+            <button className="button primary" type="button" disabled={working} onClick={() => void sendNumbers("set_vref", t("vrefApply"), { mv: vrefDraft })}>{busy === "set_vref" ? t("running") : t("vrefApply")}</button>
+            <button className="button" type="button" disabled={working || currentMv === SAFE_VREF_MV} onClick={() => void send("set_vref", t("vrefReset"), { mv: SAFE_VREF_MV })}>{t("vrefReset")}</button>
+          </div>
         </div>
-        <p className="field-hint">{t("vrefZoneLegend")}</p>
-        <div className="actions compact">
-          <button className="button primary" type="button" disabled={working || modeNow === "auto"} onClick={() => void sendNumbers("set_vref", t("vrefApply"), { mv: vrefDraft })}>{busy === "set_vref" ? t("running") : t("vrefApply")}</button>
-          <button className="button" type="button" disabled={working || currentMv === SAFE_VREF_MV} onClick={() => void send("set_vref", t("vrefReset"), { mv: SAFE_VREF_MV })}>{t("vrefReset")}</button>
-        </div>
-      </div>
+      )}
 
       <details className="settings-more">
         <summary>{t("vrefToolsTitle")}</summary>
         <div className="settings-more-body">
+          <div className="settings-subsection">
+            <h4>{t("vrefAdvancedRangeTitle")}</h4>
+            <div className="field-grid">
+              <div className="field">
+                <label>{t("rangeRefRfb")}</label>
+                <input type="number" min="1000" max="1000000" step="1000" value={refRfbDraft} onChange={(event) => setRefRfbDraft(event.target.value)} />
+              </div>
+              <SwitchRow checked={leakDraft} label={t("rangeLeak")} onChange={setLeakDraft} />
+              <div className="field settings-field-action">
+                <button className="button" type="button" disabled={working} onClick={() => void sendNumbers("set_range", t("rangeApply"), { ref_rfb_ohm: refRfbDraft }, { mode: modeNow, leak_comp: leakDraft })}>{t("rangeApply")}</button>
+              </div>
+            </div>
+          </div>
+
           <div className="settings-subsection">
             <h4>{t("rfbTitle")}</h4>
             <p className="service-muted">{t("rfbCopy")}</p>

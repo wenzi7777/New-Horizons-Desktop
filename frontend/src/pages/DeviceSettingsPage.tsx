@@ -25,6 +25,7 @@ import { compareVersionCores, normalizeUpdateChannel, waitingForStableToCatchUp,
 import { Battery, Check, CircleOff, Lightbulb, Power, TriangleAlert, X } from "lucide-react";
 import { Markdown } from "../components/Markdown";
 import { Select, type SelectChangeEvent } from "../components/Select";
+import { SwitchRow } from "../components/Switch";
 
 // Spike-validated (firmware/spikes/README.md's "PHY rate config" section,
 // 2026-08-06: raw ADC off + 40fps ran clean at 0% loss over ESP-NOW once
@@ -1021,6 +1022,13 @@ function PressureCalibrationPanel({ t, deviceUid, run }: { t: (key: string) => s
 
 // ---------------------------------------------------------------------------
 
+/** findme.last_success_ms is the device's uptime (millis()) at its last FindMe success. */
+function findmeUptimeLabel(value: unknown, t: (key: string) => string): string {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms <= 0) return "-";
+  return t("gatewayLastSuccessUptime").replace("{seconds}", (ms / 1000).toFixed(1));
+}
+
 export function DeviceSettingsPage() {
   const { t, locale } = useI18n();
   const { deviceUid = "" } = useParams();
@@ -1988,7 +1996,7 @@ export function DeviceSettingsPage() {
                       [t("transport"), device?.transport_path ?? status.transport_path ?? "-"],
                       [t("heartbeat"), findme.last_heartbeat_at ?? device?.last_heartbeat_at ?? status.last_heartbeat_at ?? "-"],
                       [t("heartbeatInterval"), findme.heartbeat_interval_ms ?? "-"],
-                      [t("gatewayLastSuccess"), findme.last_success_ms ?? "-"],
+                      [t("gatewayLastSuccess"), findmeUptimeLabel(findme.last_success_ms, t)],
                     ]}
                   />
                 </MoreDetails>
@@ -2250,10 +2258,11 @@ export function DeviceSettingsPage() {
                 <div className="field-grid">
                   <div className="field">
                     <label>{t("externalLedMode")}</label>
-                    <Select value={externalLedMode} onChange={(event) => setExternalLedMode(event.target.value)}>
-                      <option value="off">{t("indicatorMode_off")}</option>
-                      <option value="enabled">{t("indicatorMode_enabled")}</option>
-                    </Select>
+                    <SwitchRow
+                      checked={externalLedMode !== "off"}
+                      label={t(externalLedMode !== "off" ? "indicatorMode_enabled" : "indicatorMode_off")}
+                      onChange={(on) => setExternalLedMode(on ? "enabled" : "off")}
+                    />
                   </div>
                   <div className="field">
                     <label>{t("externalLedPreset")}</label>
@@ -2527,10 +2536,7 @@ export function DeviceSettingsPage() {
                 </p>
               </div>
               <div className="settings-row-controls">
-                <label className="switch-row">
-                  <input type="checkbox" checked={imuEnabled} onChange={(event) => setImuEnabled(event.target.checked)} />
-                  <span>{t("paramEnabled")}</span>
-                </label>
+                <SwitchRow checked={imuEnabled} label={t("paramEnabled")} onChange={setImuEnabled} />
                 <button className="button" type="button" disabled={isCommandBusy("set_imu") || !deviceUid} onClick={() => void run(t("saveImu"), { command: "set_imu", enabled: imuEnabled })}>
                   {isCommandBusy("set_imu") ? t("running") : t("saveImu")}
                 </button>
@@ -2558,10 +2564,7 @@ export function DeviceSettingsPage() {
                 </p>
               </div>
               <div className="settings-row-controls">
-                <label className="switch-row">
-                  <input type="checkbox" checked={streamBufferEnabled} onChange={(event) => setStreamBufferEnabled(event.target.checked)} />
-                  <span>{t("paramEnabled")}</span>
-                </label>
+                <SwitchRow checked={streamBufferEnabled} label={t("paramEnabled")} onChange={setStreamBufferEnabled} />
                 <Select value={streamBufferMode} disabled={!streamBufferEnabled} onChange={(event) => setStreamBufferMode(event.target.value)} aria-label={t("streamBufferMode")}>
                   <option value="standard">{t("streamBufferStandardMode")}</option>
                   <option value="extended">{t("streamBufferExtendedMode")}</option>
@@ -2672,10 +2675,7 @@ export function DeviceSettingsPage() {
             <MoreDetails label={t("settingsAdvanced")}>
               {otaChannelSupported ? (
                 <>
-                  <label className="switch-row">
-                    <input type="checkbox" checked={showCustomManifest} onChange={(event) => setShowCustomManifest(event.target.checked)} />
-                    <span>{t("updateCustomManifest")}</span>
-                  </label>
+                  <SwitchRow checked={showCustomManifest} label={t("updateCustomManifest")} onChange={setShowCustomManifest} />
                   {showCustomManifest ? (
                     <div className="field">
                       <label>Manifest URL</label>
@@ -2698,10 +2698,7 @@ export function DeviceSettingsPage() {
                 </>
               )}
               <div className="control-row">
-                <label className="switch-row">
-                  <input type="checkbox" checked={autoOtaOnBoot} onChange={(event) => setAutoOtaOnBoot(event.target.checked)} />
-                  <span>{t("autoOtaOnBoot")}</span>
-                </label>
+                <SwitchRow checked={autoOtaOnBoot} label={t("autoOtaOnBoot")} onChange={setAutoOtaOnBoot} />
                 <button className="button" type="button" disabled={isCommandBusy("set_ota_config") || !deviceUid} onClick={() => void saveOtaConfig()}>
                   {isCommandBusy("set_ota_config") ? t("running") : t("saveUpdateSettings")}
                 </button>
@@ -2909,10 +2906,7 @@ export function DeviceSettingsPage() {
                 </p>
               </div>
               <div className="settings-row-controls">
-                <label className="switch-row">
-                  <input type="checkbox" checked={logEnabled} onChange={(event) => setLogEnabled(event.target.checked)} />
-                  <span>{t("paramEnabled")}</span>
-                </label>
+                <SwitchRow checked={logEnabled} label={t("paramEnabled")} onChange={setLogEnabled} />
                 <Select value={logLevel} onChange={(event) => setLogLevel(event.target.value)} aria-label={t("logLevel")}>
                   <option value="error">error</option>
                   <option value="warn">warn</option>
@@ -2961,10 +2955,7 @@ export function DeviceSettingsPage() {
             <h4>{t("filterDiagnostics")}</h4>
             <p>{t("filterDiagnosticsCopy")}</p>
             <div className="field-grid">
-              <label className="switch-row">
-                <input type="checkbox" checked={filterEnabled} onChange={(event) => setFilterEnabled(event.target.checked)} />
-                <span>{t("filterEnabled")}</span>
-              </label>
+              <SwitchRow checked={filterEnabled} label={t("filterEnabled")} onChange={setFilterEnabled} />
               <div className="field">
                 <label>{t("filterMedian")}</label>
                 <Select value={filterMedian} disabled={!filterEnabled} onChange={(event) => setFilterMedian(Number(event.target.value))}>
@@ -2994,10 +2985,7 @@ export function DeviceSettingsPage() {
             <h4>{t("rawAdcDiagnostics")}</h4>
             <p>{t("rawAdcDiagnosticsCopy")}</p>
             <div className="field-grid">
-              <label className="switch-row">
-                <input type="checkbox" checked={rawAdcEnabled} onChange={(event) => setRawAdcEnabled(event.target.checked)} />
-                <span>{t("rawAdcEnabled")}</span>
-              </label>
+              <SwitchRow checked={rawAdcEnabled} label={t("rawAdcEnabled")} onChange={setRawAdcEnabled} />
             </div>
             <p className="service-muted">{t("onDevice")}: {boolString(streamRawAdcEnabled)}</p>
             <div className="actions compact">

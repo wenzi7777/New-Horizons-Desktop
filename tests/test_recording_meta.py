@@ -117,6 +117,18 @@ class DeviceMetaTests(unittest.TestCase):
         self.assertEqual(meta["battery_at_start"], {"soc_percent": 80, "vbat_mv": 3990})
         self.assertEqual(meta["status_received_at"], "2026-10-16T06:27:10+00:00")
 
+    def test_the_range_block_says_how_a_v20f_read_its_rows(self):
+        # Boards without a Vref DAC (v1.5.F and earlier, GCU): no range block.
+        self.assertIsNone(build_device_meta("DEV", {}, FULL_STATUS)["range"])
+        v20 = dict(FULL_STATUS,
+                   vref={"supported": True, "ok": True, "mv": 264},
+                   range={"mode": "auto", "ref_rfb_ohm": 20000, "leak_compensation": True,
+                          "rfb_ohm": [20010.5, 0], "offset_mv": [3.2, 0]})
+        self.assertEqual(build_device_meta("DEV", {}, v20)["range"], {
+            "mode": "auto", "vref_mv": 264, "ref_rfb_ohm": 20000, "leak_compensation": True,
+            "rfb_ohm": [20010.5, 0], "offset_mv": [3.2, 0],
+        })
+
     def test_a_disconnected_gateway_is_not_the_relay(self):
         meta = build_device_meta("X", {"gateway_id": "gw", "gateway_connected": False}, {})
         self.assertEqual(meta["transport"]["relay"], "direct")
@@ -201,6 +213,17 @@ class RecordingMetaTests(unittest.TestCase):
         }])
         # Not tracked: stays what it was when first known.
         self.assertEqual(document["device"]["hardware_model"], "TIA-CTL v1.5.F 2026.7")
+
+    def test_a_range_mode_change_mid_recording_is_logged(self):
+        meta = self.meta()
+        meta.on_frame(10, 1)
+        raw = dict(FULL_STATUS, vref={"supported": True, "mv": 330}, range={"mode": "raw", "ref_rfb_ohm": 20000})
+        meta.refresh_device(build_device_meta("DEV", {}, raw))
+        auto = dict(raw, range={"mode": "auto", "ref_rfb_ohm": 20000})
+        meta.refresh_device(build_device_meta("DEV", {}, auto))
+        document = self.on_disk()
+        self.assertEqual(document["range"]["mode"], "auto")
+        self.assertEqual([c["field"] for c in document["changes"]], ["range.mode"])
 
     def test_stop_says_how_the_recording_ended_once(self):
         meta = self.meta()

@@ -612,6 +612,41 @@ class IndependentNewHorizonsTest(unittest.TestCase):
         self.assertEqual(device["last_live_seen_at"], recent)
         self.assertNotEqual(device["last_seen_at"], recent)
 
+    def test_relay_snapshot_and_device_status_do_not_take_turns_on_findme_host(self):
+        # Regression: the relay's snapshot wrote the device's IP and an ISO time
+        # into findme.host / last_success_ms, which the device's own status
+        # uses for the relay's address and its uptime ms; the FindMe card
+        # flipped between the two every few seconds.
+        service = NewHorizonsService(mock_mode=False)
+        device_uid = "3CDC7545CCD0"
+        recent = datetime.now(timezone.utc).isoformat()
+        device_status = {
+            "device_uid": device_uid,
+            "message": "status",
+            "mode": "normal",
+            "received_at": recent,
+            "gateway_connected": True,
+            "findme": {"state": "attached", "gateway_id": "studio-01bb31f1", "host": "192.168.1.99", "udp_port": 13250, "last_success_ms": 11255},
+        }
+        relay_summary = {
+            "gateway_name": "NH Studio",
+            "state": {"devices": [{
+                "device_uid": device_uid,
+                "connected": True,
+                "findme_state": "attached",
+                "last_findme_addr": "192.168.1.4",
+                "last_findme_at": recent,
+            }]},
+        }
+        for _ in range(2):
+            service.record_gateway_result(device_uid, dict(device_status))
+            service.record_gateway_summary("studio-01bb31f1", relay_summary)
+            findme = service.get_device(device_uid)["findme"]
+            self.assertEqual(findme["host"], "192.168.1.99")
+            self.assertEqual(findme["last_success_ms"], 11255)
+            self.assertEqual(findme["device_addr"], "192.168.1.4")
+            self.assertEqual(findme["last_findme_at"], recent)
+
     def test_gateway_summary_disconnected_does_not_override_recent_attached_findme(self):
         service = NewHorizonsService(mock_mode=False)
         device_uid = "3CDC7545CCD0"

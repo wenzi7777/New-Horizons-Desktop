@@ -46,9 +46,12 @@ class DatagramIngestMixin:
                     "last_heartbeat_at": now,
                     "findme": {
                         "state": "attached",
-                        "host": addr[0],
+                        # The device's address (its own status uses "host"
+                        # for the server it streams to, "last_success_ms"
+                        # for its uptime ms).
+                        "device_addr": addr[0],
                         "udp_port": self._udp_port,
-                        "last_success_ms": now,
+                        "last_findme_at": now,
                         "last_error": "",
                     },
                     "received_at": now,

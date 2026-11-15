@@ -32,6 +32,7 @@ import { AppGlyph, isViewKind } from "./AppParts";
 import { AppResourceBar } from "./AppResourceBar";
 import { InstalledAppRow } from "./InstalledAppRow";
 import { RunningAppCard } from "./RunningAppCard";
+import { CAPABILITIES } from "../../sdk/lib/index.mjs";
 
 /** The fastest the live view asks; a slow link (ESP-NOW via a Hub) slows it further. */
 const MIN_POLL_MS = 1000;
@@ -185,6 +186,12 @@ export function DeviceAppsSection({
     });
   }, [apps, packages, catalog, localise]);
   const running = useMemo(() => merged.filter((app) => app.active && !isViewKind(app.kind)), [merged]);
+  // Running apps that may drive the external strip: the device reports one
+  // merged strip, so a card says "shared" when more than one could have lit it.
+  const stripDrivers = useMemo(() => {
+    const bit = (CAPABILITIES as Record<string, number>).drive_ext_led ?? 0;
+    return running.filter((app) => app.runtime?.state === "running" && (app.capabilities & bit) !== 0).length;
+  }, [running]);
   const installed = useMemo(() => merged.filter((app) => !app.active && !isViewKind(app.kind)), [merged]);
   const views = useMemo(() => merged.filter((app) => isViewKind(app.kind)), [merged]);
   const colourOf = useCallback(
@@ -444,6 +451,7 @@ export function DeviceAppsSection({
                 view={view}
                 load={loadOf(app)}
                 history={history.get(runtimeName(app)) ?? []}
+                stripShared={stripDrivers > 1}
                 disabled={disabled}
                 pending={pending === app.id}
                 onToggle={() => requestToggle(app)}

@@ -12246,3 +12246,52 @@ button.cal-matrix-cell:active {
   .apps-row-blocker { display: none; }
   .apps-sheet { border-radius: 20px 20px 0 0; }
 }
+
+/* Icon + label buttons in the Apps section: the icon sits on the text's centre
+   line with a gap, instead of on its baseline touching the first letter. */
+.apps-section .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1.2;
+}
+.apps-section .button > svg {
+  flex: none;
+  display: block;
+}
+
+/* The external strip under the display on a running app's card. */
+.apps-section .apps-card-preview {
+  flex-wrap: wrap;
+}
+.apps-card-strip {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 10px;
+  color: #aeaeb2;
+}
+.apps-card-strip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.apps-card-strip-head em {
+  font-style: normal;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.12);
+}
+.apps-card-strip small {
+  color: #ff9f0a;
+}
+.apps-card-strip .sdk-strip {
+  flex-wrap: wrap;
+}
+
+/* On/off settings use the same switch as the Apps section. */
+.switch-row { cursor: pointer; user-select: none; }
+.switch-row.disabled { cursor: default; opacity: 0.6; }
+.field > .switch-row { min-height: 36px; }
