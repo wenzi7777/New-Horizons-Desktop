@@ -59,19 +59,21 @@ class DeclarativeOnlyTests(unittest.TestCase):
 
 class SourceOfTruthTests(unittest.TestCase):
     def test_a_readout_is_loaded_from_the_device_not_the_catalog(self):
-        panel = read("components/DeviceAppsPanel.tsx")
+        section = read("components/deviceApps/DeviceAppsSection.tsx")
         # The device is the source of truth for what it has; reading from there
         # also works for a sideloaded package or an unreachable library.
-        self.assertIn("readDeviceFile(runner", panel)
-        self.assertIn("apps/${entry.id}.nha", panel)
+        self.assertIn("readDeviceFile(runnerRef.current", section)
+        self.assertIn("apps/${app.id}.nha", section)
 
     def test_readouts_are_separated_from_flow_packages(self):
-        panel = read("components/DeviceAppsPanel.tsx")
-        # A readout (or panel) holds no slot, so listing it among slot-bound
-        # packages would invite someone to try activating it.
-        self.assertIn('return kind === "readout" || kind === "panel";', panel)
-        self.assertIn("packages.filter((p) => isViewKind(p.kind))", panel)
-        self.assertIn("packages.filter((p) => !isViewKind(p.kind))", panel)
+        section = read("components/deviceApps/DeviceAppsSection.tsx")
+        parts = read("components/deviceApps/AppParts.tsx")
+        # A readout (or panel) never runs on the device, so listing it among
+        # apps with an on/off switch would invite someone to switch it on.
+        self.assertIn('return kind === "readout" || kind === "panel";', parts)
+        self.assertIn("merged.filter((app) => isViewKind(app.kind))", section)
+        self.assertIn("merged.filter((app) => !app.active && !isViewKind(app.kind))", section)
+        self.assertIn("{view ? null : (", read("components/deviceApps/InstalledAppRow.tsx"))
 
     def test_the_package_kind_is_parsed(self):
         lib = read("lib/deviceApps.ts")

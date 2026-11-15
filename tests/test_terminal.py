@@ -20,7 +20,7 @@ BOARD_PROFILE = ROOT / "frontend" / "src" / "lib" / "boardProfile.ts"
 
 
 # Blocks whose params are all optional but need at least one of them.
-EITHER_OR_PARAM_COMMANDS = {"app-deactivate": "id_or_slot_required"}
+EITHER_OR_PARAM_COMMANDS: dict[str, str] = {}
 
 
 def command_blocks_from_source() -> list[dict]:

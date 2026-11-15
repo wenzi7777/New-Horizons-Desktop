@@ -11,7 +11,6 @@ import { GatewaysPage } from "./pages/GatewaysPage";
 import { LaunchpadPage } from "./pages/LaunchpadPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AppStorePage } from "./pages/AppStorePage";
-import { DeviceAppsPage } from "./pages/DeviceAppsPage";
 import { ToolsPage } from "./pages/ToolsPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { TerminalPage } from "./pages/TerminalPage";
@@ -49,6 +48,12 @@ function allowedRoles(roles: readonly string[], currentRole: string | undefined)
 function LegacyPluginRedirect() {
   const { toolId } = useParams<{ toolId: string }>();
   return <Navigate to={`/tools/${toolId ?? ""}`} replace />;
+}
+
+/** The device's apps were their own page before v1.12.0; now a settings section. */
+function DeviceAppsRedirect() {
+  const { deviceUid } = useParams<{ deviceUid: string }>();
+  return <Navigate to={`/device/${encodeURIComponent(deviceUid ?? "")}/settings?section=apps`} replace />;
 }
 
 function RequireRole({ roles, children }: { roles: Role[]; children: JSX.Element }) {
@@ -287,11 +292,7 @@ function AuthenticatedApp() {
           />
           <Route
             path="/device/:deviceUid/apps"
-            element={
-              <RequireRole roles={["admin"]}>
-                <DeviceAppsPage />
-              </RequireRole>
-            }
+            element={<DeviceAppsRedirect />}
           />
           <Route
             path="/apps/:appId"

@@ -50,11 +50,8 @@ KERNEL_COMMANDS = {
     "set-time --epoch-ms 1716026905000": "set_time",
     "set-power-profile --profile balanced": "set_power_profile",
     "app-list": "app_list",
-    "app-enable --name flow": "app_enable",
-    "app-disable --name flow1": "app_disable",
-    "app-revive --name flow": "app_revive",
-    "app-load-flow --path apps/flow.json": "app_load_flow",
-    "app-unload-flow": "app_unload_flow",
+    "app-revive --name heel_strike": "app_revive",
+    "app-reorder --id heel_strike --to 0": "app_reorder",
     "app-view": "app_view",
     # v1.19.0 task manager. Every stop lasts until reboot.
     "sysmon": "sysmon",
@@ -108,7 +105,6 @@ class KernelCommandCompilationTests(unittest.TestCase):
         # The firmware treats an absent path as "dump everything" / "use the
         # default file"; inventing a default here would change its meaning.
         self.assertNotIn("path", compile_terminal_command("config-get")["payload"])
-        self.assertNotIn("path", compile_terminal_command("app-load-flow")["payload"])
 
 
 class KernelCommandModeGateTests(unittest.TestCase):

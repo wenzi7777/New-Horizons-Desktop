@@ -71,11 +71,7 @@ SHARED_COMMANDS = {
     "set_clock_config",
     "set_power_profile",
     "app_list",
-    "app_enable",
-    "app_disable",
     "app_revive",
-    "app_load_flow",
-    "app_unload_flow",
     "app_events",
     "app_list_packages",
     "app_verify",
@@ -95,6 +91,8 @@ SHARED_COMMANDS = {
     "service_start",
     "app_stop",
     "app_start",
+    # v2.1.0: which running app wins shared OLED rows and the status LED.
+    "app_reorder",
 }
 
 NORMAL_COMMANDS = SHARED_COMMANDS | {

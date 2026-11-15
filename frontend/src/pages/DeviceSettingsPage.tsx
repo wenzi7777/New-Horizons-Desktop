@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import { api, type PressureCalReadings, type PressureCalServerPreset } from "../lib/api";
 
@@ -17,7 +17,7 @@ import { BoardIoModal } from "./TerminalPage";
 import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { CalibrationWorkbench, type CalibrationRun } from "../components/calibration/CalibrationWorkbench";
-import { DeviceAppsPanel } from "../components/DeviceAppsPanel";
+import { DeviceAppsSection } from "../components/deviceApps/DeviceAppsSection";
 import { DeviceClockCard } from "../components/DeviceClockCard";
 import { DeviceHealthCard } from "../components/DeviceHealthCard";
 import { ScanHealthCard } from "../components/ScanHealthCard";
@@ -1121,7 +1121,11 @@ export function DeviceSettingsPage() {
   const updateState = recordValue(status.update_state ?? device?.update_state ?? (lastResultCommand === "check_update" ? lastResult.update_state : undefined));
   const updateChangelogUrl = stringValue(updateState.changelog_url ?? (lastResultCommand === "check_update" ? lastResult.changelog_url : undefined), "");
 
-  const [activeSection, setActiveSection] = useState<SettingsSection>("overview");
+  // ?section=apps (the App Store's "open the device's apps" link) opens on
+  // that section; any other value falls back to the overview.
+  const [searchParams] = useSearchParams();
+  const [activeSection, setActiveSection] = useState<SettingsSection>(() =>
+    searchParams.get("section") === "apps" ? "apps" : "overview");
   // The Mode overview card's dropdown: a pending choice, applied explicitly.
   // Follows the device's reported mode whenever that changes.
   const currentMode = normalized?.mode ?? "";
@@ -2824,24 +2828,21 @@ export function DeviceSettingsPage() {
               <h3>{t("settingsSection_apps")}</h3>
               <p>{t("settingsAppsCopy")}</p>
             </div>
-            <Link className="button" to={`/device/${encodeURIComponent(deviceUid)}/apps`}>
-              {t("deviceApps")}
-            </Link>
           </div>
-          <DeviceAppsPanel
-            // This page owns a single-flight mutex over run(); the panel must
+          <DeviceAppsSection
+            // This page owns a single-flight mutex over run(); the section must
             // share it rather than opening a second pipeline to the device.
-            // waitForLock: the live preview holds the same mutex between
-            // polls, and an operator's click must wait it out, not be dropped.
+            // waitForLock: the live view holds the same mutex between polls,
+            // and an operator's click must wait it out, not be dropped.
             runner={(payload, timeoutMs) =>
               run(String(payload.command ?? "app"), payload, timeoutMs, { waitForLock: true })}
             poll={(payload, timeoutMs) =>
               run(String(payload.command ?? "app_view"), payload, timeoutMs, { background: true })}
-            maintenanceMode={inMaintenanceMode}
+            inMaintenance={inMaintenanceMode}
             supportsRegistry={supportsAppRegistry}
+            recording={Boolean(device?.recording_enabled)}
             deviceUid={deviceUid}
             busy={Boolean(busyCommand)}
-            compact
           />
         </div>
       );

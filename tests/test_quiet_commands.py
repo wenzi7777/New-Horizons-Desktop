@@ -37,7 +37,7 @@ class QuietFlagTests(unittest.TestCase):
         lib = read(SRC / "lib" / "deviceCommand.ts")
         queue = lib[lib.index("export function useDeviceCommand"):]
         self.assertNotIn("quietCommand", queue)
-        for name in ("pages/TerminalPage.tsx", "components/DeviceAppsPanel.tsx"):
+        for name in ("pages/TerminalPage.tsx", "components/deviceApps/DeviceAppsSection.tsx"):
             self.assertNotIn("quietCommand", read(SRC / name), name)
 
     def test_settings_page_marks_its_automatic_refreshes(self):

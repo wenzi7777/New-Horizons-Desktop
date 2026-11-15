@@ -506,9 +506,8 @@ class MockDeviceMixin:
             self._mock_apps[device_uid] = self._mock_default_apps()
             self._mock_packages[device_uid] = self._mock_default_packages()
         # One device carries a killed app, so the overrun/revive UI has something
-        # real to render against. Killing "rules" rather than inventing a third
-        # app keeps the roster to what a v1.0.0 device actually has.
-        killed = next(a for a in self._mock_apps["NH-MOCK-002"] if a["name"] == "flow")
+        # real to render against.
+        killed = next(a for a in self._mock_apps["NH-MOCK-002"] if a["name"] == "heel_strike")
         killed.update({"state": "killed", "overruns": 5, "last_us": 2130, "max_us": 2410})
 
         for device_uid, sample in samples.items():
@@ -818,14 +817,14 @@ class MockDeviceMixin:
         """Synthesise the firmware's /proc views so `--scope proc` is demoable."""
         if path == "apps":
             apps = self._mock_apps.setdefault(device_uid, self._mock_default_apps())
-            lines = ["NAME       STATE      BUDGET_US  LAST_US  MAX_US  OVERRUNS"]
+            lines = ["NAME            STATE      BUDGET_US  LAST_US  MAX_US  OVERRUNS"]
             for app in apps:
-                lines.append("{:<10} {:<10} {:>9}  {:>7}  {:>6}  {:>8}".format(
+                lines.append("{:<15} {:<10} {:>9}  {:>7}  {:>6}  {:>8}".format(
                     app["name"], app["state"], app["budget_us"],
                     app["last_us"], app["max_us"], app["overruns"]))
             lines.append("")
             lines.append("EVENTS")
-            lines.append("[6 @18700 f18718] flow heel_strike fall")
+            lines.append("[6 @18700 f18718] heel_strike heel_strike fall")
             return "\n".join(lines) + "\n"
         if path == "tasks":
             return ("NAME          INVOCATIONS  LAST_US  MAX_US  CPU_PERMILLE\n"
@@ -860,33 +859,61 @@ class MockDeviceMixin:
             if path.is_file()
         ]
 
+    # The v2.1.0 app runtime: one memory pool, no slots (AppVm::kPoolBytes).
+    MOCK_POOL_BYTES = 8192
+    MOCK_APP_BUDGET_US = 4166  # 250 permille of a 60 Hz frame
+
     @staticmethod
-    def _mock_app_view(apps: list[dict[str, Any]]) -> dict[str, Any]:
+    def _mock_load(app: dict[str, Any], share_us: int) -> dict[str, Any]:
+        """AppLoad/AppShare fields, shaped like AppManager::loadJson()."""
+        if app["state"] != "running":
+            return {"load": 0, "level": "low", "cpu1": 0, "cpu10": 0, "cpu60": 0,
+                    "base_us": share_us, "borrowed_us": 0, "lent_us": 0}
+        phase = (time.time() % 8.0) / 8.0
+        load = int(30 + abs(phase * 2 - 1) * 50) if app.get("burst") else int(12 + phase * 10)
+        level = "low" if load < 50 else "medium" if load < 80 else "high"
+        cpu = load * 2  # permille of wall clock, roughly
+        borrowed = share_us // 3 if app.get("burst") and load >= 60 else 0
+        return {"load": load, "level": level, "cpu1": cpu, "cpu10": cpu, "cpu60": cpu,
+                "base_us": share_us, "borrowed_us": borrowed, "lent_us": 0}
+
+    @classmethod
+    def _mock_app_view(cls, apps: list[dict[str, Any]]) -> dict[str, Any]:
         """A moving app_view, shaped like ControlServer::appViewJson().
 
-        Only the "flow" slot draws, and only while it runs, so disabling it in
+        Only heel_strike draws, and only while it runs, so turning it off in
         the mock empties the preview the way it would on hardware.
         """
-        running = any(a["name"] == "flow" and a["state"] == "running" for a in apps)
+        share = cls.MOCK_APP_BUDGET_US // max(1, len(apps))
+        load = {
+            "cpu10": sum(cls._mock_load(a, share)["cpu10"] for a in apps),
+            "budget_us": cls.MOCK_APP_BUDGET_US, "throttled": False,
+            "apps": [{"name": a["name"], "state": a["state"],
+                      "memory_bytes": a.get("memory_bytes", 0), **cls._mock_load(a, share)}
+                     for a in apps],
+        }
+        running = any(a["name"] == "heel_strike" and a["state"] == "running" for a in apps)
         if not running:
             return {
                 "oled": {"hw": True, "page": "live_status", "on_screen": False, "rows": [None] * 4},
                 "status_led": {"rgb": [0, 80, 0], "signal": "online", "owner": "system"},
                 "ext_led": {"count": 3, "owner": "system_status"},
+                "load": load,
             }
         phase = (time.time() % 4.0) / 4.0
-        load = round(abs(phase * 2 - 1) * 100, 1)
+        value_pct = round(abs(phase * 2 - 1) * 100, 1)
         strike = phase < 0.25
-        value = f"{load:.1f}"
+        value = f"{value_pct:.1f}"
         label = "LOAD"
         text = label + " " * (21 - len(label) - len(value)) + value
+        others = [a["name"] for a in apps if a["name"] != "heel_strike" and a["state"] == "running"]
         return {
             "oled": {
                 "hw": True, "page": "live_status", "on_screen": False,
                 "rows": [
-                    {"slot": "flow", "kind": "text", "label": label, "text": text},
-                    {"slot": "flow", "kind": "bar", "label": "HEEL", "x0": 30, "width": 98,
-                     "fill_px": int(load / 100 * 96), "contended": ["flow1"]},
+                    {"app": "heel_strike", "kind": "text", "label": label, "text": text, "contended": []},
+                    {"app": "heel_strike", "kind": "bar", "label": "HEEL", "x0": 30, "width": 98,
+                     "fill_px": int(value_pct / 100 * 96), "contended": others[:1]},
                     None,
                     None,
                 ],
@@ -894,61 +921,63 @@ class MockDeviceMixin:
             "status_led": {
                 "rgb": [255, 0, 0] if strike else [0, 80, 0],
                 "signal": "online",
-                "owner": "flow" if strike else "system",
-                **({"app_request": {"slot": "flow", "rgb": [255, 0, 0], "suppressed": False}} if strike else {}),
+                "owner": "heel_strike" if strike else "system",
+                **({"app_request": {"app": "heel_strike", "rgb": [255, 0, 0], "suppressed": False}}
+                   if strike else {}),
             },
             "ext_led": {
                 "count": 3, "owner": "app",
-                "pixels": [[0, 160, 0] if load > 20 else [0, 0, 0],
-                           [160, 160, 0] if load > 50 else [0, 0, 0],
-                           [160, 0, 0] if load > 80 else [0, 0, 0]],
+                "pixels": [[0, 160, 0] if value_pct > 20 else [0, 0, 0],
+                           [160, 160, 0] if value_pct > 50 else [0, 0, 0],
+                           [160, 0, 0] if value_pct > 80 else [0, 0, 0]],
             },
+            "load": load,
         }
 
     @staticmethod
-    def _mock_default_apps() -> list[dict[str, Any]]:
-        """The four flow slots a v1.1.0 device compiles in.
+    def _mock_runtime_entry(package: dict[str, Any], order: int, state: str = "running") -> dict[str, Any]:
+        """One running app, shaped like AppManager::statusJson() (v2.1.0)."""
+        return {
+            "name": package["id"], "version": package["version"], "state": state,
+            "capabilities": package["capabilities"], "budget_us": 2000, "invocations": 18422,
+            "last_us": 900, "max_us": 1180, "overruns": 0, "events": 6, "idle": False,
+            "order": order, "burst": package.get("burst", False),
+            "memory_bytes": package["memory_bytes"],
+            "state_detail": {
+                "graph": package["id"], "package": package["id"],
+                "source": "apps/{}.nha".format(package["id"]), "nodes": 4,
+                "estimated_us": package["estimated_us"], "budget_us": 2000, "emissions": 6,
+                "frames": 18422, "degraded": False, "degradations": 0, "outputs": [],
+                "vm": {"suspensions": 0, "frames_skipped": 0},
+            },
+        }
 
-        Slots are hosts, not content: a slot exists whether or not a package is
-        bound to it. Shapes match AppManager::statusJson() so UI written against
-        the mock works unchanged against hardware.
-        """
-        def slot(name: str, state: str, **overrides: Any) -> dict[str, Any]:
-            entry = {
-                "name": name, "version": "1.0.0", "state": state,
-                "capabilities": 5, "budget_us": 2000, "invocations": 18422,
-                "last_us": 0, "max_us": 0, "overruns": 0, "events": 0,
-                "state_detail": {
-                    "graph": "", "package": "", "source": "", "nodes": 0,
-                    "estimated_us": 0, "budget_us": 2000, "emissions": 0,
-                    "frames": 0, "degraded": False, "degradations": 0, "outputs": [],
-                },
-            }
-            entry.update(overrides)
-            return entry
-
-        return [
-            slot("flow", "running", last_us=900, max_us=1180, events=6, state_detail={
-                "graph": "heel_strike", "package": "heel_strike",
-                "source": "apps/heel_strike.nha", "nodes": 4, "estimated_us": 15,
-                "budget_us": 2000, "emissions": 6, "frames": 18422,
-                "degraded": False, "degradations": 0,
-                "outputs": [{"op": "region_sum", "result": 41.7, "bool": False}],
-            }),
-            slot("flow1", "installed"),
-            slot("flow2", "installed"),
-            slot("flow3", "installed"),
-        ]
+    @classmethod
+    def _mock_default_apps(cls) -> list[dict[str, Any]]:
+        """The apps that are on: one entry per running app, named by its id."""
+        return [cls._mock_runtime_entry(p, p["order"])
+                for p in cls._mock_default_packages() if p["active"]]
 
     @staticmethod
     def _mock_default_packages() -> list[dict[str, Any]]:
-        return [{
-            "id": "heel_strike", "name": "Heel Strike", "version": "1.0.0",
-            "author": "wenzi7777", "summary": "Emits heel_strike on the rear half of the mat.",
-            "category": "biomechanics", "min_os": "v1.0.0", "sha256": "0" * 64,
-            "capabilities": 5, "size": 492, "estimated_us": 15, "slot": 0,
-            "state": "active",
-        }]
+        return [
+            {
+                "id": "heel_strike", "kind": "flow", "name": "Heel Strike", "version": "1.0.0",
+                "author": "wenzi7777", "summary": "Emits heel_strike on the rear half of the mat.",
+                "category": "biomechanics", "min_os": "v1.0.0", "sha256": "0" * 64,
+                "capabilities": 5, "granted": 0, "size": 492, "estimated_us": 15,
+                "memory_bytes": 1508, "burst": False, "active": True, "order": 0,
+                "state": "active",
+            },
+            {
+                "id": "gait_rhythm", "kind": "flow", "name": "Gait Rhythm", "version": "1.2.0",
+                "author": "wenzi7777", "summary": "Tracks cadence from heel and toe contacts.",
+                "category": "biomechanics", "min_os": "v2.1.0", "sha256": "1" * 64,
+                "capabilities": 5, "granted": 0, "size": 1310, "estimated_us": 0,
+                "memory_bytes": 2380, "burst": True, "active": False, "order": -1,
+                "state": "installed",
+            },
+        ]
 
     def _mock_calibration_state(self, device_uid: str) -> dict[str, Any]:
         return self._mock_calibration.setdefault(device_uid, {
@@ -1121,23 +1150,50 @@ class MockDeviceMixin:
         apps = self._mock_apps.setdefault(device_uid, self._mock_default_apps())
         packages = self._mock_packages.setdefault(device_uid, self._mock_default_packages())
 
+        def pool_used() -> int:
+            return sum(int(p.get("memory_bytes") or 0) for p in packages if p.get("active"))
+
+        def share_us() -> int:
+            return self.MOCK_APP_BUDGET_US // max(1, len(apps))
+
         def app_status() -> dict[str, Any]:
             return {
-                "dispatches": 18422, "count": len(apps), "budget_us": 2000 * len(apps),
+                "dispatches": 18422, "count": len(apps), "budget_us": self.MOCK_APP_BUDGET_US,
                 "last_total_us": 900, "max_total_us": 1180,
-                "event_seq": 6, "events_dropped": 0, "apps": apps,
+                "event_seq": 6, "events_dropped": 0,
+                "governor": {"ceiling_permille": 250, "budget_us": self.MOCK_APP_BUDGET_US},
+                "pool": {"bytes": self.MOCK_POOL_BYTES, "used": pool_used(),
+                         "free": self.MOCK_POOL_BYTES - pool_used()},
+                "apps": [dict(a, **self._mock_load(a, share_us())) for a in apps],
             }
 
         def registry_status() -> dict[str, Any]:
             return {
-                "count": len(packages), "capacity": 8, "slots": 4,
-                "used_us": sum(int(p.get("estimated_us") or 0) for p in packages),
+                "count": len(packages), "capacity": 16,
+                "used_us": sum(int(p.get("estimated_us") or 0) for p in packages if p.get("active")),
+                "budget_us": self.MOCK_APP_BUDGET_US,
+                "pool_bytes": self.MOCK_POOL_BYTES, "pool_used": pool_used(),
+                "pool_free": self.MOCK_POOL_BYTES - pool_used(), "control_bytes": 572,
                 "index_writes": 1, "recovered_from_tmp": False, "rebuilt": False,
                 "packages": packages,
             }
 
         def find_package(app_id: str) -> dict[str, Any] | None:
             return next((p for p in packages if p["id"] == app_id), None)
+
+        def find_app(name: str) -> dict[str, Any] | None:
+            return next((a for a in apps if a["name"] == name), None)
+
+        def renumber() -> None:
+            apps.sort(key=lambda a: a["order"])
+            for index, app in enumerate(apps):
+                app["order"] = index
+                entry = find_package(app["name"])
+                if entry is not None:
+                    entry["order"] = index
+
+        def error(code: str) -> dict[str, Any]:
+            return {"ok": False, "status": "error", "error": code}
 
         if command == "app_list":
             return {"message": "app_list", "data": app_status()}
@@ -1148,9 +1204,9 @@ class MockDeviceMixin:
         if command == "app_events":
             since = int(payload.get("since_seq") or 0)
             events = [
-                {"seq": 5, "ms": 18400, "frame_seq": 18400, "app": "flow",
+                {"seq": 5, "ms": 18400, "frame_seq": 18400, "app": "heel_strike",
                  "event": "heel_strike", "detail": "rise"},
-                {"seq": 6, "ms": 18700, "frame_seq": 18718, "app": "flow",
+                {"seq": 6, "ms": 18700, "frame_seq": 18718, "app": "heel_strike",
                  "event": "heel_strike", "detail": "fall"},
             ]
             return {"message": "app_events",
@@ -1160,61 +1216,72 @@ class MockDeviceMixin:
         if command == "app_view":
             return {"message": "app_view", "data": self._mock_app_view(apps)}
 
-        if command in ("app_enable", "app_disable", "app_revive"):
+        if command in ("app_stop", "app_start", "app_revive"):
             name = str(payload.get("name") or "")
             if not name:
-                return {"ok": False, "status": "error", "error": "name_required"}
-            app = next((a for a in apps if a["name"] == name), None)
+                return error("name_required")
+            app = find_app(name)
             if app is None:
-                return {"ok": False, "status": "error",
-                        "error": "app_revive_failed" if command == "app_revive"
-                        else "app_state_change_rejected"}
+                return error("app_not_active")
             if command == "app_revive":
                 if app["state"] != "killed":
-                    return {"ok": False, "status": "error", "error": "app_revive_failed"}
+                    return error("app_revive_failed")
                 app["state"] = "running"
                 app["overruns"] = 0
                 return {"message": "app_revived", "data": app_status()}
-            # setEnabled() refuses to silently un-kill an app that blew its budget.
+            # A killed app must be revived, not simply started.
             if app["state"] == "killed":
-                return {"ok": False, "status": "error", "error": "app_state_change_rejected"}
-            app["state"] = "running" if command == "app_enable" else "installed"
-            return {"message": "app_enabled" if command == "app_enable" else "app_disabled",
+                return error("app_state_change_rejected")
+            app["state"] = "running" if command == "app_start" else "stopped"
+            return {"message": "app_started" if command == "app_start" else "app_stopped",
                     "data": app_status()}
+
+        if command == "app_reorder":
+            app = find_app(str(payload.get("id") or ""))
+            if app is None:
+                return error("app_not_active")
+            to = max(0, min(int(payload.get("to") or 0), len(apps) - 1))
+            apps.remove(app)
+            apps.insert(to, app)
+            for index, entry in enumerate(apps):
+                entry["order"] = index
+            renumber()
+            return {"message": "app_reordered", "data": registry_status()}
 
         if command == "app_install":
             path = str(payload.get("path") or "")
             if not path:
-                return {"ok": False, "status": "error", "error": "path_required"}
+                return error("path_required")
             target = self._mock_resolve_scope_path(device_uid, "user", path)
             if target is None or not target.exists():
-                return {"ok": False, "status": "error", "error": "package_not_found"}
+                return error("package_not_found")
             try:
                 doc = json.loads(target.read_text(encoding="utf-8"))
                 manifest = doc["manifest"]
                 app_id = str(manifest["id"])
             except Exception:
-                return {"ok": False, "status": "error", "error": "not_a_package"}
+                return error("not_a_package")
             if path != "apps/{}.nha".format(app_id):
-                return {"ok": False, "status": "error",
-                        "error": "id_path_mismatch:{}".format(app_id)}
+                return error("id_path_mismatch:{}".format(app_id))
             existing = find_package(app_id)
             if existing is not None and not payload.get("replace"):
-                return {"ok": False, "status": "error",
-                        "error": "already_installed:{}".format(app_id)}
-            if existing is None and len(packages) >= 8:
-                return {"ok": False, "status": "error", "error": "registry_full"}
-            entry = existing or {"slot": -1}
+                return error("already_installed:{}".format(app_id))
+            if existing is None and len(packages) >= 16:
+                return error("registry_full")
+            size = target.stat().st_size
+            entry = existing or {"active": False, "order": -1}
             entry.update({
-                "id": app_id, "name": manifest.get("name", app_id),
+                "id": app_id, "kind": manifest.get("kind", "flow"),
+                "name": manifest.get("name", app_id),
                 "version": manifest.get("version", "0.0.0"),
                 "author": manifest.get("author", ""), "summary": manifest.get("summary", ""),
                 "category": manifest.get("category", "other"),
                 "min_os": manifest.get("min_os", "v1.0.0"),
                 "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
-                "capabilities": 5, "size": target.stat().st_size,
+                "capabilities": 5, "granted": 0, "size": size,
                 "estimated_us": 15 * max(1, len(doc.get("nodes") or [])) // 4,
-                "state": "active" if entry.get("slot", -1) >= 0 else "installed",
+                "memory_bytes": 572 + size, "burst": manifest.get("burst") is True,
+                "state": "active" if entry.get("active") else "installed",
             })
             if existing is None:
                 packages.append(entry)
@@ -1225,10 +1292,11 @@ class MockDeviceMixin:
             app_id = str(payload.get("id") or "")
             entry = find_package(app_id)
             if entry is None:
-                return {"ok": False, "status": "error",
-                        "error": "unknown_package:{}".format(app_id)}
-            if entry.get("slot", -1) >= 0:
-                apps[entry["slot"]]["state_detail"]["package"] = ""
+                return error("unknown_package:{}".format(app_id))
+            app = find_app(app_id)
+            if app is not None:
+                apps.remove(app)
+                renumber()
             packages.remove(entry)
             if not payload.get("keep_file"):
                 self._mock_file_delete(device_uid, {"scope": "user",
@@ -1236,68 +1304,46 @@ class MockDeviceMixin:
             return {"message": "app_uninstalled", "data": registry_status()}
 
         if command in ("app_activate", "app_deactivate"):
+            # v2.1.0: no slots; a "slot" argument is accepted and ignored.
             app_id = str(payload.get("id") or "")
             entry = find_package(app_id) if app_id else None
+            if entry is None:
+                return error("unknown_package:{}".format(app_id))
             if command == "app_activate":
-                if entry is None:
-                    return {"ok": False, "status": "error",
-                            "error": "unknown_package:{}".format(app_id)}
-                if entry.get("slot", -1) >= 0:
-                    return {"ok": False, "status": "error",
-                            "error": "already_active:{}".format(entry["slot"])}
-                taken = {p["slot"] for p in packages if p.get("slot", -1) >= 0}
-                slot = int(payload.get("slot", -1))
-                if slot < 0:
-                    slot = next((i for i in range(4) if i not in taken), -1)
-                if slot < 0:
-                    return {"ok": False, "status": "error", "error": "no_free_slot"}
-                if slot >= 4:
-                    return {"ok": False, "status": "error",
-                            "error": "slot_out_of_range:{}".format(slot)}
-                if slot in taken:
-                    return {"ok": False, "status": "error", "error": "slot_occupied"}
-                entry["slot"] = slot
+                if entry.get("active"):
+                    return error("already_active")
+                if self.MOCK_POOL_BYTES - pool_used() < int(entry.get("memory_bytes") or 0):
+                    return error("app_pool_exhausted")
+                used = sum(int(p.get("estimated_us") or 0) for p in packages if p.get("active"))
+                if used + int(entry.get("estimated_us") or 0) > self.MOCK_APP_BUDGET_US:
+                    return error("app_budget_exhausted")
+                entry["active"] = True
                 entry["state"] = "active"
-                apps[slot]["state_detail"]["package"] = app_id
+                apps.append(self._mock_runtime_entry(entry, len(apps)))
+                renumber()
                 return {"message": "app_activated", "data": registry_status()}
-            slot = int(payload.get("slot", -1))
-            if entry is None:
-                entry = next((p for p in packages if p.get("slot", -1) == slot), None)
-            if entry is None:
-                return {"ok": False, "status": "error",
-                        "error": "slot_not_active:{}".format(slot)}
-            apps[entry["slot"]]["state_detail"]["package"] = ""
-            entry["slot"] = -1
+            if not entry.get("active"):
+                return error("app_not_active")
+            app = find_app(app_id)
+            if app is not None:
+                apps.remove(app)
+            entry["active"] = False
+            entry["order"] = -1
             entry["state"] = "installed"
+            renumber()
             return {"message": "app_deactivated", "data": registry_status()}
 
         if command == "app_verify":
             entry = find_package(str(payload.get("id") or ""))
             if entry is None:
-                return {"ok": False, "status": "error", "error": "unknown_package"}
+                return error("unknown_package")
             return {"message": "app_verified",
                     "data": {"id": entry["id"], "sha256": entry["sha256"], "match": True}}
 
-        if command == "app_reindex":
-            return {"message": "app_reindexed",
-                    "data": {"recovered": len(packages), "dropped": 0,
-                             "registry": registry_status()}}
-
-        slot0 = apps[0]
-        if command == "app_load_flow":
-            path = str(payload.get("path") or "apps/flow.json")
-            if self._mock_resolve_scope_path(device_uid, "user", path) is None:
-                return {"ok": False, "status": "error", "error": "flow_load_failed:file_not_found"}
-            slot0["state_detail"] = dict(slot0["state_detail"], source=path,
-                                         graph=Path(path).stem)
-            return {"message": "flow_graph_loaded", "data": slot0["state_detail"]}
-
-        # app_unload_flow
-        slot0["state_detail"] = {"graph": "", "package": "", "source": "", "nodes": 0,
-                                 "estimated_us": 0, "budget_us": 2000, "emissions": 0,
-                                 "frames": 0, "degraded": False, "degradations": 0,
-                                 "outputs": []}
-        return {"message": "flow_graph_unloaded", "data": slot0["state_detail"]}
+        # app_reindex
+        return {"message": "app_reindexed",
+                "data": {"recovered": len(packages), "dropped": 0,
+                         "registry": registry_status()}}
 
     def _mock_resolve_scope_path(self, device_uid: str, scope: str, raw_path: str) -> Path | None:
         """Resolve a device-relative path inside a mock scope, or None if it escapes."""

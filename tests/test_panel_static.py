@@ -205,13 +205,13 @@ class BrowserGateTests(unittest.TestCase):
 
     def test_actions_missing_from_the_device_catalog_are_hidden(self):
         self.assertIn("supportedActions(spec.actions ?? [], supportedCommands)", read("components/PanelView.tsx"))
-        apps = read("components/DeviceAppsPanel.tsx")
+        apps = read("components/deviceApps/DeviceAppsSection.tsx")
         self.assertIn("supportedCommands={deviceCommands}", apps)
         self.assertIn("api\n      .deviceCommands(deviceUid)", apps)
 
     def test_permissions_are_shown_on_open_and_install(self):
-        self.assertIn("<PanelPermissionList permissions={openModel?.permissions ?? []} />",
-                      read("components/DeviceAppsPanel.tsx"))
+        self.assertIn("<PanelPermissionList permissions={panelModelOpen?.permissions ?? []} />",
+                      read("components/deviceApps/DeviceAppsSection.tsx"))
         self.assertIn("<PanelPermissionList permissions={app.permissions ?? []} />",
                       read("components/AppInstallDialog.tsx"))
 
@@ -246,8 +246,8 @@ class RunnerMutexTests(unittest.TestCase):
         # A skipped pass keeps what is on screen.
         self.assertIn("if (!response.result) return;", poll)
         self.assertIn("pollRunnerRef.current = pollRunner ?? runner;", self.view)
-        apps = read("components/DeviceAppsPanel.tsx")
-        self.assertIn("<PanelView pkg={openReadout} runner={runner} poll={poll}", apps)
+        apps = read("components/deviceApps/DeviceAppsSection.tsx")
+        self.assertIn("<PanelView pkg={openPanel.doc} runner={runner} poll={poll}", apps)
 
     def test_busy_never_takes_focus_or_a_click(self):
         run = self.view[self.view.index("function RunSection("):self.view.index("type Pending =")]

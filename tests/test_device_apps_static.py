@@ -1,4 +1,4 @@
-"""Static checks on the device Apps page, the panel, and the shared transfer.
+"""Static checks on the device Apps section, its parts, and the shared transfer.
 
 These pin the decisions that are invisible at runtime until they bite: one
 upload implementation rather than two, an injected command runner rather than a
@@ -44,19 +44,30 @@ class TransferReuseTests(unittest.TestCase):
         self.assertIn("finishPayload.sha256 = sha256;", lib)
 
 
+SECTION = "components/deviceApps/DeviceAppsSection.tsx"
+CARD = "components/deviceApps/RunningAppCard.tsx"
+SHEET = "components/deviceApps/AppDetailSheet.tsx"
+ROW = "components/deviceApps/InstalledAppRow.tsx"
+APPS_UI = (SECTION, CARD, SHEET, ROW,
+           "components/deviceApps/AppResourceBar.tsx", "components/deviceApps/AppParts.tsx")
+
+
 class PanelWiringTests(unittest.TestCase):
-    def test_the_panel_takes_an_injected_runner(self):
-        panel = read("components/DeviceAppsPanel.tsx")
+    def test_the_section_takes_an_injected_runner(self):
+        section = read(SECTION)
         # DeviceSettingsPage holds a single-flight mutex; a second pipeline to
         # the same device would race it.
-        self.assertNotIn("useDeviceCommand(", panel)
-        self.assertIn("runner: CommandRunner", panel)
+        for name in APPS_UI:
+            self.assertNotIn("useDeviceCommand(", read(name), name)
+            self.assertNotIn("sendDeviceCommand(", read(name), name)
+        self.assertIn("runner: CommandRunner", section)
 
-    def test_the_settings_page_shares_its_own_mutex_with_the_panel(self):
+    def test_the_settings_page_shares_its_own_mutex_with_the_section(self):
         page = read("pages/DeviceSettingsPage.tsx")
         flat = re.sub(r"\s+", " ", page)
+        self.assertIn("<DeviceAppsSection", page)
         self.assertIn("runner={(payload, timeoutMs) => run(", flat)
-        # The live preview holds the same mutex between polls, so an operator's
+        # The live view holds the same mutex between polls, so an operator's
         # click must wait it out rather than be silently skipped.
         self.assertRegex(flat, r"runner=\{\(payload, timeoutMs\) => run\([^}]*\{ waitForLock: true \}")
         self.assertRegex(flat, r"poll=\{\(payload, timeoutMs\) => run\([^}]*\{ background: true \}")
@@ -69,43 +80,40 @@ class PanelWiringTests(unittest.TestCase):
         self.assertNotIn("pushOperationLog", body)
         self.assertIn("commandInFlightRef.current = false", body)
 
-    def test_the_apps_page_never_overlaps_a_poll_and_an_action(self):
-        page = read("pages/DeviceAppsPage.tsx")
-        # A Hub relays one command per device at a time.
-        self.assertIn("if (pollInFlightRef.current) await pollInFlightRef.current", page)
-        self.assertIn("if (actionsInFlightRef.current > 0 || pollInFlightRef.current) return { result: null };", page)
-        self.assertIn("poll={poll}", page)
-
-    def test_the_preview_has_no_pipeline_of_its_own(self):
-        preview = read("components/DeviceAppLivePreview.tsx")
-        self.assertNotIn("useDeviceCommand(", preview)
-        self.assertNotIn("sendDeviceCommand(", preview)
-        self.assertIn('{ command: "app_view" }', preview)
+    def test_the_live_view_polls_only_through_the_background_runner(self):
+        section = read(SECTION)
+        live = section[section.index("// --- the live view"):section.index("// --- actions ---")]
+        self.assertIn('pollNow({ command: "app_view" }', live)
+        self.assertNotIn("runnerRef.current(", live)
+        # Paused while the operator's own command is in flight, and when hidden.
+        self.assertIn("!pausedRef.current", live)
+        self.assertIn('document.visibilityState === "visible"', live)
 
     def test_the_shared_indicator_views_do_not_pull_in_the_sdk(self):
         views = read("components/sdk/IndicatorViews.tsx")
-        # The Apps panel is in the main bundle; a value import from the SDK
+        # The Apps section is in the main bundle; a value import from the SDK
         # index drags the simulator and compiler in with it.
         imports = [line for line in views.splitlines() if "sdk/lib" in line]
         self.assertTrue(imports)
         self.assertTrue(all(line.startswith("import type") for line in imports))
 
     def test_installed_packages_show_the_catalog_translation(self):
-        panel = read("components/DeviceAppsPanel.tsx")
+        section = read(SECTION)
         # A package manifest holds one English name; the catalog has every
         # locale, looked up by id, with the device's own text as the fallback.
-        self.assertIn("api\n      .appLibraryIndex()", panel)
-        self.assertIn("known ? localise(known.name) || entry.name : entry.name", panel)
-        for raw in ("<strong>{entry.name}</strong>", "{bound.name}", "{entry.summary}</div>"):
-            self.assertNotIn(raw, panel)
+        self.assertIn("api\n      .appLibraryIndex()", section)
+        self.assertIn("name: localise(known.name) || app.name", section)
+        self.assertIn("summary: localise(known.summary) || app.summary", section)
 
     def test_killed_and_suspended_are_shown_differently(self):
-        panel = read("components/DeviceAppsPanel.tsx")
+        card = read(CARD)
+        sheet = read(SHEET)
         # A killed app needs an operator; a suspended one comes back by itself,
         # and telling the user otherwise would be a lie about their device.
-        self.assertIn("needsRevive(app)", panel)
-        self.assertIn('t("appSuspendedHint")', panel)
-        self.assertIn('t("appKilledHint")', panel)
+        self.assertIn('if (runtime.state === "suspended") return "suspended";', card)
+        self.assertIn('if (runtime.state === "killed") return "killed";', card)
+        self.assertIn('state === "killed" ? (', sheet)
+        self.assertIn('t("appRevive")', sheet)
 
     def test_installing_an_installed_app_updates_it(self):
         page = read("components/AppInstallDialog.tsx")
@@ -115,77 +123,85 @@ class PanelWiringTests(unittest.TestCase):
         # already_installed after the new file had already been written.
         self.assertIn("replace: true,", call)
 
-    def test_an_empty_slot_is_not_shown_as_running(self):
-        panel = read("components/DeviceAppsPanel.tsx")
+    def test_an_idle_app_is_not_shown_as_running(self):
+        card = read(CARD)
         lib = read("lib/deviceApps.ts")
-        # After uninstalling every package all four slots still said Running
-        # with a Disable button: enabled, but with nothing to run.
-        self.assertIn("const empty = app.idle;", panel)
+        # After uninstalling every package all four slots still said Running:
+        # on, but with nothing to run.
+        self.assertIn('if (runtime.state === "running") return runtime.idle ? "faulted" : "running";', card)
         self.assertIn("entry.idle !== undefined ? entry.idle === true", lib)
         self.assertIn("num(detail.nodes) === 0", lib)
 
-    def test_rolled_off_history_is_not_reported_as_loss(self):
-        panel = read("components/DeviceAppsPanel.tsx")
+    def test_the_cumulative_dropped_counter_is_not_shown_as_loss(self):
         # The firmware's dropped counter is cumulative since boot, and a
-        # one-shot read cannot lose anything: showing it as "lost" told the
-        # operator hundreds of events were missing when none were.
-        self.assertIn('t("appEventsRolledOff")', panel)
-        self.assertNotIn("parsed.dropped", panel)
-        self.assertIn("parsed.seq - parsed.events.length", panel)
+        # one-shot read cannot lose anything.
+        for name in APPS_UI:
+            self.assertNotIn("parsed.dropped", read(name), name)
 
-    def test_newest_events_come_first(self):
-        panel = read("components/DeviceAppsPanel.tsx")
-        self.assertIn("sort((a, b) => b.seq - a.seq)", panel)
+    def test_newest_events_come_first_and_only_the_open_apps(self):
+        section = read(SECTION)
+        self.assertIn("sort((a, b) => b.seq - a.seq)", section)
+        self.assertIn("filter((event) => event.app === sheetName)", section)
 
     def test_events_show_the_frame_they_belong_to(self):
-        panel = read("components/DeviceAppsPanel.tsx")
-        self.assertIn("event.frameSeq", panel)
+        self.assertIn("event.frameSeq", read(SHEET))
 
     def test_degradation_is_visible(self):
-        panel = read("components/DeviceAppsPanel.tsx")
-        self.assertIn('t("appDegraded")', panel)
+        self.assertIn('t("appDegraded")', read(CARD))
+
+    def test_there_are_no_slots_in_the_ui(self):
+        for name in APPS_UI:
+            source = read(name)
+            self.assertNotRegex(source, r"\bslot\b", name)
+            self.assertNotIn("freeSlots", source, name)
 
 
 class CapabilityGateTests(unittest.TestCase):
     def test_the_registry_ui_is_hidden_on_older_firmware(self):
-        page = read("pages/DeviceAppsPage.tsx")
         settings = read("pages/DeviceSettingsPage.tsx")
-        for source in (page, settings):
-            # Cores only: a beta of v1.1.0 has what v1.1.0 has.
-            self.assertIn('compareVersionCores(', source)
-            self.assertIn('"v1.1.0"', source)
+        # Cores only: a beta of v1.1.0 has what v1.1.0 has.
+        self.assertIn('compareVersionCores(', settings)
+        self.assertIn('"v1.1.0"', settings)
+        self.assertIn('t("appRegistryUnsupported")', read(SECTION))
 
-    def test_maintenance_is_never_entered_silently(self):
-        page = read("pages/DeviceAppsPage.tsx")
+    def test_maintenance_is_entered_openly_and_left_only_if_entered(self):
+        section = read(SECTION)
+        lib = read("lib/deviceCommand.ts")
         dialog = read("components/AppInstallDialog.tsx")
-        # Entering maintenance stops the scan, which on a recording device is
-        # not something to do behind the operator's back: the page has an
-        # explicit toggle, and the install dialog says so on its confirm step
-        # before it enters (and leaves only what it entered itself).
-        self.assertIn('t("appInstallEnterMaintenance")', page)
+        # Switching an app needs maintenance mode, which pauses the scan: the
+        # section says so up front, asks first while recording, and leaves
+        # maintenance only when it entered it itself.
+        self.assertIn('t("appsScanPauseNote")', section)
+        self.assertIn("if (recording && !inMaintenance) setConfirm({ kind: \"toggle\", app });", section)
+        self.assertIn('t("appsRecordingConfirm")', section)
+        self.assertIn("withMaintenance(runnerRef.current, inMaintenance,", section)
+        helper = lib[lib.index("export async function withMaintenance"):]
+        helper = helper[:helper.index("\n}\n")]
+        self.assertIn("if (alreadyInMaintenance) return work();", helper)
+        self.assertIn("finally", helper)
+        # Pausing and resuming do not need maintenance.
+        self.assertIn('send({ command: "app_stop", name: runtimeName(sheetApp) })', section)
         self.assertIn('t("appInstallMaintenanceNote")', dialog)
-        confirm = dialog[dialog.index('stage === "confirm" && selected && !selected.blocker'):]
         self.assertEqual(dialog.count("void install()"), 1)
-        self.assertIn("void install()", confirm[:1500])
         self.assertIn("if (entered)", dialog)
-        self.assertIn('reason: "app_install"', page)
 
 
 class RoutingTests(unittest.TestCase):
-    def test_the_device_apps_route_exists_and_is_admin_only(self):
+    def test_the_old_device_apps_route_lands_on_the_settings_section(self):
         app = read("App.tsx")
         self.assertIn('path="/device/:deviceUid/apps"', app)
-        block = app[app.index('path="/device/:deviceUid/apps"'):]
-        self.assertIn('RequireRole roles={["admin"]}', block[:250])
+        self.assertIn("element={<DeviceAppsRedirect />}", app)
+        self.assertIn("/settings?section=apps", app)
+        self.assertFalse((SRC / "pages" / "DeviceAppsPage.tsx").exists())
+        settings = read("pages/DeviceSettingsPage.tsx")
+        self.assertIn('searchParams.get("section") === "apps"', settings)
 
     def test_the_store_can_send_you_to_a_device(self):
         store = read("pages/AppStorePage.tsx")
-        page = read("pages/DeviceAppsPage.tsx")
-        # The store installs in place; old /apps?install= links still open
-        # the same dialog on the device's page.
+        dialog = read("components/AppInstallDialog.tsx")
         self.assertIn("<AppInstallDialog", store)
-        self.assertIn('params.get("install")', page)
-        self.assertIn("<AppInstallDialog", page)
+        self.assertIn("/settings?section=apps", dialog)
+        self.assertIn('to="/apps"', read(SECTION))
 
 
 class TranslationParityTests(unittest.TestCase):
@@ -205,12 +221,20 @@ class TranslationParityTests(unittest.TestCase):
 
     def test_every_key_the_apps_ui_uses_exists_in_all_three_languages(self):
         used: set[str] = set()
-        for name in ("components/DeviceAppsPanel.tsx", "pages/DeviceAppsPage.tsx", "components/AppInstallDialog.tsx"):
+        for name in (*APPS_UI, "components/AppInstallDialog.tsx"):
             source = read(name)
             used |= set(re.findall(r't\("([A-Za-z0-9_]+)"\)', source))
+            # t(cond ? "a" : "b") picks between two keys.
+            for _, first, second in re.findall(r't\(([^()]*?)\? "([A-Za-z0-9_]+)" : "([A-Za-z0-9_]+)"\)', source):
+                used |= {first, second}
             # Template keys like t(`appState_${...}`) are expanded explicitly.
             for prefix in re.findall(r't\(`([A-Za-z0-9_]+)\$\{', source):
-                if prefix == "appState_":
+                if prefix in ("appsState_", "appsHint_"):
+                    used |= {f"{prefix}{s}" for s in
+                             ("running", "stopped", "suspended", "killed", "faulted")}
+                elif prefix == "appsLevel_":
+                    used |= {f"appsLevel_{s}" for s in ("low", "medium", "high", "overloaded")}
+                elif prefix == "appState_":
                     used |= {f"appState_{s}" for s in
                              ("running", "installed", "killed", "suspended", "faulted", "unknown")}
                 elif prefix == "appInstallStep_":
@@ -250,11 +274,11 @@ class RunnerIdentityTests(unittest.TestCase):
         self.assertIsNotNone(deps, name)
         return deps.group(1)
 
-    def test_panel_refresh_ignores_runner_identity(self):
-        panel = read("components/DeviceAppsPanel.tsx")
-        self.assertIn("runnerRef.current = runner;", panel)
-        self.assertNotIn("runner", self.callback_deps(panel, "refresh"))
-        self.assertNotIn("await runner(", panel)
+    def test_section_refresh_ignores_runner_identity(self):
+        section = read(SECTION)
+        self.assertIn("runnerRef.current = runner;", section)
+        self.assertNotIn("runner", self.callback_deps(section, "refresh"))
+        self.assertNotIn("await runner(", section)
 
     def test_readout_poll_ignores_runner_identity(self):
         # Readouts and panels poll through PanelView.

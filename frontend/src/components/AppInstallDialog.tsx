@@ -124,7 +124,7 @@ export function AppInstallDialog({
         devicePath: pkg.device_path,
         dataHex: pkg.data_hex,
         sha256: pkg.sha256,
-        // See DeviceAppsPage: the upload has already replaced the file by the
+        // See DeviceAppsSection: the upload has already replaced the file by the
         // time app_install runs, so the index must follow it.
         replace: true,
         grant: dangerous,
@@ -278,7 +278,7 @@ export function AppInstallDialog({
               ) : (
                 <>
                   {selected ? (
-                    <Link className="button" to={`/device/${encodeURIComponent(selected.entry.device_uid)}/apps`}>
+                    <Link className="button" to={`/device/${encodeURIComponent(selected.entry.device_uid)}/settings?section=apps`}>
                       {t("appInstallOpenDeviceApps")}
                     </Link>
                   ) : null}

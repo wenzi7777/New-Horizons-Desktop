@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { api, type DeviceEntry } from "./api";
 import { normalizeCommandResult } from "./commandResult";
+import type { CommandRunner } from "./deviceFileTransfer";
 import { deviceStatusToken, resultFromDeviceState } from "./device";
 import { sendDeviceCommand } from "./wsClient";
 
@@ -63,6 +64,39 @@ export async function pollDeviceCommand(
 ): Promise<{ result: Record<string, unknown> | null }> {
   const response = await sendDeviceCommand(deviceUid, quietCommand(payload), timeoutMs);
   return { result: response.result ? normalizeCommandResult(response.result) : null };
+}
+
+/** The device's error code for a failed command, or "" when it succeeded. */
+export function commandFailure(result: Record<string, unknown> | null | undefined): string {
+  if (!result) return "command_delivery_timeout";
+  if (result.ok === false || result.status === "error") {
+    return String(result.error || result.message || "device_error");
+  }
+  return "";
+}
+
+/**
+ * Runs `work` in maintenance mode: enters it when the device is not already
+ * there, and leaves it afterwards -- whether `work` succeeded or not -- but
+ * only when this call entered it. The device refuses app_install /
+ * app_activate / app_deactivate / app_uninstall outside maintenance, and the
+ * operator should not have to drive that by hand for a one-second change.
+ */
+export async function withMaintenance<T>(
+  queue: CommandRunner,
+  alreadyInMaintenance: boolean,
+  reason: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  if (alreadyInMaintenance) return work();
+  const entering = await queue({ command: "enter_maintenance", reason });
+  const failure = commandFailure(entering.result);
+  if (failure) throw new Error(failure);
+  try {
+    return await work();
+  } finally {
+    await queue({ command: "exit_maintenance" }).catch(() => undefined);
+  }
 }
 
 export function useDeviceCommand(deviceUid: string) {

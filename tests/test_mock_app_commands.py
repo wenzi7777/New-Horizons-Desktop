@@ -39,54 +39,57 @@ class MockAppCommandTestCase(unittest.TestCase):
 
 
 class MockAppRosterTests(MockAppCommandTestCase):
-    def test_app_list_reports_the_flow_slots(self):
-        # Slots are hosts, not content: all four exist whether or not a package
-        # is bound to them.
+    def test_app_list_reports_the_running_apps_by_id(self):
+        # Firmware v2.1.0: no slots; only apps that are on are listed, by id.
         roster = self.roster("NH-MOCK-001")
-        self.assertEqual(sorted(roster), ["flow", "flow1", "flow2", "flow3"])
-        self.assertEqual(roster["flow"]["state"], "running")
+        self.assertEqual(sorted(roster), ["heel_strike"])
+        self.assertEqual(roster["heel_strike"]["state"], "running")
+        self.assertEqual(roster["heel_strike"]["order"], 0)
 
-    def test_disable_then_enable_round_trips(self):
-        self.assertEqual(
-            self.run_command("NH-MOCK-001", {"command": "app_disable", "name": "flow"})["message"],
-            "app_disabled",
-        )
-        self.assertEqual(self.roster("NH-MOCK-001")["flow"]["state"], "installed")
-        self.assertEqual(
-            self.run_command("NH-MOCK-001", {"command": "app_enable", "name": "flow"})["message"],
-            "app_enabled",
-        )
-        self.assertEqual(self.roster("NH-MOCK-001")["flow"]["state"], "running")
+    def test_app_list_reports_load_and_the_pool(self):
+        data = self.run_command("NH-MOCK-001", {"command": "app_list"})["data"]
+        app = data["apps"][0]
+        for key in ("load", "level", "cpu1", "cpu10", "cpu60", "base_us", "borrowed_us", "lent_us",
+                    "memory_bytes"):
+            self.assertIn(key, app)
+        self.assertEqual(data["pool"]["bytes"], 8192)
+        self.assertEqual(data["pool"]["used"] + data["pool"]["free"], 8192)
+        self.assertGreater(data["governor"]["ceiling_permille"], 0)
 
-    def test_a_killed_app_is_not_silently_re_enabled(self):
-        # Mirrors AppManager::setEnabled -- reviving is a deliberate acknowledgement.
-        self.assertEqual(self.roster("NH-MOCK-002")["flow"]["state"], "killed")
-        result = self.run_command("NH-MOCK-002", {"command": "app_enable", "name": "flow"})
+    def test_stop_then_start_round_trips(self):
+        self.assertEqual(
+            self.run_command("NH-MOCK-001", {"command": "app_stop", "name": "heel_strike"})["message"],
+            "app_stopped",
+        )
+        self.assertEqual(self.roster("NH-MOCK-001")["heel_strike"]["state"], "stopped")
+        self.assertEqual(
+            self.run_command("NH-MOCK-001", {"command": "app_start", "name": "heel_strike"})["message"],
+            "app_started",
+        )
+        self.assertEqual(self.roster("NH-MOCK-001")["heel_strike"]["state"], "running")
+
+    def test_a_killed_app_is_not_silently_restarted(self):
+        # Reviving is a deliberate acknowledgement.
+        self.assertEqual(self.roster("NH-MOCK-002")["heel_strike"]["state"], "killed")
+        result = self.run_command("NH-MOCK-002", {"command": "app_start", "name": "heel_strike"})
         self.assertEqual(result.get("error"), "app_state_change_rejected")
-        self.assertEqual(self.roster("NH-MOCK-002")["flow"]["state"], "killed")
+        self.assertEqual(self.roster("NH-MOCK-002")["heel_strike"]["state"], "killed")
 
     def test_revive_clears_the_kill_and_zeroes_overruns(self):
-        self.assertGreater(self.roster("NH-MOCK-002")["flow"]["overruns"], 0)
+        self.assertGreater(self.roster("NH-MOCK-002")["heel_strike"]["overruns"], 0)
         self.assertEqual(
-            self.run_command("NH-MOCK-002", {"command": "app_revive", "name": "flow"})["message"],
+            self.run_command("NH-MOCK-002", {"command": "app_revive", "name": "heel_strike"})["message"],
             "app_revived",
         )
-        revived = self.roster("NH-MOCK-002")["flow"]
+        revived = self.roster("NH-MOCK-002")["heel_strike"]
         self.assertEqual(revived["state"], "running")
         self.assertEqual(revived["overruns"], 0)
 
     def test_name_is_required(self):
         self.assertEqual(
-            self.run_command("NH-MOCK-001", {"command": "app_enable"}).get("error"),
+            self.run_command("NH-MOCK-001", {"command": "app_stop"}).get("error"),
             "name_required",
         )
-
-    def test_flow_graph_load_and_unload(self):
-        self.assertEqual(
-            self.run_command("NH-MOCK-001", {"command": "app_unload_flow"})["message"],
-            "flow_graph_unloaded",
-        )
-        self.assertEqual(self.roster("NH-MOCK-001")["flow"]["state_detail"]["nodes"], 0)
 
 
 class MockFileUploadTests(MockAppCommandTestCase):
@@ -205,7 +208,7 @@ class MockFileUploadTests(MockAppCommandTestCase):
 
 
 class MockAppRegistryTests(MockAppCommandTestCase):
-    """The package registry: slots are hosts, packages are content."""
+    """The package registry: an app is on or off; the pool is the only limit."""
 
     PACKAGE = {
         "nhapp": 1, "kind": "flow", "name": "demo",
@@ -237,15 +240,20 @@ class MockAppRegistryTests(MockAppCommandTestCase):
         self.upload("apps/demo.nha")
         installed = self.run_command("NH-MOCK-001", {"command": "app_install", "path": "apps/demo.nha"})
         self.assertEqual(installed["message"], "app_installed")
-        self.assertEqual([p["id"] for p in self.packages()], ["heel_strike", "demo"])
+        self.assertEqual([p["id"] for p in self.packages()], ["heel_strike", "gait_rhythm", "demo"])
 
+        # A "slot" from an old client is accepted and ignored.
         activated = self.run_command("NH-MOCK-001", {"command": "app_activate", "id": "demo", "slot": 1})
         self.assertEqual(activated["message"], "app_activated")
-        self.assertEqual(next(p for p in self.packages() if p["id"] == "demo")["slot"], 1)
+        demo = next(p for p in self.packages() if p["id"] == "demo")
+        self.assertTrue(demo["active"])
+        self.assertEqual(demo["order"], 1)
+        self.assertIn("demo", self.roster("NH-MOCK-001"))
 
         removed = self.run_command("NH-MOCK-001", {"command": "app_uninstall", "id": "demo"})
         self.assertEqual(removed["message"], "app_uninstalled")
-        self.assertEqual([p["id"] for p in self.packages()], ["heel_strike"])
+        self.assertEqual([p["id"] for p in self.packages()], ["heel_strike", "gait_rhythm"])
+        self.assertNotIn("demo", self.roster("NH-MOCK-001"))
 
     def test_installing_a_missing_file_is_refused(self):
         result = self.run_command("NH-MOCK-001", {"command": "app_install", "path": "apps/ghost.nha"})
@@ -266,25 +274,44 @@ class MockAppRegistryTests(MockAppCommandTestCase):
                                   {"command": "app_install", "path": "apps/demo.nha", "replace": True})
         self.assertEqual(forced["message"], "app_installed")
 
-    def test_an_occupied_slot_is_refused(self):
-        self.upload("apps/demo.nha")
-        self.run_command("NH-MOCK-001", {"command": "app_install", "path": "apps/demo.nha"})
-        # heel_strike already holds slot 0.
-        result = self.run_command("NH-MOCK-001", {"command": "app_activate", "id": "demo", "slot": 0})
-        self.assertEqual(result.get("error"), "slot_occupied")
+    def test_more_than_four_apps_can_run(self):
+        # No fixed number: the pool is the limit.
+        for index in range(4):
+            doc = dict(self.PACKAGE, manifest=dict(self.PACKAGE["manifest"], id=f"d{index}"))
+            self.upload(f"apps/d{index}.nha", doc)
+            self.run_command("NH-MOCK-001", {"command": "app_install", "path": f"apps/d{index}.nha"})
+            result = self.run_command("NH-MOCK-001", {"command": "app_activate", "id": f"d{index}"})
+            self.assertEqual(result["message"], "app_activated")
+        self.assertEqual(len(self.roster("NH-MOCK-001")), 5)
 
-    def test_activating_without_a_slot_picks_a_free_one(self):
-        self.upload("apps/demo.nha")
+    def test_a_full_pool_is_refused(self):
+        big = dict(self.PACKAGE, padding="x" * 8000)
+        self.upload("apps/demo.nha", big)
         self.run_command("NH-MOCK-001", {"command": "app_install", "path": "apps/demo.nha"})
         result = self.run_command("NH-MOCK-001", {"command": "app_activate", "id": "demo"})
-        self.assertEqual(result["message"], "app_activated")
-        self.assertEqual(next(p for p in self.packages() if p["id"] == "demo")["slot"], 1)
+        self.assertEqual(result.get("error"), "app_pool_exhausted")
+
+    def test_reorder_moves_an_app_first(self):
+        self.run_command("NH-MOCK-001", {"command": "app_activate", "id": "gait_rhythm"})
+        self.assertEqual(self.roster("NH-MOCK-001")["gait_rhythm"]["order"], 1)
+        result = self.run_command("NH-MOCK-001", {"command": "app_reorder", "id": "gait_rhythm", "to": 0})
+        self.assertEqual(result["message"], "app_reordered")
+        roster = self.roster("NH-MOCK-001")
+        self.assertEqual(roster["gait_rhythm"]["order"], 0)
+        self.assertEqual(roster["heel_strike"]["order"], 1)
 
     def test_deactivate_leaves_the_package_installed(self):
         self.run_command("NH-MOCK-001", {"command": "app_deactivate", "id": "heel_strike"})
         entry = next(p for p in self.packages() if p["id"] == "heel_strike")
-        self.assertEqual(entry["slot"], -1)
+        self.assertFalse(entry["active"])
         self.assertEqual(entry["state"], "installed")
+        self.assertEqual(self.roster("NH-MOCK-001"), {})
+
+    def test_the_registry_reports_the_pool(self):
+        data = self.run_command("NH-MOCK-001", {"command": "app_list_packages"})["data"]
+        for key in ("pool_bytes", "pool_used", "pool_free", "control_bytes", "budget_us", "used_us"):
+            self.assertIn(key, data)
+        self.assertNotIn("slots", data)
 
     def test_events_are_returned_by_sequence(self):
         events = self.run_command("NH-MOCK-001", {"command": "app_events", "since_seq": 5})["data"]
@@ -302,13 +329,14 @@ class MockAppViewTests(MockAppCommandTestCase):
     def test_app_view_has_the_firmware_shape(self):
         view = self.run_command("NH-MOCK-001", {"command": "app_view"})["data"]
         self.assertEqual(len(view["oled"]["rows"]), 4)
-        self.assertIn(view["status_led"]["owner"], ("system", "flow"))
+        self.assertIn(view["status_led"]["owner"], ("system", "heel_strike"))
+        self.assertIn("load", view)
         text = view["oled"]["rows"][0]
         # Rows arrive already formatted to the panel's 21 columns.
         self.assertEqual(len(text["text"]), 21)
 
-    def test_a_stopped_slot_draws_nothing(self):
-        self.run_command("NH-MOCK-001", {"command": "app_disable", "name": "flow"})
+    def test_a_stopped_app_draws_nothing(self):
+        self.run_command("NH-MOCK-001", {"command": "app_stop", "name": "heel_strike"})
         view = self.run_command("NH-MOCK-001", {"command": "app_view"})["data"]
         self.assertEqual(view["oled"]["rows"], [None] * 4)
         self.assertEqual(view["status_led"]["owner"], "system")
@@ -321,7 +349,7 @@ class MockProcScopeTests(MockAppCommandTestCase):
 
     def test_proc_apps_reflects_the_roster(self):
         text = self.svc._mock_read_file("NH-MOCK-002", "apps", "proc")
-        self.assertIn("flow", text)
+        self.assertIn("heel_strike", text)
         self.assertIn("killed", text)
 
 

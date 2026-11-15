@@ -36,6 +36,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "service_start",
     "app_stop",
     "app_start",
+    "app_reorder",
     "set_time",
     "clock_sync",
     "clock_status",
@@ -47,11 +48,7 @@ DEVICE_COMMAND_ALLOWLIST = {
     "capabilities",
     "commands",
     "app_list",
-    "app_enable",
-    "app_disable",
     "app_revive",
-    "app_load_flow",
-    "app_unload_flow",
     "app_events",
     "app_view",
     "app_list_packages",
@@ -274,29 +271,24 @@ def terminal_help_items() -> list[dict[str, str]]:
             "example": "app-list",
         },
         {
-            "command": "app-enable",
-            "description": "Enable an installed app slot.",
-            "example": "app-enable --name flow",
-        },
-        {
-            "command": "app-disable",
-            "description": "Disable an app slot without uninstalling its package.",
-            "example": "app-disable --name flow1",
-        },
-        {
             "command": "app-revive",
             "description": "Clear a budget-overrun kill and restart the app.",
-            "example": "app-revive --name flow",
+            "example": "app-revive --name heel_strike",
         },
         {
             "command": "app-stop",
-            "description": "Stop an app slot until it is started again or the device reboots, without touching its saved enabled state (firmware v1.19.0+).",
-            "example": "app-stop --name flow",
+            "description": "Pause an app until it is started again or the device reboots, keeping its memory and its on/off setting (firmware v1.19.0+).",
+            "example": "app-stop --name heel_strike",
         },
         {
             "command": "app-start",
-            "description": "Start an app slot stopped with app-stop (firmware v1.19.0+).",
-            "example": "app-start --name flow",
+            "description": "Resume an app paused with app-stop (firmware v1.19.0+).",
+            "example": "app-start --name heel_strike",
+        },
+        {
+            "command": "app-reorder",
+            "description": "Move a running app in the display order: lower wins shared OLED rows and the status LED (firmware v2.1.0+).",
+            "example": "app-reorder --id heel_strike --to 0",
         },
         {
             "command": "app-events",
@@ -305,7 +297,7 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "app-list-packages",
-            "description": "Installed app packages and which slot each is bound to.",
+            "description": "Installed app packages, which are on, and what each takes of the app pool.",
             "example": "app-list-packages",
         },
         {
@@ -320,12 +312,12 @@ def terminal_help_items() -> list[dict[str, str]]:
         },
         {
             "command": "app-activate",
-            "description": "Bind an installed package to a flow slot.",
-            "example": "app-activate --id heel_strike --slot 1",
+            "description": "Turn an installed app on: it runs now and at every boot (needs maintenance mode).",
+            "example": "app-activate --id heel_strike",
         },
         {
             "command": "app-deactivate",
-            "description": "Unbind a package from its slot, leaving it installed.",
+            "description": "Turn an app off and free its resources, leaving it installed (needs maintenance mode).",
             "example": "app-deactivate --id heel_strike",
         },
         {
@@ -337,16 +329,6 @@ def terminal_help_items() -> list[dict[str, str]]:
             "command": "app-reindex",
             "description": "Rebuild the package index from the .nha files present.",
             "example": "app-reindex",
-        },
-        {
-            "command": "app-load-flow",
-            "description": "Load a flow graph into slot 0; rejected at load time if it exceeds the budget.",
-            "example": "app-load-flow --path apps/flow.json",
-        },
-        {
-            "command": "app-unload-flow",
-            "description": "Unload the flow graph in slot 0.",
-            "example": "app-unload-flow",
         },
         {
             "command": "capabilities",
@@ -621,7 +603,6 @@ def compile_terminal_command(command_line: str, device_commands: set[str] | None
         "app-list-packages": "app_list_packages",
         "app-view": "app_view",
         "app-reindex": "app_reindex",
-        "app-unload-flow": "app_unload_flow",
     }
     if command in simple_commands:
         payload = {"command": simple_commands[command]}
@@ -952,19 +933,16 @@ def compile_terminal_command(command_line: str, device_commands: set[str] | None
         payload = {"command": "set_power_profile", "profile": parsed["profile"]}
         return {"command": "set_power_profile", "payload": payload, "argv": argv}
 
-    if command in ("app-enable", "app-disable", "app-revive", "app-stop", "app-start"):
+    if command in ("app-revive", "app-stop", "app-start"):
         parsed = _parse_options(args)
         resolved = command.replace("-", "_")
         payload = {"command": resolved, "name": parsed["name"]}
         return {"command": resolved, "payload": payload, "argv": argv}
 
-    if command == "app-load-flow":
+    if command == "app-reorder":
         parsed = _parse_options(args)
-        payload = {"command": "app_load_flow"}
-        # The firmware defaults to apps/flow.json when path is omitted.
-        if "path" in parsed:
-            payload["path"] = parsed["path"]
-        return {"command": "app_load_flow", "payload": payload, "argv": argv}
+        payload = {"command": "app_reorder", "id": parsed["id"], "to": int(parsed.get("to", 0))}
+        return {"command": "app_reorder", "payload": payload, "argv": argv}
 
     if command == "app-events":
         parsed = _parse_options(args)
@@ -1000,6 +978,8 @@ def compile_terminal_command(command_line: str, device_commands: set[str] | None
 
     if command == "app-deactivate":
         parsed = _parse_options(args)
+        # Firmware v2.1.0 names apps by id only; --slot still reaches older
+        # firmware, which picked the app by its slot.
         payload = {"command": "app_deactivate"}
         if "id" in parsed:
             payload["id"] = parsed["id"]
