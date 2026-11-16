@@ -76,7 +76,12 @@ class FirmwarePacketFixtureTest(unittest.TestCase):
                     for event in expect.get("app_events", [])
                 ]
                 self.assertEqual(parsed["app_events"], expected_events)
-                self.assertEqual(len(parsed["extensions"]), len(expected_events))
+                # The range TLV (v2.0.F) rides first; without it the levels are ADC mV.
+                self.assertEqual(parsed["range"], expect.get("range"))
+                self.assertEqual(
+                    len(parsed["extensions"]),
+                    len(expected_events) + (1 if expect.get("range") is not None else 0),
+                )
 
     def test_every_parsed_packet_is_json(self):
         # The parsed packet is the visualization payload the browser gets as

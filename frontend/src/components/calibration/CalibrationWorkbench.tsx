@@ -10,6 +10,7 @@ import {
   getCalibrationStep,
   isFullCalibrationStatus,
   parseCalibrationState,
+  calibrationUnitLabel,
   saturatingSensorReports,
   sensorPointStatuses,
   unfittedSensorReports,
@@ -671,6 +672,15 @@ export function CalibrationWorkbench({
       </div>
 
       {!deviceConnected ? <p className="notice warning">{t("calOffline")}</p> : null}
+      {!calibration.unit_matches ? (
+        <p className="notice warning">
+          {t("calUnitMismatch")
+            .replace("{unit}", calibrationUnitLabel(calibration.unit))
+            .split("{active}").join(calibrationUnitLabel(calibration.active_unit))}
+        </p>
+      ) : calibration.active_unit === "uS" ? (
+        <p className="notice">{t("calUnitConductance")}</p>
+      ) : null}
 
       <section className="settings-card cal-card cal-zero-card">
         <div className="cal-card-body">
@@ -948,7 +958,7 @@ export function CalibrationWorkbench({
                 onClick={() => {
                   const fit = calibration.draft_fit;
                   if (fit && !fit.complete) {
-                    setConfirm({ kind: "save_partial", unfitted: fit.cells_total - fit.cells_fitted });
+                    setConfirm({ kind: "save_partial", unfitted: fit.cells_total - fit.cells_fitted - fit.cells_no_rfb });
                   } else {
                     void saveCalibration();
                   }
@@ -1328,15 +1338,18 @@ function FitProgress({
   const detailed = fit.points.length > 0;
   const needPoints = fit.failures.too_few_points + fit.failures.no_tare;
   const failedList = [...fit.failed].sort(byLabel).map((item) => labelOf(item.sensor_index)).join(", ");
-  const more = fit.cells_total - fit.cells_fitted - fit.failed.length;
+  const more = fit.cells_total - fit.cells_no_rfb - fit.cells_fitted - fit.failed.length;
   return (
     <div className="cal-fit-progress" aria-live="polite">
       <p className={fit.complete ? "cal-done" : "cal-hint"}>
         {fit.complete ? <CircleCheck size={16} strokeWidth={2} aria-hidden="true" /> : null}
         {t(saved ? "calFitSaved" : "calFitProgress")
           .replace("{fitted}", String(fit.cells_fitted))
-          .replace("{total}", String(fit.cells_total))}
+          .replace("{total}", String(fit.cells_total - fit.cells_no_rfb))}
       </p>
+      {fit.cells_no_rfb > 0 ? (
+        <p className="cal-hint">{t("calFitNoRfbNote").replace("{count}", String(fit.cells_no_rfb))}</p>
+      ) : null}
       {detailed && reports.length > 0 ? (
         <>
           <p className="cal-hint">{t("calFitExcludedTitle").replace("{count}", String(reports.length))}</p>
@@ -1375,7 +1388,7 @@ function FitProgress({
         </p>
       ) : null}
       {!saved && !fit.complete && fit.partial_save && fit.cells_fitted > 0 ? (
-        <p className="cal-hint">{t("calFitPartialSaveNote").replace("{count}", String(fit.cells_total - fit.cells_fitted))}</p>
+        <p className="cal-hint">{t("calFitPartialSaveNote").replace("{count}", String(fit.cells_total - fit.cells_no_rfb - fit.cells_fitted))}</p>
       ) : null}
     </div>
   );

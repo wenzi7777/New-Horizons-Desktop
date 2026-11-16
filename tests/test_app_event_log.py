@@ -364,6 +364,44 @@ class FirmwarePacketEndToEndTests(unittest.TestCase):
         self.assertEqual(rows[1]["value"], "0.75")
 
 
+class RangeColumnTests(unittest.TestCase):
+    """TIA-CTL v2.0.F frames say how they were read; the sample file keeps it."""
+
+    FIXTURE = ROOT.parent / "NewHorizonsOS-OTA" / "spec" / "fixtures" / "packets.json"
+
+    def record(self, name):
+        import json
+
+        from newhorizons_backend.packet_parser import parse_binary_packet
+        from newhorizons_backend.service import NewHorizonsService
+
+        case = next(case for case in json.loads(self.FIXTURE.read_text(encoding="utf-8"))["packets"] if case["name"] == name)
+        uid = case["expect"]["device_uid"]
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        service = NewHorizonsService(mock_mode=False)
+        service._data_root = Path(tmp.name)
+        self.addCleanup(service.stop)
+        with service._lock:
+            service._recording_enabled.add(uid)
+        service._write_csv_sample(uid, parse_binary_packet(bytes.fromhex(case["hex"])))
+        service._recording_sessions[uid].writer.flush()
+        with service._csv_paths[uid].open(encoding="utf-8") as handle:
+            return list(csv.DictReader(handle))
+
+    @unittest.skipUnless(FIXTURE.exists(), "NewHorizonsOS-OTA not checked out alongside")
+    def test_a_conductance_frame_records_its_unit_vref_and_clipped_rows(self):
+        rows = self.record("range_conductance")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["range_unit"], rows[0]["vref_mv"], rows[0]["saturated_rows"]), ("uS", "412", "4"))
+        self.assertEqual(rows[0]["RawADC_3"], "3105.0")
+
+    @unittest.skipUnless(FIXTURE.exists(), "NewHorizonsOS-OTA not checked out alongside")
+    def test_a_frame_without_the_tlv_has_no_range_columns(self):
+        rows = self.record("imu")
+        self.assertNotIn("range_unit", rows[0])
+
+
 class SampleAlignmentTests(unittest.TestCase):
     """The sample writer has to carry the same key the events do."""
 

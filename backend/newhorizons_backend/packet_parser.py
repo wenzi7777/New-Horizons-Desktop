@@ -7,6 +7,7 @@ from .wire import (
     APP_EVENT_FLAG_VALUE,
     BATTERY_BYTES_V5,
     EXT_APP_EVENT,
+    EXT_RANGE,
     FLAG_BATTERY,
     FLAG_EPOCH_VALID,
     FLAG_EXTENSIONS,
@@ -19,6 +20,10 @@ from .wire import (
     MAG_BYTES,
     PACKET_MAGIC as MAGIC,
     PACKET_VERSION_V5 as ARDUINO_PACKET_VERSION_V5,
+    RANGE_FLAG_AUTO,
+    RANGE_TLV_LEN,
+    RANGE_UNIT_MV,
+    RANGE_UNIT_US,
 )
 
 HEADER_LEN = 20
@@ -116,10 +121,36 @@ def decode_app_event(value: bytes) -> dict[str, Any] | None:
     return event
 
 
+RANGE_STRUCT = struct.Struct("<BBHI")  # unit, flags, vref_mv, saturated_rows
+RANGE_UNITS = {RANGE_UNIT_MV: "mV", RANGE_UNIT_US: "uS"}
+
+
+def decode_range(value: bytes) -> dict[str, Any] | None:
+    """The range TLV (TIA-CTL v2.0.F, spec/PROTOCOL.md 3.1): the unit, the Vref
+    and the clipped rows of this frame, or None when it is not one exactly."""
+    if len(value) != RANGE_TLV_LEN:
+        return None
+    unit, flags, vref_mv, saturated_rows = RANGE_STRUCT.unpack(value)
+    if unit not in RANGE_UNITS:
+        return None
+    return {
+        "unit": RANGE_UNITS[unit],
+        "auto": bool(flags & RANGE_FLAG_AUTO),
+        "vref_mv": int(vref_mv),
+        "saturated_rows": int(saturated_rows),
+    }
+
+
+def _extension_is_known(item: dict[str, Any]) -> bool:
+    if item["type"] == EXT_APP_EVENT:
+        return decode_app_event(item["value"]) is not None
+    if item["type"] == EXT_RANGE:
+        return decode_range(item["value"]) is not None
+    return False
+
+
 def _extensions_are_known(extensions: list[dict[str, Any]]) -> bool:
-    return bool(extensions) and all(
-        item["type"] == EXT_APP_EVENT and decode_app_event(item["value"]) is not None for item in extensions
-    )
+    return bool(extensions) and all(_extension_is_known(item) for item in extensions)
 
 
 def _v5_fixed_trailer_len(flags: int) -> int:
@@ -287,6 +318,12 @@ def parse_binary_packet(payload: bytes, sensor_count: int | None = None, device_
             event for event in (decode_app_event(item["value"]) for item in extensions if item["type"] == EXT_APP_EVENT)
             if event is not None
         ],
+        # How the levels were read (v2.0.F): None = ADC mV, as every other board.
+        "range": next(
+            (decoded for decoded in (decode_range(item["value"]) for item in extensions if item["type"] == EXT_RANGE)
+             if decoded is not None),
+            None,
+        ),
         "flags": int(flags),
     }
     if epoch_ms is not None:

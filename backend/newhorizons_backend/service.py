@@ -1019,7 +1019,7 @@ class NewHorizonsService(
 
     CALIBRATION_STATUS_KEYS = (
         "enabled", "mode_active", "session_active", "complete", "tare_complete",
-        "tare_enabled", "output_mode",
+        "tare_enabled", "output_mode", "unit", "active_unit", "unit_matches", "draft_unit",
         "tare", "draft_tare", "levels", "draft_levels", "fit", "draft_fit", "fit_settings", "metadata",
     )
 
@@ -1135,6 +1135,8 @@ class NewHorizonsService(
         mag = payload.get("mag") or imu.get("mag") or [0, 0, 0]
         raw_adc = payload.get("raw_adc")
         include_raw = isinstance(raw_adc, list) and len(raw_adc) == len(pressures)
+        # TIA-CTL v2.0.F says on every frame how it was read (packet_parser.decode_range).
+        frame_range = payload.get("range") if isinstance(payload.get("range"), dict) else None
         timestamp = self._csv_timestamp_ms(payload, now)
         time_ref = self._csv_time_ref(payload)
         frame_seq = int(payload.get("frame_id") or 0)
@@ -1152,6 +1154,9 @@ class NewHorizonsService(
                 + ["frame_seq"]
                 # Appended for the same reason: see _csv_time_ref().
                 + ["time_ref"]
+                # v2.0.F only: this frame's unit (mV / uS), Vref and clipped
+                # rows (bit n = row n), since auto range moves Vref mid-recording.
+                + (["range_unit", "vref_mv", "saturated_rows"] if frame_range is not None else [])
             )
 
         device_clock = time_ref == "device"
@@ -1164,7 +1169,12 @@ class NewHorizonsService(
             + list(gyro[:3])
             + list(acc[:3])
             + [frame_seq]
-            + [time_ref],
+            + [time_ref]
+            + (
+                [frame_range.get("unit"), frame_range.get("vref_mv"), frame_range.get("saturated_rows")]
+                if frame_range is not None
+                else []
+            ),
             frame_seq,
             timestamp,
             device_clock,

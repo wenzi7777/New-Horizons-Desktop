@@ -18,7 +18,23 @@ const RELAY_KEYS: Record<string, string> = {
 export function RecordingMetaSummary({ meta, className }: { meta: RecordingMeta; className?: string }) {
   const { t, locale } = useI18n();
   const unknown = "—";
-  const { device, sensors, calibration, stream, transport, recording } = meta;
+  const { device, sensors, calibration, stream, transport, recording, range } = meta;
+  // A meta without output_unit is from firmware before v2.2, when every mode was mV
+  // ("virtual" and the old "auto" re-expressed it at a reference Rfb). A profile
+  // applies only in its own unit (none recorded = mV); in the other it is kept, unused.
+  const outputUnit = range?.outputUnit ?? "mV";
+  const profileUnit = calibration.unit ?? "mV";
+  const unitMismatch = calibration.enabled === true && profileUnit !== outputUnit;
+  const calibrationText = unitMismatch
+    ? t("metaCalibrationUnitMismatch")
+    : calibration.outputMode
+      ? `${t(OUTPUT_MODE_KEYS[calibration.outputMode] ?? calibration.outputMode)}${calibration.outputMode !== "raw" && profileUnit === "uS" ? " · µS" : ""}`
+      : unknown;
+  const readingKey = range === null || !range.mode
+    ? null
+    : range.outputUnit === null
+      ? (range.mode === "raw" ? "rangeModeShort_raw" : "metaReadingLegacyVirtual")
+      : `rangeModeShort_${range.mode === "conductance" || range.mode === "auto" ? range.mode : "raw"}`;
   const end = recordingEnd(meta);
   const shape = sensors.rows && sensors.cols ? `${sensors.rows} × ${sensors.cols}` : null;
   const relay = transport.relay ? t(RELAY_KEYS[transport.relay] ?? transport.relay) : null;
@@ -47,8 +63,14 @@ export function RecordingMetaSummary({ meta, className }: { meta: RecordingMeta;
         <dd>{device.firmwareVersion ? `${device.firmwareVersion}${device.firmwarePrerelease ? " (beta)" : ""}` : unknown}</dd>
         <dt>{t("metaSensors")}</dt>
         <dd>{sensors.count ?? unknown}{shape ? ` · ${shape}` : ""}</dd>
+        {range ? (
+          <>
+            <dt>{t("metaReading")}</dt>
+            <dd>{readingKey ? t(readingKey) : unknown}</dd>
+          </>
+        ) : null}
         <dt>{t("metaCalibration")}</dt>
-        <dd>{calibration.outputMode ? t(OUTPUT_MODE_KEYS[calibration.outputMode] ?? calibration.outputMode) : unknown}</dd>
+        <dd>{calibrationText}</dd>
         <dt>{t("metaTargetFps")}</dt>
         <dd>{stream.targetFps ? `${stream.targetFps} Hz` : unknown}</dd>
         <dt>{t("metaTransport")}</dt>

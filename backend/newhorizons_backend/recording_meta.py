@@ -24,18 +24,21 @@ properly::
             firmware_version, firmware_prerelease, protocol}
     sensors {count, matrix_shape {rows, cols}, matrix_layout, order,
              raw_adc_columns}
-    calibration {enabled, output_mode, tare_complete, fit_settings, metadata}
+    calibration {enabled, output_mode, unit, tare_complete, fit_settings, metadata}
     stream {target_fps, send_every_n_frames, filter, stream_raw_adc, imu,
             magnetometer}
     transport {path, relay (gateway | hub | direct), relay_id}
     clock               the device's clock status, as it reported it
-    range {mode, vref_mv, ref_rfb_ohm, leak_compensation, rfb_ohm, offset_mv}
+    range {mode, output_unit, auto, vref_mv, leak_compensation, rfb_ohm,
+           offset_mv, rfb_status}
                         TIA-CTL v2.0.F only (null on boards without a Vref
-                        DAC): how the rows were read. mode "raw" at 330 mV
-                        reads like v1.5.F and earlier boards; "virtual" and
-                        "auto" re-express every reading at ref_rfb_ohm and
-                        330 mV, so with the default 20000 they compare with
-                        those boards too.
+                        DAC): how the rows were read. mode "raw" is ADC mV,
+                        as on every other board; "conductance" and "auto"
+                        send each cell's conductance in µS (output_unit "uS")
+                        from the measured rfb_ohm / offset_mv, rows whose
+                        rfb_status is not "ok" reading 0. Each frame's own
+                        unit, Vref and clipped rows are in the sample file's
+                        range_unit / vref_mv / saturated_rows columns.
     battery_at_start {soc_percent, vbat_mv}
     status_received_at  when the status the fields above came from arrived;
                         null = no full status yet (fields filled in later)
@@ -194,13 +197,16 @@ def _range_meta(status: dict[str, Any]) -> dict[str, Any] | None:
         return None
     rng = _dict(status.get("range"))
     leak = rng.get("leak_compensation")
+    auto = rng.get("auto")
     return {
         "mode": _known(rng.get("mode")),
+        "output_unit": _known(rng.get("output_unit")),
+        "auto": auto if isinstance(auto, bool) else None,
         "vref_mv": _known(vref.get("mv")),
-        "ref_rfb_ohm": _known(rng.get("ref_rfb_ohm")),
         "leak_compensation": leak if isinstance(leak, bool) else None,
         "rfb_ohm": copy.deepcopy(rng.get("rfb_ohm")) if isinstance(rng.get("rfb_ohm"), list) else None,
         "offset_mv": copy.deepcopy(rng.get("offset_mv")) if isinstance(rng.get("offset_mv"), list) else None,
+        "rfb_status": copy.deepcopy(rng.get("rfb_status")) if isinstance(rng.get("rfb_status"), list) else None,
     }
 
 
@@ -256,6 +262,9 @@ def build_device_meta(
         "calibration": {
             "enabled": calibration.get("enabled") if isinstance(calibration.get("enabled"), bool) else None,
             "output_mode": _known(calibration.get("output_mode")),
+            # The profile's unit: mV, or uS for one captured in conductance
+            # (firmware before v2.2 has no units: every profile is mV).
+            "unit": _known(calibration.get("unit")),
             "tare_complete": calibration.get("tare_complete") if isinstance(calibration.get("tare_complete"), bool) else None,
             # The settings, not the fitted levels/coefficients: those are
             # large and the device keeps them.
@@ -310,6 +319,7 @@ class RecordingMeta:
     TRACKED = (
         ("calibration", "enabled"),
         ("calibration", "output_mode"),
+        ("calibration", "unit"),
         ("stream", "target_fps"),
         ("stream", "stream_raw_adc"),
         ("transport", "path"),
@@ -317,7 +327,8 @@ class RecordingMeta:
         ("device", "firmware_version"),
         ("range", "mode"),
         ("range", "vref_mv"),
-        ("range", "ref_rfb_ohm"),
+        ("range", "output_unit"),
+        ("range", "auto"),
         ("range", "leak_compensation"),
     )
 

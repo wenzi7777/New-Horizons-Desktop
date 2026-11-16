@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 import { rsSpreadFraction, summarizeSweep, sweepCsv, type SweepCalibration, type SweepStep, type SweepSummary } from "../lib/vrefSweep";
 import { Select } from "./Select";
-import { SwitchRow } from "./Switch";
 
 // v2.0.F: the Vref DAC, the calibration switch, the measured Rfb per row, the
 // range mode and the Vref sweep. The firmware owns every rule (ceiling,
@@ -35,6 +34,10 @@ const STRAP_MARGIN_MV = 700;
 const STRAP_RISK_MV = 800;
 
 type VrefZone = "auto" | "safe" | "raised" | "near" | "risk" | "unknown";
+// raw = ADC mV (every board's way); conductance = µS from the measured Rfb;
+// auto = conductance with smart Vref. "virtual" (before firmware v2.2) is gone.
+type RangeModeName = "raw" | "conductance" | "auto";
+const RANGE_MODES: RangeModeName[] = ["raw", "conductance", "auto"];
 
 function vrefZone(mv: number | null, mode: string): VrefZone {
   if (mode === "auto") return "auto";
@@ -89,11 +92,12 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const currentMv = num(vref.mv);
   const limitMv = num(vref.limit_mv);
   const calibrationOn = vref.calibration_on === true;
-  const modeNow = typeof range.mode === "string" ? range.mode : "raw";
-  const refRfbNow = num(range.ref_rfb_ohm) ?? 20000;
+  const modeNow: RangeModeName = range.mode === "conductance" || range.mode === "auto" ? range.mode : "raw";
   const leakNow = range.leak_compensation !== false;
   const rfbTable = Array.isArray(range.rfb_ohm) ? (range.rfb_ohm as unknown[]).map((v) => num(v) ?? 0) : [];
   const rfbOffsets = Array.isArray(range.offset_mv) ? (range.offset_mv as unknown[]).map((v) => num(v) ?? 0) : [];
+  const rfbStatuses = Array.isArray(range.rfb_status) ? (range.rfb_status as unknown[]).map((v) => (typeof v === "string" ? v : "")) : [];
+  const autoCeilingMv = num(range.auto_ceiling_mv);
   const knownRows = num(range.rfb_known_rows) ?? 0;
 
   const [busy, setBusy] = useState<string | null>(null);
@@ -103,11 +107,9 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const [measureVref, setMeasureVref] = useState("");
   const [rfbRows, setRfbRows] = useState<RfbRow[] | null>(null);
 
-  const [refRfbDraft, setRefRfbDraft] = useState(String(refRfbNow));
   const [leakDraft, setLeakDraft] = useState(leakNow);
-  // The reading mode as two on/off drafts, sent together with Apply.
-  const [convertDraft, setConvertDraft] = useState(modeNow !== "raw");
-  const [smartDraft, setSmartDraft] = useState(modeNow === "auto");
+  // The reading mode is chosen from a menu and sent with Apply.
+  const [modeDraft, setModeDraft] = useState<RangeModeName>(modeNow);
   const [sweepStart, setSweepStart] = useState("100");
   const [sweepStop, setSweepStop] = useState("700");
   const [sweepStep, setSweepStep] = useState("100");
@@ -115,9 +117,8 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const [sweepSolderedRfb, setSweepSolderedRfb] = useState("");
   const [sweep, setSweep] = useState<SweepResult | null>(null);
 
-  useEffect(() => { setRefRfbDraft(String(refRfbNow)); }, [refRfbNow]);
   useEffect(() => { setLeakDraft(leakNow); }, [leakNow]);
-  useEffect(() => { setConvertDraft(modeNow !== "raw"); setSmartDraft(modeNow === "auto"); }, [modeNow]);
+  useEffect(() => { setModeDraft(modeNow); }, [modeNow]);
   useEffect(() => { if (currentMv !== null) setVrefDraft(String(currentMv)); }, [currentMv]);
   useEffect(() => { if (limitMv !== null) setLimitDraft(String(limitMv)); }, [limitMv]);
 
@@ -166,10 +167,6 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
     if (values === null) return null;
     return send(name, label, { ...extra, ...values });
   }
-
-  // A mode applies at once, with the reference Rfb and leak setting in force.
-  // Off/off is raw, the old boards' way of reading; smart needs conversion.
-  const modeDraft = !convertDraft ? "raw" : smartDraft ? "auto" : "virtual";
 
   async function applyMode() {
     if (modeDraft !== "raw" && !rfbValid) return;
@@ -223,7 +220,8 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const span = sliderMax - MIN_VREF_MV;
   const share = (from: number, to: number) => Math.max(0, Math.min(to, sliderMax) - Math.max(from, MIN_VREF_MV)) / span;
   const autoSteps = num(range.auto_steps);
-  const legacyScale = modeNow === "raw" && currentMv === SAFE_VREF_MV;
+  // Rows without a measured Rfb read 0 in conductance: fine where none is soldered.
+  const unmeasuredRows = rfbRowCount > 0 ? rfbRowCount - measuredRfb.length : 0;
 
   return (
     <>
@@ -250,16 +248,14 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
       <div className="settings-subsection">
         <h4>{t("vrefReadingTitle")}</h4>
         <div className="field-grid">
-          <SwitchRow
-            checked={convertDraft}
-            disabled={working || (!convertDraft && !rfbValid)}
-            label={t("vrefConvertSwitch").replace("{ref}", kOhm(refRfbNow))}
-            onChange={(on) => {
-              setConvertDraft(on);
-              if (!on) setSmartDraft(false);
-            }}
-          />
-          <SwitchRow checked={smartDraft} disabled={working || !convertDraft} label={t("vrefSmartSwitch")} onChange={setSmartDraft} />
+          <div className="field">
+            <label>{t("rangeMode")}</label>
+            <Select value={modeDraft} disabled={working} aria-label={t("rangeMode")} onChange={(event) => setModeDraft(event.target.value as RangeModeName)}>
+              {RANGE_MODES.map((mode) => (
+                <option key={mode} value={mode} disabled={mode !== "raw" && !rfbValid}>{t(`rangeModeShort_${mode}`)}</option>
+              ))}
+            </Select>
+          </div>
           <div className="field settings-field-action">
             <button
               className="button primary"
@@ -271,22 +267,33 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
             </button>
           </div>
         </div>
-        <p className="field-hint">{convertDraft ? t("vrefConvertOnHint") : t("vrefConvertOffHint")}</p>
-        <p className="field-hint">{t("vrefSmartHint")}</p>
+        <p className="field-hint">
+          {modeDraft === "raw"
+            ? t("rangeModeRawHint")
+            : modeDraft === "conductance"
+              ? t("rangeModeConductanceHint")
+              : t("rangeModeAutoHint").replace("{ceil}", String(autoCeilingMv ?? DEFAULT_LIMIT_MV))}
+        </p>
         {!rfbValid ? (
           <div className="notice vref-needs-rfb">
             <span>{t("rangeNeedsRfb")}</span>
             <button className="button" type="button" disabled={working} onClick={() => void measureRfb()}>{busy === "rfb_measure" ? t("running") : t("rfbMeasure")}</button>
           </div>
         ) : null}
-        {legacyScale ? <p className="notice success">{t("vrefLegacyMatch")}</p> : null}
+        {modeNow !== "raw" ? <p className="notice">{t("rangeConductanceCalibrationHint")}</p> : null}
+        {modeNow !== "raw" && rfbValid && unmeasuredRows > 0 ? (
+          <p className="field-hint">{t("rfbUnmeasuredRowsHint").replace("{n}", String(unmeasuredRows))}</p>
+        ) : null}
       </div>
 
       {modeNow === "auto" ? (
         <div className="settings-subsection">
           <h4>{t("vrefControlTitle")}</h4>
           <p className="field-hint">
-            {t("vrefSmartStatus").replace("{mv}", currentMv !== null ? String(currentMv) : "-").replace("{steps}", String(autoSteps ?? 0))}
+            {t("vrefSmartStatus")
+              .replace("{mv}", currentMv !== null ? String(currentMv) : "-")
+              .replace("{ceil}", autoCeilingMv !== null ? String(autoCeilingMv) : "-")
+              .replace("{steps}", String(autoSteps ?? 0))}
           </p>
         </div>
       ) : (
@@ -326,12 +333,14 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
             <h4>{t("vrefAdvancedRangeTitle")}</h4>
             <div className="field-grid">
               <div className="field">
-                <label>{t("rangeRefRfb")}</label>
-                <input type="number" min="1000" max="1000000" step="1000" value={refRfbDraft} onChange={(event) => setRefRfbDraft(event.target.value)} />
+                <label>{t("rangeLeak")}</label>
+                <Select value={leakDraft ? "on" : "off"} disabled={working} aria-label={t("rangeLeak")} onChange={(event) => setLeakDraft(event.target.value === "on")}>
+                  <option value="on">{t("onOffOn")}</option>
+                  <option value="off">{t("onOffOff")}</option>
+                </Select>
               </div>
-              <SwitchRow checked={leakDraft} disabled={working} label={t("rangeLeak")} onChange={setLeakDraft} />
               <div className="field settings-field-action">
-                <button className="button" type="button" disabled={working} onClick={() => void sendNumbers("set_range", t("rangeApply"), { ref_rfb_ohm: refRfbDraft }, { leak_comp: leakDraft })}>{t("rangeApply")}</button>
+                <button className="button" type="button" disabled={working || leakDraft === leakNow} onClick={() => void send("set_range", t("rangeApply"), { leak_comp: leakDraft })}>{t("rangeApply")}</button>
               </div>
             </div>
           </div>
@@ -353,12 +362,12 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
               <table className="data-table">
                 <thead><tr><th>{t("rfbRow")}</th><th>{t("rfbValue")}</th><th>{t("rfbOffset")}</th><th>{t("rfbStatus")}</th></tr></thead>
                 <tbody>
-                  {(rfbRows ?? rfbTable.map((value, row) => ({ row, off_mv: 0, on_mv: 0, rfb_ohm: value, offset_mv: rfbOffsets[row], status: value > 0 ? "ok" : "" }))).map((item) => (
+                  {(rfbRows ?? rfbTable.map((value, row) => ({ row, off_mv: 0, on_mv: 0, rfb_ohm: value, offset_mv: rfbOffsets[row], status: rfbStatuses[row] || (value > 0 ? "ok" : "") }))).map((item) => (
                     <tr key={item.row}>
                       <td>{item.row}</td>
                       <td>{kOhm(item.rfb_ohm)}</td>
                       <td>{item.offset_mv !== undefined && item.rfb_ohm > 0 ? `${item.offset_mv > 0 ? "+" : ""}${item.offset_mv.toFixed(1)} mV` : "-"}</td>
-                      <td>{item.status ? t(`rfbStatus_${item.status}`) : t("rfbNotMeasured")}</td>
+                      <td>{item.status && item.status !== "unknown" ? t(`rfbStatus_${item.status}`) : t("rfbNotMeasured")}</td>
                     </tr>
                   ))}
                 </tbody>

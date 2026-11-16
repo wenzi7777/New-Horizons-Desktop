@@ -122,11 +122,11 @@ class DeviceMetaTests(unittest.TestCase):
         self.assertIsNone(build_device_meta("DEV", {}, FULL_STATUS)["range"])
         v20 = dict(FULL_STATUS,
                    vref={"supported": True, "ok": True, "mv": 264},
-                   range={"mode": "auto", "ref_rfb_ohm": 20000, "leak_compensation": True,
-                          "rfb_ohm": [20010.5, 0], "offset_mv": [3.2, 0]})
+                   range={"mode": "auto", "output_unit": "uS", "auto": True, "leak_compensation": True,
+                          "rfb_ohm": [20010.5, 0], "offset_mv": [3.2, 0], "rfb_status": ["ok", "no_feedback"]})
         self.assertEqual(build_device_meta("DEV", {}, v20)["range"], {
-            "mode": "auto", "vref_mv": 264, "ref_rfb_ohm": 20000, "leak_compensation": True,
-            "rfb_ohm": [20010.5, 0], "offset_mv": [3.2, 0],
+            "mode": "auto", "output_unit": "uS", "auto": True, "vref_mv": 264, "leak_compensation": True,
+            "rfb_ohm": [20010.5, 0], "offset_mv": [3.2, 0], "rfb_status": ["ok", "no_feedback"],
         })
 
     def test_a_disconnected_gateway_is_not_the_relay(self):
@@ -217,13 +217,14 @@ class RecordingMetaTests(unittest.TestCase):
     def test_a_range_mode_change_mid_recording_is_logged(self):
         meta = self.meta()
         meta.on_frame(10, 1)
-        raw = dict(FULL_STATUS, vref={"supported": True, "mv": 330}, range={"mode": "raw", "ref_rfb_ohm": 20000})
+        raw = dict(FULL_STATUS, vref={"supported": True, "mv": 330}, range={"mode": "raw", "output_unit": "mV", "auto": False})
         meta.refresh_device(build_device_meta("DEV", {}, raw))
-        auto = dict(raw, range={"mode": "auto", "ref_rfb_ohm": 20000})
+        auto = dict(raw, range={"mode": "auto", "output_unit": "uS", "auto": True})
         meta.refresh_device(build_device_meta("DEV", {}, auto))
         document = self.on_disk()
         self.assertEqual(document["range"]["mode"], "auto")
-        self.assertEqual([c["field"] for c in document["changes"]], ["range.mode"])
+        self.assertEqual(document["range"]["output_unit"], "uS")
+        self.assertEqual([c["field"] for c in document["changes"]], ["range.mode", "range.output_unit", "range.auto"])
 
     def test_stop_says_how_the_recording_ended_once(self):
         meta = self.meta()
