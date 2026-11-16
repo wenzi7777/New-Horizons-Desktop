@@ -31,13 +31,17 @@ def control_source() -> str:
 
 
 class FirmwareFindMeStaticTest(unittest.TestCase):
-    def test_findme_does_not_periodically_rediscover_after_same_gateway_accept(self):
+    def test_findme_renews_its_lease_after_accept(self):
+        # Since firmware v2.3.0 an attachment is a lease: the device renews it
+        # (unicast to its relay, naming it) one lease interval after an offer,
+        # quietly, instead of going silent once attached.
         source = FINDME_CPP.read_text()
 
         self.assertNotIn("kAttachedRefreshIntervalMs", source)
         self.assertIn("isSameGateway", source)
         self.assertNotIn("findme_offer_refreshed", source)
-        self.assertIn("nextDiscoverMs_ = 0;", source)
+        self.assertIn("nextDiscoverMs_ = lastSuccessMs_ + offerPolicy_.leaseIntervalMs();", source)
+        self.assertIn("FindMeRoundKind::Renew", source)
         self.assertNotIn("nextDiscoverMs_ = millis() + (offer.ttlMs ? offer.ttlMs : kDefaultOfferTtlMs);", source)
 
     def test_findme_rediscovers_after_wifi_reconnect(self):
