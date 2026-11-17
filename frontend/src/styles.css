@@ -51,6 +51,8 @@
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
   --blur-chrome: 20px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
   --dur-fast: 120ms;
   --dur-med: 220ms;
 
@@ -109,9 +111,9 @@
 :root.theme-fading,
 :root.theme-fading * {
   transition:
-    background-color 300ms ease,
-    color 300ms ease,
-    border-color 300ms ease !important;
+    background-color 300ms var(--ease-in-out),
+    color 300ms var(--ease-in-out),
+    border-color 300ms var(--ease-in-out) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -460,7 +462,7 @@ input:-webkit-autofill:focus {
   -webkit-text-fill-color: var(--text);
   caret-color: var(--text);
   border-color: var(--line-strong);
-  transition: background-color 9999s ease-out 0s;
+  transition: background-color 9999s var(--ease-out) 0s;
 }
 
 .login-loading {
@@ -1238,7 +1240,7 @@ input:-webkit-autofill:focus {
   border-radius: 7px;
   background: transparent;
   min-width: 0;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s var(--ease-out);
 }
 
 /* The card opens the folder; the devices in it are a preview, not targets. */
@@ -1287,7 +1289,7 @@ input:-webkit-autofill:focus {
 
 .status-dot.booting {
   background: #3d756b;
-  animation: pulse-dot 1.2s ease-in-out infinite;
+  animation: pulse-dot 1.2s var(--ease-in-out) infinite;
 }
 
 @keyframes pulse-dot {
@@ -1943,7 +1945,7 @@ input:-webkit-autofill:focus {
   background: var(--panel-solid);
   padding: 11px;
   cursor: pointer;
-  transition: transform 160ms ease-out, border-color 160ms ease-out, background 160ms ease-out, box-shadow 160ms ease-out;
+  transition: transform 160ms var(--ease-out), border-color 160ms var(--ease-out), background 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
 }
 
 .action-button-choice:hover {
@@ -2233,7 +2235,7 @@ input:-webkit-autofill:focus {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, #3f7f65 0%, #4f92a3 100%);
-  transition: width 0.25s ease;
+  transition: width 0.25s var(--ease-out);
 }
 
 .storage-segment,
@@ -2552,7 +2554,7 @@ input:-webkit-autofill:focus {
   height: 100%;
   background: var(--accent);
   border-radius: 2px;
-  transition: width 0.2s ease;
+  transition: width 0.2s var(--ease-out);
 }
 
 .level-progress-text {
@@ -3055,7 +3057,7 @@ input:-webkit-autofill:focus {
   width: 100%;
   max-width: 760px;
   min-width: 0;
-  transition: box-shadow 0.4s ease;
+  transition: box-shadow 0.4s var(--ease-out);
 }
 
 /* Card top: one line of name and actions, one line of view controls, one
@@ -3963,7 +3965,7 @@ input:-webkit-autofill:focus {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
   background: color-mix(in srgb, var(--danger) 16%, var(--panel-soft));
-  animation: battery-low-pulse 1s ease-in-out infinite;
+  animation: battery-low-pulse 1s var(--ease-in-out) infinite;
 }
 
 @keyframes battery-low-pulse {
@@ -4007,7 +4009,7 @@ input:-webkit-autofill:focus {
   height: 100%;
   border-radius: inherit;
   background: var(--accent);
-  transition: width 180ms ease;
+  transition: width 180ms var(--ease-out);
 }
 
 .command-card-shell {
@@ -4582,7 +4584,7 @@ input:-webkit-autofill:focus {
   position: absolute;
   inset: 0;
   background: var(--accent-soft);
-  transition: width 0.15s ease;
+  transition: width 0.15s var(--ease-out);
 }
 
 .download-progress span {
@@ -6775,7 +6777,7 @@ input:-webkit-autofill:focus {
   cursor: default;
   background: linear-gradient(90deg, var(--panel-soft) 0%, color-mix(in srgb, #fafafa var(--tint), var(--panel-solid)) 50%, var(--panel-soft) 100%);
   background-size: 200% 100%;
-  animation: app-shimmer 1.4s ease-in-out infinite;
+  animation: app-shimmer 1.4s var(--ease-in-out) infinite;
 }
 
 @keyframes app-shimmer {
@@ -7292,7 +7294,7 @@ input:-webkit-autofill:focus {
 
 .readout-live.on i {
   background: var(--success);
-  animation: pulse-dot 1.6s ease-in-out infinite;
+  animation: pulse-dot 1.6s var(--ease-in-out) infinite;
 }
 
 .readout-section {
@@ -12001,7 +12003,7 @@ button.cal-matrix-cell:active {
   opacity: 0.45;
 }
 .apps-switch.pending i {
-  animation: apps-switch-pulse 0.9s ease-in-out infinite alternate;
+  animation: apps-switch-pulse 0.9s var(--ease-in-out) infinite alternate;
 }
 .apps-switch:focus-visible {
   outline: 2px solid var(--accent);

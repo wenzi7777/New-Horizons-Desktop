@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useI18n } from "../i18n";
-import { rsSpreadFraction, summarizeSweep, sweepCsv, type SweepCalibration, type SweepStep, type SweepSummary } from "../lib/vrefSweep";
+import { rsSpreadFraction, summarizeSweep, sweepCsv, sweepRsProblem, type SweepCalibration, type SweepStep, type SweepSummary } from "../lib/vrefSweep";
 import { Select } from "./Select";
 
 // v2.0.F: the Vref DAC, the calibration switch, the measured Rfb per row, the
@@ -207,6 +207,7 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
 
   const summary: SweepSummary[] = sweep ? summarizeSweep(sweep.steps, sweep.rows, sweep.cols, sweep.calibration, sweep.fallbackRfbOhm || undefined) : [];
   const spread = rsSpreadFraction(summary);
+  const rsProblem = sweep ? sweepRsProblem(summary, sweep.calibration, sweep.fallbackRfbOhm || undefined) : null;
 
   // The status cards: what the device is doing now.
   const measuredRfb = (rfbRows ? rfbRows.map((row) => row.rfb_ohm) : rfbTable).filter((value) => value > 0);
@@ -430,7 +431,7 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
                     ))}
                   </tbody>
                 </table>
-                {spread !== null ? <p className="service-muted">{t("sweepSpread")}: {(spread * 100).toFixed(1)}%</p> : <p className="service-muted">{t("sweepNoRs")}</p>}
+                {spread !== null ? <p className="service-muted">{t("sweepSpread")}: {(spread * 100).toFixed(1)}%</p> : <p className="service-muted">{t(rsProblem === "no_rfb" ? "sweepNoRs" : "sweepFewSteps")}</p>}
               </>
             ) : null}
           </div>

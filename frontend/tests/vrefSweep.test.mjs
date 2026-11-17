@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { rsSpreadFraction, summarizeSweep, sweepCsv } from "../src/lib/vrefSweep.ts";
+import { rsSpreadFraction, summarizeSweep, sweepCsv, sweepRsProblem } from "../src/lib/vrefSweep.ts";
 
 // 2 rows x 2 cols; Rfb 20k, a cell of Rs = 10k reads Vref * (1 + 20k/10k) = 3 * Vref.
 function step(vref, rs, rfb = 20000) {
@@ -50,4 +50,14 @@ test("the csv is one line per vref and cell, row-major", () => {
   assert.equal(lines[0], "vref_mv,row,col,rfb_ohm,offset_mv,raw_mv");
   assert.equal(lines.length, 1 + 4);
   assert.equal(lines[2], "300,0,1,20000,0,300");
+});
+
+test("a missing spread says whether Rfb or the signal is missing", () => {
+  // Pressure let go after the first step: the others read Vref everywhere.
+  const idle = (vref) => ({ vref_mv: vref, matrix_mv: [vref, vref, vref, vref] });
+  const letGo = summarizeSweep([step(100, 10000), idle(200), idle(300)], 2, 2, measured);
+  assert.equal(sweepRsProblem(letGo, measured), "few_steps");
+  const held = summarizeSweep([step(100, 10000), step(200, 10000)], 2, 2, {}, 20000);
+  assert.equal(sweepRsProblem(held, {}, 20000), null);
+  assert.equal(sweepRsProblem(summarizeSweep([step(100, 10000)], 2, 2), {}), "no_rfb");
 });
