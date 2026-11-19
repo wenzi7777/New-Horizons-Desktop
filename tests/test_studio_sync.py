@@ -6,6 +6,7 @@ import time
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -293,6 +294,29 @@ class RelayListHygieneTest(_Env):
             self.service._gateways["pocket-keep"]["last_seen"] = "2020-01-01T00:00:00+00:00"
         with patch.dict("os.environ", {"NEWHORIZONS_RELAY_OFFLINE_TTL_DAYS": "0"}):
             self.assertIn("pocket-keep", [i["gateway_id"] for i in self.service.gateway_snapshot()])
+
+    def test_unsigned_app_relays_go_after_a_day(self):
+        two_days_ago = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        for gateway_id, client_type in (("studio-anon", "studio"), ("studio-signed", "studio"), ("hub-quiet", "hub")):
+            session, _ = self.session()
+            self.hello(session, gateway_id=gateway_id, client_type=client_type)
+            self.service.unregister_gateway_sender(session.sender)
+            with self.service._lock:
+                self.service._gateways[gateway_id]["last_seen"] = two_days_ago
+                if gateway_id == "studio-signed":
+                    self.service._gateways[gateway_id]["authenticated"] = True
+        listed = [i["gateway_id"] for i in self.service.gateway_snapshot()]
+        self.assertNotIn("studio-anon", listed)
+        self.assertIn("studio-signed", listed)
+        self.assertIn("hub-quiet", listed)
+        # 0 gives them the normal TTL.
+        session, _ = self.session()
+        self.hello(session, gateway_id="pocket-anon", client_type="pocket")
+        self.service.unregister_gateway_sender(session.sender)
+        with self.service._lock:
+            self.service._gateways["pocket-anon"]["last_seen"] = two_days_ago
+        with patch.dict("os.environ", {"NEWHORIZONS_UNAUTH_RELAY_OFFLINE_TTL_DAYS": "0"}):
+            self.assertIn("pocket-anon", [i["gateway_id"] for i in self.service.gateway_snapshot()])
 
     def test_prune_offline_api_removes_every_offline_relay(self):
         online, _ = self.session()

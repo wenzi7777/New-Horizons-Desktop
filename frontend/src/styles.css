@@ -12314,3 +12314,51 @@ button.cal-matrix-cell:active {
 .onoff-row.disabled {
   opacity: 0.55;
 }
+
+/* Relays page: section title with an online count, and the inactive list */
+.relay-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.relay-section-title .relay-badge {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.relay-none-online {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.relay-inactive-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.relay-inactive-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.relay-inactive-panel .page-copy {
+  margin: 0;
+}
+
+.relay-inactive-scroll {
+  overflow-x: auto;
+}
+
+.relay-inactive-table td,
+.relay-inactive-table th {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.relay-inactive-table td:last-child {
+  text-align: right;
+}

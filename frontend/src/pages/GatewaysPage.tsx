@@ -33,6 +33,123 @@ function gatewayPorts(gateway: GatewayEntry) {
   return items.length ? items.join(" / ") : "-";
 }
 
+// A counter that is 0 (or missing) is left out of the card.
+function nonZero(value: unknown) {
+  const count = Number(value ?? 0);
+  return Number.isFinite(count) && count !== 0 ? count : "";
+}
+
+function isOnline(relay: GatewayEntry) {
+  return gatewayStatus(relay) === "online";
+}
+
+// Signed-in apps first, then by id.
+function byOwnership(a: GatewayEntry, b: GatewayEntry) {
+  return Number(Boolean(b.authenticated)) - Number(Boolean(a.authenticated)) || String(a.gateway_id).localeCompare(String(b.gateway_id));
+}
+
+const INACTIVE_OPEN_KEY = "newhorizons-relays-inactive-open";
+
+function readInactiveOpen() {
+  try {
+    return window.localStorage.getItem(INACTIVE_OPEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeInactiveOpen(open: boolean) {
+  try {
+    window.localStorage.setItem(INACTIVE_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    // Not remembered; fine.
+  }
+}
+
+function SectionTitle({ title, relays }: { title: string; relays: GatewayEntry[] }) {
+  const { t } = useI18n();
+  const online = relays.filter(isOnline).length;
+  return (
+    <h2 className="relay-section-title">
+      {title}
+      {relays.length ? <span className={`relay-badge ${online ? "" : "muted"}`.trim()}>{t("relayOnlineCount").replace("{count}", String(online))}</span> : null}
+    </h2>
+  );
+}
+
+// Offline relays of every kind, one compact row each.
+function InactiveRelays({
+  relays,
+  deletingId,
+  onDelete,
+  onPrune,
+}: {
+  relays: GatewayEntry[];
+  deletingId: string;
+  onDelete: (relay: GatewayEntry) => void;
+  onPrune: () => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(readInactiveOpen);
+  if (!relays.length) return null;
+  const toggle = () => {
+    setOpen(!open);
+    writeInactiveOpen(!open);
+  };
+  return (
+    <section className="gateways-section relay-inactive">
+      <div className="relay-inactive-head">
+        <button className="button" type="button" aria-expanded={open} onClick={toggle}>
+          {open ? t("relayInactiveHide") : t("relayInactiveToggle").replace("{count}", String(relays.length))}
+        </button>
+        {open ? (
+          <button className="button danger compact" type="button" onClick={onPrune}>
+            {t("pruneOfflineRelays")} ({relays.length})
+          </button>
+        ) : null}
+      </div>
+      {open ? (
+        <div className="panel relay-inactive-panel">
+          <p className="page-copy">{t("relayInactiveHint")}</p>
+          <div className="relay-inactive-scroll">
+            <table className="data-table relay-inactive-table">
+              <thead>
+                <tr>
+                  <th>{t("relayColName")}</th>
+                  <th>ID</th>
+                  <th>{t("gatewayVersion")}</th>
+                  <th>{t("relayColAccount")}</th>
+                  <th>{t("lastSeen")}</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {relays.map((relay) => {
+                  const app = relayKind(relay) === "studio" || relayKind(relay) === "pocket";
+                  return (
+                    <tr key={relay.gateway_id}>
+                      <td>{relayDisplayName(relay)}</td>
+                      <td className="mono">{relay.gateway_id}</td>
+                      <td>{relay.version || "-"}</td>
+                      <td>{app ? (relay.authenticated ? relay.account || t("relayAuthenticated") : t("relayNotAuthenticated")) : "-"}</td>
+                      <td>{formatLastSeen(relay.last_seen)}</td>
+                      <td>
+                        <button className="button danger compact" type="button" onClick={() => onDelete(relay)} disabled={deletingId === relay.gateway_id}>
+                          {t("deleteGateway")}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function claimLabel(claim: GatewayClaimEntry) {
   const device = claim.device_uid ? ` ${claim.device_uid}` : "";
   const reason = claim.reason || claim.error ? ` (${claim.reason || claim.error})` : "";
@@ -121,9 +238,9 @@ function GatewayCard({
           [t("gatewayTarget"), gateway.target_mode || ""],
           [t("gatewayPorts"), gatewayPorts(gateway)],
           [t("gatewayServingDevices"), gateway.serving_device_count ?? servingDevices.length],
-          [t("gatewayDeniedDevices"), gateway.denied_count ?? gateway.denied_devices?.length ?? 0],
-          [t("gatewayUdpForwarded"), gateway.udp_forwarded ?? 0],
-          [t("gatewayUdpDropped"), gateway.udp_dropped ?? 0],
+          [t("gatewayDeniedDevices"), nonZero(gateway.denied_count ?? gateway.denied_devices?.length)],
+          [t("gatewayUdpForwarded"), nonZero(gateway.udp_forwarded)],
+          [t("gatewayUdpDropped"), nonZero(gateway.udp_dropped)],
         ]}
       />
 
@@ -136,10 +253,14 @@ function GatewayCard({
         </p>
       ) : null}
 
-      <p className="relay-upstream">
-        <span>{t("gatewayUpstream")}</span>
-        {gateway.server_url || gateway.upstream_path || "-"}
-      </p>
+      {/* Every relay listed here reaches this server, so the upstream only
+          says something when it was set by hand (local / manual). */}
+      {legacy || gateway.target_mode !== "production" ? (
+        <p className="relay-upstream">
+          <span>{t("gatewayUpstream")}</span>
+          {gateway.server_url || gateway.upstream_path || "-"}
+        </p>
+      ) : null}
       {gateway.last_error ? <p className="notice error">{gateway.last_error}</p> : null}
       {gateway.update?.required_update === true ? (
         <p className="cal-hint">{t("gatewayUpdateRequiredShort").replace("{version}", String(gateway.update.latest_version || ""))}</p>
@@ -220,12 +341,13 @@ function HubsSection({
   onDelete: (hub: GatewayEntry) => void;
 }) {
   const { t } = useI18n();
+  const online = hubs.filter(isOnline);
   return (
     <section className="gateways-section">
-      <h2>{t("sectionHubs")}</h2>
-      {hubs.length ? (
+      <SectionTitle title={t("sectionHubs")} relays={hubs} />
+      {online.length ? (
         <div className="gateway-grid">
-          {hubs.map((hub) => (
+          {online.map((hub) => (
             <HubCard
               key={hub.gateway_id}
               hub={hub}
@@ -235,6 +357,8 @@ function HubsSection({
             />
           ))}
         </div>
+      ) : hubs.length ? (
+        <p className="relay-none-online">{t("relayNoneOnline")}</p>
       ) : (
         <section className="panel empty-gateway-state">
           <h3>{t("hubNoHubs")}</h3>
@@ -259,7 +383,11 @@ export function GatewaysPage() {
   // The relay waiting on the delete confirmation.
   const [confirmDelete, setConfirmDelete] = useState<GatewayEntry | null>(null);
   const [confirmPrune, setConfirmPrune] = useState(false);
-  const offlineCount = gateways.filter((gateway) => gatewayStatus(gateway) !== "online").length;
+  const onlineApps = appRelays.filter(isOnline).sort(byOwnership);
+  const onlineLegacy = legacyGateways.filter(isOnline);
+  const inactive = [...appRelays, ...hubs, ...legacyGateways]
+    .filter((relay) => !isOnline(relay))
+    .sort((a, b) => (Date.parse(String(b.last_seen ?? "")) || 0) - (Date.parse(String(a.last_seen ?? "")) || 0));
 
   useEffect(() => {
     requestGatewaySnapshot();
@@ -314,11 +442,6 @@ export function GatewaysPage() {
           <span className={`status-pill ${status === "connected" ? "live" : "waiting"}`}>
             {t("wsStatus")}: {status}
           </span>
-          {offlineCount ? (
-            <button className="button" type="button" onClick={() => setConfirmPrune(true)}>
-              {t("pruneOfflineRelays")} ({offlineCount})
-            </button>
-          ) : null}
           <button className="button" type="button" onClick={requestGatewaySnapshot}>
             {t("refreshGateways")}
           </button>
@@ -344,10 +467,10 @@ export function GatewaysPage() {
       </section>
 
       <section className="gateways-section">
-        <h2>{t("sectionAppRelays")}</h2>
-        {appRelays.length ? (
+        <SectionTitle title={t("sectionAppRelays")} relays={appRelays} />
+        {onlineApps.length ? (
           <section className="gateway-grid">
-            {appRelays.map((gateway) => (
+            {onlineApps.map((gateway) => (
               <GatewayCard
                 key={gateway.gateway_id}
                 gateway={gateway}
@@ -357,6 +480,8 @@ export function GatewaysPage() {
               />
             ))}
           </section>
+        ) : appRelays.length ? (
+          <p className="relay-none-online">{t("relayNoneOnline")}</p>
         ) : (
           <section className="panel empty-gateway-state">
             <h3>{t("appRelayNone")}</h3>
@@ -375,11 +500,11 @@ export function GatewaysPage() {
         onDelete={handleDelete}
       />
 
-      {legacyGateways.length ? (
+      {onlineLegacy.length ? (
         <section className="gateways-section">
           <h2>{t("sectionLegacyGateways")}</h2>
           <section className="gateway-grid">
-            {legacyGateways.map((gateway) => (
+            {onlineLegacy.map((gateway) => (
               <GatewayCard
                 key={gateway.gateway_id}
                 gateway={gateway}
@@ -392,6 +517,8 @@ export function GatewaysPage() {
         </section>
       ) : null}
 
+      <InactiveRelays relays={inactive} deletingId={deletingGatewayId} onDelete={handleDelete} onPrune={() => setConfirmPrune(true)} />
+
       <section className="gateway-tools panel">
         <div className="gateway-tools-copy">
           <h3>{t("gatewayToolsTitle")}</h3>
@@ -400,7 +527,7 @@ export function GatewaysPage() {
         <div className="gateway-setup-grid">
           <div className="gateway-setup">
             <div className="gateway-setup-head">
-              <h4>NH Studio / NH Pocket</h4>
+              <h4>{t("sectionAppRelays")}</h4>
               <div className="gateway-tool-actions">
                 <a className="button primary compact" href={NH_STUDIO_DOWNLOAD_URL} target="_blank" rel="noreferrer">
                   {t("appSetupDownload")}

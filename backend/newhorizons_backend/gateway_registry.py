@@ -49,6 +49,23 @@ def relay_offline_ttl() -> timedelta | None:
     return timedelta(days=days) if days > 0 else None
 
 
+# An app relay (NH Studio / Pocket / headless) that never signed in goes
+# sooner: every fresh install or dev run mints a new id, and one nobody signed
+# in with is rarely worth keeping. NEWHORIZONS_UNAUTH_RELAY_OFFLINE_TTL_DAYS=0
+# gives them the normal TTL. Hubs and legacy Gateways always get the normal one.
+DEFAULT_UNAUTH_RELAY_OFFLINE_TTL_DAYS = 1.0
+APP_RELAY_CLIENT_TYPES = ("studio", "pocket", "relay")
+
+
+def relay_unauthenticated_offline_ttl() -> timedelta | None:
+    raw = os.getenv("NEWHORIZONS_UNAUTH_RELAY_OFFLINE_TTL_DAYS", "")
+    try:
+        days = float(raw) if raw.strip() else DEFAULT_UNAUTH_RELAY_OFFLINE_TTL_DAYS
+    except ValueError:
+        days = DEFAULT_UNAUTH_RELAY_OFFLINE_TTL_DAYS
+    return timedelta(days=days) if days > 0 else None
+
+
 def normalize_relay_client_type(value: Any) -> str:
     client_type = str(value or "").strip().lower()
     return client_type if client_type in RELAY_CLIENT_TYPES else "gateway"
@@ -709,13 +726,17 @@ class GatewayRegistryMixin:
         return removed
 
     def _prune_offline_gateways_locked(self, ttl: timedelta) -> list[str]:
-        cutoff = datetime.now(timezone.utc) - ttl
+        now = datetime.now(timezone.utc)
+        cutoff = now - ttl
+        unauth_ttl = relay_unauthenticated_offline_ttl()
+        unauth_cutoff = now - min(ttl, unauth_ttl) if unauth_ttl is not None else cutoff
         removed: list[str] = []
         for gateway_id, entry in list(self._gateways.items()):
             if entry.get("status") == "online" or gateway_id in self._gateway_session_senders:
                 continue
             last_seen = self._parse_iso_datetime(str(entry.get("last_seen") or ""))
-            if last_seen is not None and last_seen > cutoff:
+            unauthenticated_app = entry.get("client_type") in APP_RELAY_CLIENT_TYPES and not entry.get("authenticated")
+            if last_seen is not None and last_seen > (unauth_cutoff if unauthenticated_app else cutoff):
                 continue
             if any(mapped == gateway_id for mapped in self._gateway_device_ids.values()):
                 continue
