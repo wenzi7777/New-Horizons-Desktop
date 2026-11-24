@@ -11,11 +11,11 @@
       } catch (error) {
         document.documentElement.dataset.theme = "light";
       }
-      // The interface style (src/lib/uiStyle.tsx): classic unless chosen.
+      // The interface style (src/lib/uiStyle.tsx): modern unless classic was chosen.
       try {
-        document.documentElement.dataset.ui = localStorage.getItem("nh-ui-style") === "modern" ? "modern" : "classic";
+        document.documentElement.dataset.ui = localStorage.getItem("nh-ui-style") === "classic" ? "classic" : "modern";
       } catch (error) {
-        document.documentElement.dataset.ui = "classic";
+        document.documentElement.dataset.ui = "modern";
       }
     </script>
   </head>

@@ -1,6 +1,6 @@
-// Which interface the Desktop draws: "classic" (the plain cards, the default
-// here) or "modern" (the board illustration with callouts that NH Studio and
-// NH Pocket use by default). Per browser, kept in localStorage and mirrored on
+// Which interface the Desktop draws: "modern" (the board illustration with
+// callouts, the default, as in NH Studio and NH Pocket) or "classic" (the
+// plain cards). Per browser, kept in localStorage and mirrored on
 // <html data-ui> so CSS can tell them apart; index.html sets it before the
 // first paint.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -11,9 +11,9 @@ export const UI_STYLE_KEY = "nh-ui-style";
 
 function readStored(): UiStyle {
   try {
-    return window.localStorage.getItem(UI_STYLE_KEY) === "modern" ? "modern" : "classic";
+    return window.localStorage.getItem(UI_STYLE_KEY) === "classic" ? "classic" : "modern";
   } catch {
-    return "classic";
+    return "modern";
   }
 }
 

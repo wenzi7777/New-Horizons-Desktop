@@ -165,8 +165,8 @@ function AuthenticatedApp() {
               aria-label={t("uiStyleLabel")}
               title={t("uiStyleLabel")}
             >
-              <option value="classic">{t("uiStyleClassic")}</option>
               <option value="modern">{t("uiStyleModern")}</option>
+              <option value="classic">{t("uiStyleClassic")}</option>
             </Select>
           </label>
           <div className="session-chip">
