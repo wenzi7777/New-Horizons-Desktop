@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 
 import { useI18n } from "../i18n";
 import { rsSpreadFraction, summarizeSweep, sweepCsv, sweepRsProblem, type SweepCalibration, type SweepStep, type SweepSummary } from "../lib/vrefSweep";
+import { rfbBoard } from "../lib/rfbLayout";
+import { RfbBoardMap } from "./RfbBoardMap";
 import { Select } from "./Select";
 
 // v2.0.F: the Vref DAC, the calibration switch, the measured Rfb per row, the
@@ -19,6 +21,8 @@ type Props = {
   disabled: boolean;
   vref: Record<string, unknown>;
   range: Record<string, unknown>;
+  /** matrix_layout.analog_pins as "1,2,3": the firmware's Rfb rows follow it. */
+  analogPins: string;
   run: PanelRun;
 };
 
@@ -79,7 +83,7 @@ function fieldNumber(text: string): number | null {
 // cover a status poll that was already on its way, not forever.
 const ANSWER_FRESH_MS = 10_000;
 
-export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: Props) {
+export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, analogPins, run }: Props) {
   const { t } = useI18n();
   // What the device last answered to a command here. The page's own status can
   // lag a command (a status poll lands in between, a relay drops a field), and a
@@ -106,6 +110,15 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
   const [limitDraft, setLimitDraft] = useState("700");
   const [measureVref, setMeasureVref] = useState("");
   const [rfbRows, setRfbRows] = useState<RfbRow[] | null>(null);
+
+  // The table's rows: this measurement's answer, else what the status holds.
+  const rfbDisplay: RfbRow[] = rfbRows ?? rfbTable.map((value, row) => ({ row, off_mv: 0, on_mv: 0, rfb_ohm: value, offset_mv: rfbOffsets[row], status: rfbStatuses[row] || (value > 0 ? "ok" : "") }));
+  // Rfb0-13 on the back of the board; rows follow the matrix layout.
+  const pinList = analogPins.split(",").map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0);
+  const board = rfbBoard(pinList.length ? pinList : null, rfbDisplay.map((item) => item.rfb_ohm), rfbDisplay.map((item) => item.status));
+  // t() with {name} placeholders filled in.
+  const tv = (key: string, vars?: Readonly<Record<string, unknown>>) =>
+    Object.entries(vars ?? {}).reduce((text, [name, value]) => text.split(`{${name}}`).join(String(value)), t(key));
 
   const [leakDraft, setLeakDraft] = useState(leakNow);
   // The reading mode is chosen from a menu and sent with Apply.
@@ -359,11 +372,12 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, run }: P
               <button className="button" type="button" disabled={working} onClick={() => void measureRfb()}>{busy === "rfb_measure" ? t("running") : t("rfbMeasure")}</button>
               <button className="button" type="button" disabled={working || !rfbValid} onClick={() => void clearRfb()}>{t("rfbClear")}</button>
             </div>
+            <RfbBoardMap board={board} ds={tv} />
             {rfbValid || rfbRows ? (
               <table className="data-table">
                 <thead><tr><th>{t("rfbRow")}</th><th>{t("rfbValue")}</th><th>{t("rfbOffset")}</th><th>{t("rfbStatus")}</th></tr></thead>
                 <tbody>
-                  {(rfbRows ?? rfbTable.map((value, row) => ({ row, off_mv: 0, on_mv: 0, rfb_ohm: value, offset_mv: rfbOffsets[row], status: rfbStatuses[row] || (value > 0 ? "ok" : "") }))).map((item) => (
+                  {rfbDisplay.map((item) => (
                     <tr key={item.row}>
                       <td>{item.row}</td>
                       <td>{kOhm(item.rfb_ohm)}</td>

@@ -2195,7 +2195,7 @@ export function DeviceSettingsPage() {
                   <p>{t("vrefCopy")}</p>
                 </div>
               </div>
-              <VrefPanel key={deviceUid} disabled={!deviceUid || isDeviceOffline} vref={vrefStatus} range={rangeStatus} run={run} />
+              <VrefPanel key={deviceUid} disabled={!deviceUid || isDeviceOffline} vref={vrefStatus} range={rangeStatus} analogPins={analogPinsFromStatus} run={run} />
             </div>
           ) : null}
 
