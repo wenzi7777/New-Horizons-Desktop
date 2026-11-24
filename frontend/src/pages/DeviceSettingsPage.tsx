@@ -15,6 +15,11 @@ import { storageSnapshotFromDevice } from "../lib/storageStatus";
 import { fetchReleaseNotes } from "../lib/releaseNotes";
 import { BoardIoModal } from "./TerminalPage";
 import { BatteryStatusIndicator } from "../components/BatteryStatusIndicator";
+import { CalloutDiagram, type CalloutItem } from "../components/callout/CalloutDiagram";
+import { boardArtFor } from "../lib/boardArt";
+import { FlowPath } from "../components/callout/FlowPath";
+import { connectionFlow, powerFlow } from "../lib/flowPath";
+import { useUiStyle } from "../lib/uiStyle";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { CalibrationWorkbench, type CalibrationRun } from "../components/calibration/CalibrationWorkbench";
 import { DeviceAppsSection } from "../components/deviceApps/DeviceAppsSection";
@@ -22,10 +27,11 @@ import { DeviceClockCard } from "../components/DeviceClockCard";
 import { DeviceHealthCard } from "../components/DeviceHealthCard";
 import { ScanHealthCard } from "../components/ScanHealthCard";
 import { compareVersionCores, normalizeUpdateChannel, waitingForStableToCatchUp, type UpdateChannel } from "../lib/versioning";
-import { Battery, Check, CircleOff, Lightbulb, Power, TriangleAlert, X } from "lucide-react";
+import { Battery, Check, CircleOff, Cpu, Gauge, Grid3x3, Lightbulb, Power, TriangleAlert, Wifi, WifiOff, X } from "lucide-react";
 import { Markdown } from "../components/Markdown";
 import { Select, type SelectChangeEvent } from "../components/Select";
 import { SwitchRow } from "../components/Switch";
+import { ChoiceSegment } from "../components/callout/ChoiceSegment";
 
 // Spike-validated (firmware/spikes/README.md's "PHY rate config" section,
 // 2026-08-06: raw ADC off + 40fps ran clean at 0% loss over ESP-NOW once
@@ -1142,6 +1148,8 @@ export function DeviceSettingsPage() {
     setModeDraft(currentMode);
   }, [currentMode, deviceUid]);
   const boardProfile = useMemo(() => boardProfileForHardwareModel(normalized?.hardwareModel), [normalized?.hardwareModel]);
+  const { uiStyle } = useUiStyle();
+  const heroArt = uiStyle === "modern" ? boardArtFor(normalized?.hardwareModel) : null;
   const powerStatusCopy = boardProfile.powerUx === "remote_only" ? t("powerStatusCopyRemoteOnly") : boardProfile.hardwareModel === V15F_HARDWARE_MODEL || boardProfile.hardwareModel === V20F_HARDWARE_MODEL ? t("powerStatusCopyV15") : t("powerStatusCopy");
   const pinLayoutCopy = boardProfile.powerUx === "remote_only" ? t("pinLayoutCopyGcu") : t("pinLayoutCopyV1");
   // Firmware with update channels reports ota.channel. There, manifestUrl is
@@ -1872,6 +1880,128 @@ export function DeviceSettingsPage() {
     return renderSection(activeSection);
   }
 
+  /** The "Illustrated" overview: live values pointing at the board's parts (lib/boardArt.ts). */
+  function heroItems(connectionSummary: string, relayId: string | undefined): CalloutItem[] {
+    const items: CalloutItem[] = [];
+    items.push({
+      id: "connection",
+      target: "antenna",
+      icon: isControlUnavailable ? <WifiOff size={14} aria-hidden="true" /> : <Wifi size={14} aria-hidden="true" />,
+      title: t("calloutConnection"),
+      value: isControlUnavailable ? t("offline") : t("online"),
+      detail: relayId ? `${connectionSummary} · ${relayId}` : connectionSummary,
+      tone: isControlUnavailable ? "muted" : "ok",
+    });
+    items.push({
+      id: "firmware",
+      target: "mcu",
+      icon: <Cpu size={14} aria-hidden="true" />,
+      title: t("calloutFirmware"),
+      value: normalized?.firmwareVersion ?? "-",
+      detail: currentMode || undefined,
+      tone: currentMode && currentMode !== "normal" ? "warn" : "ok",
+      onSelect: () => setActiveSection("update"),
+    });
+    if (battery.socPercent !== null) {
+      const percent = Math.round(battery.socPercent);
+      const charging = Boolean(batteryIndicator?.charging);
+      items.push({
+        id: "battery",
+        target: "battery",
+        icon: <BatteryStatusIndicator fillPercent={percent} charging={charging} ariaLabel="" className="callout-battery" />,
+        title: t("battery"),
+        value: `${percent}%`,
+        detail: charging ? t("batteryChargingOrMissing") : t("batteryOnBattery"),
+        tone: percent <= 10 && !charging ? "danger" : percent <= 20 && !charging ? "warn" : "ok",
+        onSelect: () => setActiveSection("hardware"),
+      });
+    }
+    const vrefMv = Number(vrefStatus.mv);
+    if (Object.keys(vrefStatus).length && Number.isFinite(vrefMv)) {
+      const mode = rangeStatus.mode;
+      items.push({
+        id: "vref",
+        target: "vref",
+        icon: <Gauge size={14} aria-hidden="true" />,
+        title: t("vrefTitle"),
+        value: `${Math.round(vrefMv)} mV`,
+        detail: mode === "auto" ? t("readingAuto") : mode === "conductance" ? t("readingConductance") : t("readingRaw"),
+        onSelect: () => setActiveSection("hardware"),
+      });
+    }
+    // The matrix is rows on the analog FPC times columns on the digital one:
+    // one label, its line split to both connectors.
+    const analogCount = analogPinsFromStatus ? analogPinsFromStatus.split(",").filter(Boolean).length : 0;
+    const selectCount = selectPinsFromStatus ? selectPinsFromStatus.split(",").filter(Boolean).length : 0;
+    const scanFps = numberValue(authoritativeScanTiming.target_fps ?? scanHealth.requested_target_fps, 0);
+    items.push({
+      id: "matrix",
+      target: "analogFpc",
+      branches: ["digitalFpc"],
+      icon: <Grid3x3 size={14} aria-hidden="true" />,
+      title: t("calloutMatrix"),
+      value: analogCount && selectCount ? `${analogCount} × ${selectCount}` : normalized?.matrixShape ?? "-",
+      detail: scanFps > 0 ? `${scanFps} fps` : undefined,
+      onSelect: () => setActiveSection("hardware"),
+    });
+    if (Object.keys(boardLed).length || Object.keys(oled).length) {
+      const brightness = Number(boardLed.brightness);
+      const ledOn = Number.isFinite(brightness) ? brightness > 0 : boardLed.enabled !== false;
+      items.push({
+        id: "lights",
+        target: "led",
+        icon: <Lightbulb size={14} aria-hidden="true" />,
+        title: t("calloutLights"),
+        value: ledOn ? (Number.isFinite(brightness) ? `${Math.round(brightness * 100)}%` : t("lightOn")) : t("lightOff"),
+        detail: Object.keys(oled).length ? (oled.mode && oled.mode !== "off" ? t("oledOn") : t("oledOff")) : undefined,
+        tone: ledOn ? "ok" : "muted",
+        onSelect: () => setActiveSection("hardware"),
+      });
+    }
+    return items;
+  }
+
+  /** Illustrated interface: USB-C / battery -> charger -> device, the live path lit. */
+  function renderPowerFlow() {
+    if (!heroArt) return null;
+    const graph = powerFlow({ chargerPresent: typeof powerStatus.charger_present === "boolean" ? powerStatus.charger_present : null, chargeState: batteryChargeState });
+    if (!graph) return null;
+    const usb = graph.nodes.find((node) => node.id === "usb")?.active ?? false;
+    const percent = battery.socPercent;
+    return (
+      <FlowPath
+        graph={graph}
+        ariaLabel={t("flowPower")}
+        labels={{
+          usb: { title: t("flowUsb"), value: usb ? t("flowPowered") : t("flowNoUsb") },
+          charger: { title: t("flowCharger"), value: batteryChargeState === "charging" ? t("flowCharging") : batteryChargeState === "charge_done" ? t("flowFull") : "–" },
+          battery: { title: t("flowBattery"), value: percent === null || percent === undefined || batteryGaugeSyncing ? "–" : `${Math.round(Number(percent))}%` },
+          system: { title: t("flowSystem"), value: usb ? "USB" : t("flowBattery") },
+        }}
+      />
+    );
+  }
+
+  /** Illustrated interface: device -> relay or Hub -> this server. */
+  function renderConnectionFlow(relayName: string | undefined) {
+    if (!heroArt || (!hubRelayed && !relayName)) return null;
+    const online = !isControlUnavailable;
+    const graph = connectionFlow({ link: hubRelayed ? "espnow" : "wifi", deviceOnline: online, upstreamOnline: online });
+    const name = relayName || "–";
+    return (
+      <FlowPath
+        graph={graph}
+        ariaLabel={t("flowConnection")}
+        labels={{
+          device: { title: t("flowDevice"), value: String(normalized?.displayName ?? deviceUid ?? "") },
+          relay: { title: t("flowRelay"), value: name },
+          hub: { title: t("flowHub"), value: name },
+          server: { title: t("flowServer"), value: online ? t("flowOnline") : t("flowOffline") },
+        }}
+      />
+    );
+  }
+
   function renderSection(section: SettingsSection) {
     if (section === "overview") {
       const connectionSummary = hubRelayed
@@ -1891,35 +2021,42 @@ export function DeviceSettingsPage() {
             </button>
           </div>
 
-          <div className="settings-hero">
-            <div className="settings-hero-item">
-              <div className="battery-overview-icon" aria-hidden={batteryIndicator ? undefined : true}>
-                {batteryIndicator ? (
-                  <BatteryStatusIndicator
-                    fillPercent={batteryIndicator.fillPercent}
-                    charging={batteryIndicator.charging}
-                    ariaLabel={`${t("battery")}: ${batteryIndicator.label ?? t("batteryUnknown")}${batteryIndicator.charging ? `, ${t("batteryChargingOrMissing")}` : ""}`}
-                  />
-                ) : <Battery size={24} />}
+          {heroArt ? (
+            <div className="settings-card device-hero-card">
+              <CalloutDiagram art={heroArt} items={heroItems(connectionSummary, typeof relayId === "string" ? relayId : undefined)} ariaLabel={t("heroLabel")} />
+              {renderConnectionFlow(hubRelayed ? (typeof relayId === "string" ? relayId : undefined) : device?.client_type || findme.gateway_id ? relayDisplayName(device) : undefined)}
+            </div>
+          ) : (
+            <div className="settings-hero">
+              <div className="settings-hero-item">
+                <div className="battery-overview-icon" aria-hidden={batteryIndicator ? undefined : true}>
+                  {batteryIndicator ? (
+                    <BatteryStatusIndicator
+                      fillPercent={batteryIndicator.fillPercent}
+                      charging={batteryIndicator.charging}
+                      ariaLabel={`${t("battery")}: ${batteryIndicator.label ?? t("batteryUnknown")}${batteryIndicator.charging ? `, ${t("batteryChargingOrMissing")}` : ""}`}
+                    />
+                  ) : <Battery size={24} />}
+                </div>
+                <div>
+                  <strong>{battery.socPercent === null ? t("batteryUnknown") : `${Math.round(battery.socPercent)}%`}</strong>
+                  <span>
+                    {batteryTimeEstimate.kind === "remaining" ? `${t("batteryEstimatedRemaining")} · ${durationLabel(batteryTimeEstimate.minutes)}` : null}
+                    {batteryTimeEstimate.kind === "until_full" ? `${t("batteryEstimatedUntilFull")} · ${durationLabel(batteryTimeEstimate.minutes)}` : null}
+                    {batteryTimeEstimate.kind === "full" ? t("batteryFull") : null}
+                    {batteryTimeEstimate.kind === "unavailable" ? t("battery") : null}
+                  </span>
+                </div>
               </div>
-              <div>
-                <strong>{battery.socPercent === null ? t("batteryUnknown") : `${Math.round(battery.socPercent)}%`}</strong>
-                <span>
-                  {batteryTimeEstimate.kind === "remaining" ? `${t("batteryEstimatedRemaining")} · ${durationLabel(batteryTimeEstimate.minutes)}` : null}
-                  {batteryTimeEstimate.kind === "until_full" ? `${t("batteryEstimatedUntilFull")} · ${durationLabel(batteryTimeEstimate.minutes)}` : null}
-                  {batteryTimeEstimate.kind === "full" ? t("batteryFull") : null}
-                  {batteryTimeEstimate.kind === "unavailable" ? t("battery") : null}
-                </span>
+              <div className="settings-hero-item">
+                <span className={`settings-status-dot${isControlUnavailable ? "" : " online"}`} aria-hidden="true" />
+                <div>
+                  <strong>{connectionSummary}</strong>
+                  <span>{relayId ? `${relayId} · ` : ""}{t("lastSeen")}: {normalized?.lastSeen ?? "-"}</span>
+                </div>
               </div>
             </div>
-            <div className="settings-hero-item">
-              <span className={`settings-status-dot${isControlUnavailable ? "" : " online"}`} aria-hidden="true" />
-              <div>
-                <strong>{connectionSummary}</strong>
-                <span>{relayId ? `${relayId} · ` : ""}{t("lastSeen")}: {normalized?.lastSeen ?? "-"}</span>
-              </div>
-            </div>
-          </div>
+          )}
 
           <FactList
             items={[
@@ -2216,6 +2353,7 @@ export function DeviceSettingsPage() {
                 </button>
               </div>
             </div>
+            {renderPowerFlow()}
             <FactList
               items={[
                 [t("powerState"), powerStatus.state ?? "-"],
@@ -2482,22 +2620,34 @@ export function DeviceSettingsPage() {
           <div className="settings-card">
             <h4>{t("scanPerformance")}</h4>
             <p>{t("scanPerformanceCopy")}</p>
-              <div className="segmented-control">
-                <button className={targetFps === 60 ? "active" : ""} type="button" onClick={() => applyScanPreset(60)}>
-                  {t("standardFps")}
-                </button>
-                <button className={targetFps === 90 ? "active" : ""} type="button" onClick={() => applyScanPreset(90)}>
-                  {t("extendedFps")}
-                </button>
-                <button
-                  className={`${targetFps === DIRECT_STABILITY_FPS ? "active" : ""}${isHubRelayed(device) ? " recommended" : ""}`}
-                  type="button"
-                  onClick={() => void applyDirectStabilityPreset()}
-                >
-                  {t("directStabilityMode")}
-                  {isHubRelayed(device) ? <small>{t("directStabilityModeRecommended")}</small> : null}
-                </button>
-              </div>
+              <ChoiceSegment<"60" | "90" | "direct">
+                label={t("scanPerformance")}
+                value={targetFps === 60 ? "60" : targetFps === 90 ? "90" : targetFps === DIRECT_STABILITY_FPS ? "direct" : null}
+                options={[
+                  { value: "60", label: t("standardFps") },
+                  { value: "90", label: t("extendedFps") },
+                  { value: "direct", label: t("directStabilityMode"), detail: isHubRelayed(device) ? t("directStabilityModeRecommended") : undefined },
+                ]}
+                onChange={(next) => (next === "direct" ? void applyDirectStabilityPreset() : applyScanPreset(next === "60" ? 60 : 90))}
+                classic={
+                  <div className="segmented-control">
+                    <button className={targetFps === 60 ? "active" : ""} type="button" onClick={() => applyScanPreset(60)}>
+                      {t("standardFps")}
+                    </button>
+                    <button className={targetFps === 90 ? "active" : ""} type="button" onClick={() => applyScanPreset(90)}>
+                      {t("extendedFps")}
+                    </button>
+                    <button
+                      className={`${targetFps === DIRECT_STABILITY_FPS ? "active" : ""}${isHubRelayed(device) ? " recommended" : ""}`}
+                      type="button"
+                      onClick={() => void applyDirectStabilityPreset()}
+                    >
+                      {t("directStabilityMode")}
+                      {isHubRelayed(device) ? <small>{t("directStabilityModeRecommended")}</small> : null}
+                    </button>
+                  </div>
+                }
+              />
             <p className="service-muted">
               {t("effectiveSendFps")}: ≈ {Math.round(targetFps / Math.max(1, sendEveryNFrames))} fps
               {scanDraftDiffers ? ` · ${t("scanDeviceUsing").replace("{fps}", String(deviceFps))}` : ""}
@@ -2652,18 +2802,34 @@ export function DeviceSettingsPage() {
               <>
                 <div className="field update-channel-field">
                   <label>{t("updateChannel")}</label>
-                  <Select
-                    value={deviceUpdateChannel}
+                  <ChoiceSegment<"stable" | "beta">
+                    label={t("updateChannel")}
+                    value={deviceUpdateChannel === "beta" ? "beta" : "stable"}
                     disabled={isCommandBusy("set_ota_config") || !deviceUid}
-                    onChange={(event) => {
-                      const next = normalizeUpdateChannel(event.target.value);
+                    options={[
+                      { value: "stable", label: t("updateChannelStable") },
+                      { value: "beta", label: t("updateChannelBeta") },
+                    ]}
+                    onChange={(next) => {
+                      if (next === deviceUpdateChannel) return;
                       if (next === "beta") setConfirmBetaChannel(true);
                       else void setUpdateChannel("stable");
                     }}
-                  >
-                    <option value="stable">{t("updateChannelStable")}</option>
-                    <option value="beta">{t("updateChannelBeta")}</option>
-                  </Select>
+                    classic={
+                      <Select
+                        value={deviceUpdateChannel}
+                        disabled={isCommandBusy("set_ota_config") || !deviceUid}
+                        onChange={(event) => {
+                          const next = normalizeUpdateChannel(event.target.value);
+                          if (next === "beta") setConfirmBetaChannel(true);
+                          else void setUpdateChannel("stable");
+                        }}
+                      >
+                        <option value="stable">{t("updateChannelStable")}</option>
+                        <option value="beta">{t("updateChannelBeta")}</option>
+                      </Select>
+                    }
+                  />
                 </div>
                 {waitingForStableToCatchUp(deviceUpdateChannel, normalized?.firmwareVersion) ? (
                   <p className="cal-hint">{t("updateChannelWaitingStable").replace("{version}", normalized?.firmwareVersion ?? "")}</p>

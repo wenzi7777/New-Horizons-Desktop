@@ -7,18 +7,21 @@ import { I18nProvider } from "./i18n";
 import { AuthProvider } from "./lib/auth";
 import { APP_BASE_PATH } from "./lib/runtime";
 import { ThemeProvider } from "./lib/theme";
+import { UiStyleProvider } from "./lib/uiStyle";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ThemeProvider>
-      <I18nProvider>
-        <AuthProvider>
-          <BrowserRouter basename={APP_BASE_PATH || "/"}>
-            <App />
-          </BrowserRouter>
-        </AuthProvider>
-      </I18nProvider>
+      <UiStyleProvider>
+        <I18nProvider>
+          <AuthProvider>
+            <BrowserRouter basename={APP_BASE_PATH || "/"}>
+              <App />
+            </BrowserRouter>
+          </AuthProvider>
+        </I18nProvider>
+      </UiStyleProvider>
     </ThemeProvider>
   </React.StrictMode>,
 );

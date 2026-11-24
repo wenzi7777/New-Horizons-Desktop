@@ -11,6 +11,12 @@
       } catch (error) {
         document.documentElement.dataset.theme = "light";
       }
+      // The interface style (src/lib/uiStyle.tsx): classic unless chosen.
+      try {
+        document.documentElement.dataset.ui = localStorage.getItem("nh-ui-style") === "modern" ? "modern" : "classic";
+      } catch (error) {
+        document.documentElement.dataset.ui = "classic";
+      }
     </script>
   </head>
   <body>

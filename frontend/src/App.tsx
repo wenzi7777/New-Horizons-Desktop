@@ -20,6 +20,7 @@ import { ManualPage } from "./pages/ManualPage";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { useI18n, type Locale } from "./i18n";
 import { useAuth } from "./lib/auth";
+import { useUiStyle, type UiStyle } from "./lib/uiStyle";
 import { Select } from "./components/Select";
 
 // App Studio carries a code editor; loaded on first visit so it stays out of
@@ -98,6 +99,7 @@ function useTopbarHeightVar() {
 
 function AuthenticatedApp() {
   const { locale, setLocale, t } = useI18n();
+  const { uiStyle, setUiStyle } = useUiStyle();
   const { user, logout } = useAuth();
   const role = (user?.role ?? "user") as Role;
   const navItems = NAV_ITEMS.filter((item) => allowedRoles(item.roles, role));
@@ -153,6 +155,18 @@ function AuthenticatedApp() {
               <option value="en">English</option>
               <option value="ja">日本語</option>
               <option value="zh-CN">简体中文</option>
+            </Select>
+          </label>
+          <label className="language-select ui-style-select">
+            <span className="sr-only">{t("uiStyleLabel")}</span>
+            <Select
+              value={uiStyle}
+              onChange={(event) => setUiStyle(event.target.value as UiStyle)}
+              aria-label={t("uiStyleLabel")}
+              title={t("uiStyleLabel")}
+            >
+              <option value="classic">{t("uiStyleClassic")}</option>
+              <option value="modern">{t("uiStyleModern")}</option>
             </Select>
           </label>
           <div className="session-chip">

@@ -5,6 +5,7 @@ import { rsSpreadFraction, summarizeSweep, sweepCsv, sweepRsProblem, type SweepC
 import { rfbBoard } from "../lib/rfbLayout";
 import { RfbBoardMap } from "./RfbBoardMap";
 import { Select } from "./Select";
+import { ChoiceSegment } from "./callout/ChoiceSegment";
 
 // v2.0.F: the Vref DAC, the calibration switch, the measured Rfb per row, the
 // range mode and the Vref sweep. The firmware owns every rule (ceiling,
@@ -264,11 +265,20 @@ export function VrefPanel({ disabled, vref: vrefProp, range: rangeProp, analogPi
         <div className="field-grid">
           <div className="field">
             <label>{t("rangeMode")}</label>
-            <Select value={modeDraft} disabled={working} aria-label={t("rangeMode")} onChange={(event) => setModeDraft(event.target.value as RangeModeName)}>
-              {RANGE_MODES.map((mode) => (
-                <option key={mode} value={mode} disabled={mode !== "raw" && !rfbValid}>{t(`rangeModeShort_${mode}`)}</option>
-              ))}
-            </Select>
+            <ChoiceSegment<RangeModeName>
+              label={t("rangeMode")}
+              value={modeDraft}
+              disabled={working}
+              options={RANGE_MODES.map((mode) => ({ value: mode, label: t(`rangeModeShort_${mode}`), disabled: mode !== "raw" && !rfbValid }))}
+              onChange={setModeDraft}
+              classic={
+                <Select value={modeDraft} disabled={working} aria-label={t("rangeMode")} onChange={(event) => setModeDraft(event.target.value as RangeModeName)}>
+                  {RANGE_MODES.map((mode) => (
+                    <option key={mode} value={mode} disabled={mode !== "raw" && !rfbValid}>{t(`rangeModeShort_${mode}`)}</option>
+                  ))}
+                </Select>
+              }
+            />
           </div>
           <div className="field settings-field-action">
             <button

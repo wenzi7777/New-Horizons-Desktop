@@ -18,7 +18,8 @@ test("v1.5.F visual IO uses full pin headings and a top-down digital connector o
   assert.equal(profile.analogPinHeading, "Analog Pins");
   assert.equal(profile.digitalPinHeading, "Digital Pins");
   assert.equal(profile.digitalPinSlots[0].label, "5V");
-  assert.deepEqual(profile.digitalPinSlots.slice(0, 4).map((pin) => pin.label), ["5V", "3V3", "GND", "GND"]);
+  // FPC2 contacts 20 down to 15 (EasyEDA): 5V, 3V3, GND, SCL, SDA, not connected.
+  assert.deepEqual(profile.digitalPinSlots.slice(0, 6).map((pin) => pin.label), ["5V", "3V3", "GND", "SCL", "SDA", "NC"]);
   assert.equal(profile.digitalPinSlots.at(-1)?.label, "D0");
 });
 

@@ -24,6 +24,9 @@ import { valueToCsv } from "../lib/valueFormat";
 import { updateStateOf } from "../lib/device";
 import { appliedFileCount, isAppliedComplete, progressOf, totalUnits, type UpdateState } from "../lib/updateProgress";
 import { Select } from "../components/Select";
+import { PinMap } from "../components/callout/PinMap";
+import { boardArtFor } from "../lib/boardArt";
+import { useUiStyle } from "../lib/uiStyle";
 
 
 type TerminalLogEntry =
@@ -372,6 +375,10 @@ export function BoardIoModal({
   const command = pinCommand(selectedAnalogPins, selectedSelectPins);
   const boardLabel = displayHardwareModel(boardName);
   const orientationCopy = boardName === DEFAULT_BOARD_PROFILE.hardwareModel ? t("ioOrientation") : boardLabel;
+  const { uiStyle } = useUiStyle();
+  // Illustrated: the board's FPC contacts fanned out to clickable labels, in
+  // place of the artwork and the pin table.
+  const pinArt = uiStyle === "modern" && supportsPinVisualizer ? boardArtFor(boardName) : null;
 
   function isSelected(pin: BoardPinSlot) {
     if (pin.role === "analog" && pin.gpio !== undefined) return selectedAnalogPins.includes(pin.gpio);
@@ -464,16 +471,28 @@ export function BoardIoModal({
             {t("ioConfigClose")}
           </button>
         </div>
-        <div className="board-diagram">
-          <div className="board-outline board-image-outline">
-            {supportsPinVisualizer && overviewAsset ? (
-              <img className="board-overview-image" src={overviewAsset} alt={`${boardLabel} overview`} />
-            ) : (
-              <div className="board-overview-image" aria-label={boardLabel}>
-                <strong>{boardLabel}</strong>
-              </div>
-            )}
-          </div>
+        <div className={pinArt ? "board-diagram is-illustrated" : "board-diagram"}>
+          {pinArt ? (
+            <PinMap
+              art={pinArt}
+              analogSlots={analogPinSlots}
+              digitalSlots={digitalPinSlots}
+              analogChosen={selectedAnalogPins}
+              selectChosen={selectedSelectPins}
+              onToggle={handleToggle}
+              ariaLabel={t("ioConfigTitle")}
+            />
+          ) : (
+            <div className="board-outline board-image-outline">
+              {supportsPinVisualizer && overviewAsset ? (
+                <img className="board-overview-image" src={overviewAsset} alt={`${boardLabel} overview`} />
+              ) : (
+                <div className="board-overview-image" aria-label={boardLabel}>
+                  <strong>{boardLabel}</strong>
+                </div>
+              )}
+            </div>
+          )}
           <div className="io-config-panel">
             <div className="command-copy">
               <label>{t("copyCommand")}</label>
@@ -512,7 +531,7 @@ export function BoardIoModal({
                 <strong>{selectedSelectPins.join(",") || "-"}</strong>
               </div>
             </div>
-            {supportsPinVisualizer ? (
+            {supportsPinVisualizer && !pinArt ? (
               <div className="pin-table">
                 <div>
                   <h4 title={analogPinOrder.join(", ")}>{analogHeading}</h4>

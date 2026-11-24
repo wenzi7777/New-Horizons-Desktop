@@ -68,7 +68,11 @@ class DeviceSettingsPageStaticTest(unittest.TestCase):
         self.assertNotIn('| "pins"', source)
         self.assertNotIn('| "indicators"', source)
         self.assertNotIn('| "flash"', source)
-        self.assertNotIn("detail:", source)
+        # The sidebar tabs carry a label only (callout items elsewhere on the
+        # page do have a detail line).
+        sections = source[source.index("const sections: {"):]
+        sections = sections[: sections.index("];")]
+        self.assertNotIn("detail", sections)
         self.assertNotIn("<span>{section.detail}</span>", source)
         self.assertNotIn('activeSection === "scan"', source)
         self.assertNotIn('activeSection === "io"', source)
