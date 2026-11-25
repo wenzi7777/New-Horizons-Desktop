@@ -17,6 +17,9 @@ import { useI18n } from "../i18n";
 import { useWsState } from "../lib/wsClient";
 import { Select } from "../components/Select";
 import { FitText } from "../components/FitText";
+import { displayIndexGrid, displayPinLabels, type MatrixTransform } from "../lib/matrixTransform";
+import { ImuHistory } from "../lib/imuView";
+import { ImuPanels } from "../components/ImuPanels";
 
 // Behind by this much, the recording card says so.
 const RECORDING_LAG_WARN_MS = 2000;
@@ -45,6 +48,7 @@ type VisualizationView = {
   selected: boolean;
   rowMirror: boolean;
   colMirror: boolean;
+  transpose: boolean;
   dotSize: number;
 };
 
@@ -455,20 +459,14 @@ function resetSurfaceCamera(current: {
   current.controls.update();
 }
 
-function formatVector(values: number[] | null | undefined) {
-  return (values ?? [0, 0, 0])
-    .slice(0, 3)
-    .map((value) => Number(value).toFixed(2))
-    .join(", ");
-}
 
 function buildMatrixView(
   item: VisualizationEntry | undefined,
   device: DeviceEntry | undefined,
   profile: ProfileData | null | undefined,
-  rowMirror: boolean,
-  colMirror: boolean,
+  transform: MatrixTransform,
 ): MatrixView {
+  const { rowMirror, colMirror } = transform;
   const source = item?.p ?? [];
   const deviceRows = asFiniteNumber(device?.matrix_shape?.rows, 0);
   const deviceCols = asFiniteNumber(device?.matrix_shape?.cols, 0);
@@ -516,47 +514,41 @@ function buildMatrixView(
     };
   }
 
-  const indices = Array.from({ length: rows }, (_, row) =>
-    Array.from({ length: cols }, (_, col) => {
-      const sourceRow = rowMirror ? rows - 1 - row : row;
-      const sourceCol = colMirror ? cols - 1 - col : col;
-      return sourceRow * cols + sourceCol;
-    }),
-  );
+  // Transpose first, then the mirrors on what is drawn (lib/matrixTransform.ts).
+  const grid = displayIndexGrid(rows, cols, transform);
+  const indices = grid.indices;
   const values = indices.map((row) => row.map((sourceIndex) => asFiniteNumber(source[sourceIndex], 0)));
 
   const rawSource = item?.raw_adc;
   const rawValues = Array.isArray(rawSource) && rawSource.length === source.length
-    ? Array.from({ length: rows }, (_, row) =>
-        Array.from({ length: cols }, (_, col) => {
-          const sourceRow = rowMirror ? rows - 1 - row : row;
-          const sourceCol = colMirror ? cols - 1 - col : col;
-          const sourceIndex = sourceRow * cols + sourceCol;
-          return asFiniteNumber(rawSource[sourceIndex], 0);
-        }),
-      )
+    ? indices.map((row) => row.map((sourceIndex) => asFiniteNumber(rawSource[sourceIndex], 0)))
     : null;
 
   const points = values.flatMap((row, rowIndex) =>
     row.map((value, colIndex) => ({
       index: indices[rowIndex][colIndex],
       value,
-      xRatio: cols <= 1 ? 0.5 : colIndex / (cols - 1),
-      yRatio: rows <= 1 ? 0.5 : rowIndex / (rows - 1),
+      xRatio: grid.cols <= 1 ? 0.5 : colIndex / (grid.cols - 1),
+      yRatio: grid.rows <= 1 ? 0.5 : rowIndex / (grid.rows - 1),
       // The sensor actually drawn here: mirroring moves it, not its number.
       label: streamSensorLabel(indices[rowIndex][colIndex]),
     })),
   );
 
   const pinLabels = devicePinLabels(device, rows, cols);
-  const rowLabels = pinLabels
-    ? Array.from({ length: rows }, (_, row) => pinLabels.rows[rowMirror ? rows - 1 - row : row])
-    : null;
-  const colLabels = pinLabels
-    ? Array.from({ length: cols }, (_, col) => pinLabels.cols[colMirror ? cols - 1 - col : col])
-    : null;
+  const drawnPins = pinLabels ? displayPinLabels(pinLabels, transform) : null;
 
-  return { rows, cols, values, rawValues, indices, rowLabels, colLabels, points, usesProfileSensors: false };
+  return {
+    rows: grid.rows,
+    cols: grid.cols,
+    values,
+    rawValues,
+    indices,
+    rowLabels: drawnPins?.rows ?? null,
+    colLabels: drawnPins?.cols ?? null,
+    points,
+    usesProfileSensors: false,
+  };
 }
 
 function computeCop(points: DisplayPoint[], rows: number, cols: number) {
@@ -613,6 +605,7 @@ function loadStoredViews(): VisualizationView[] {
           selected: Boolean(item.selected),
           rowMirror: Boolean(item.rowMirror),
           colMirror: Boolean(item.colMirror),
+          transpose: Boolean(item.transpose),
           dotSize: clamp(asFiniteNumber(item.dotSize, 1), 0.5, 4),
         };
       })
@@ -1094,6 +1087,36 @@ export function VisualizationPage() {
     return next;
   }, [items]);
 
+  // Ten seconds of each device's IMU / magnetometer for the IMU panels
+  // (lib/imuView.ts), fed from every new visualization frame.
+  const imuHistoriesRef = useRef(new Map<string, ImuHistory>());
+  const imuHistoryFor = (uid: string) => {
+    let history = imuHistoriesRef.current.get(uid);
+    if (!history) {
+      history = new ImuHistory();
+      imuHistoriesRef.current.set(uid, history);
+    }
+    return history;
+  };
+  const imuNow = Date.now();
+  itemsByUid.forEach((item, uid) => {
+    // Idempotent per frame (keyed by its timestamp / sequence), so a re-render pushes nothing new.
+    imuHistoryFor(uid).push(imuNow, {
+      acc: item.acc ?? item.imu?.acc,
+      gyro: item.gyro ?? item.imu?.gyro,
+      mag: item.mag ?? item.imu?.mag,
+    }, `${item.timestamp_ms ?? ""}:${item.sn ?? ""}`);
+  });
+  const imuLabels = {
+    acc: t("imuAcc"),
+    gyro: t("imuGyro"),
+    mag: t("imuMag"),
+    noMag: t("imuNoMag"),
+    heading: t("imuHeading"),
+    tilt: t("imuTilt"),
+    magnitude: t("imuMagnitude"),
+  };
+
   const viewDeviceKey = useMemo(() => {
     return Array.from(new Set(views.map((view) => normalizeUid(view.deviceUid)).filter(Boolean))).sort().join("|");
   }, [views]);
@@ -1302,6 +1325,7 @@ export function VisualizationPage() {
           selected: false,
           rowMirror: false,
           colMirror: false,
+          transpose: false,
           dotSize: 1,
         },
       ];
@@ -1470,7 +1494,12 @@ export function VisualizationPage() {
           const hasEnabledCalibration = calibrationState.enabled;
           const hasCalibrationLevels = calibrationLevelsForDevice(device).length > 0;
           const activeRange = hasEnabledCalibration ? calibrationDisplayRange(calibrationState, cardRange) : cardRange;
-          const matrix = buildMatrixView(item, device, profile, view.rowMirror, view.colMirror);
+          const matrix = buildMatrixView(item, device, profile, {
+            rowMirror: view.rowMirror,
+            colMirror: view.colMirror,
+            // A profile places its sensors over its own picture: nothing to transpose.
+            transpose: view.transpose && !profile,
+          });
           const dotSize = clamp(asFiniteNumber(view.dotSize, 1), 0.5, 4);
           const cop = computeCop(matrix.points, matrix.rows, matrix.cols);
           const values = matrix.points.map((point) => point.value);
@@ -1583,6 +1612,15 @@ export function VisualizationPage() {
                   />
                   <span>{t("colMirror")}</span>
                 </label>
+                <label className="switch-row" title={profile ? t("transposeProfileHint") : undefined}>
+                  <input
+                    type="checkbox"
+                    checked={view.transpose && !profile}
+                    disabled={Boolean(profile)}
+                    onChange={(event) => updateView(view.id, { transpose: event.target.checked })}
+                  />
+                  <span>{t("transpose")}</span>
+                </label>
                 <span className="viz-card-shape" title={t("matrixShape")}>{matrix.rows} × {matrix.cols}</span>
               </div>
 
@@ -1619,14 +1657,6 @@ export function VisualizationPage() {
                   <dt>{hasEnabledCalibration ? t("maxCalibratedLevel") : "Max P"}</dt>
                   <dd><FitText text={maxPressure.toFixed(2)} /></dd>
                 </div>
-                <div className="is-wide">
-                  <dt>Gyro</dt>
-                  <dd><FitText text={formatVector(item?.gyro ?? item?.imu?.gyro)} /></dd>
-                </div>
-                <div className="is-wide">
-                  <dt>Acc</dt>
-                  <dd><FitText text={formatVector(item?.acc ?? item?.imu?.acc)} /></dd>
-                </div>
                 {showCop ? (
                   <div className={`viz-card-cop is-wide${cop.hasData ? " has-data" : ""}`}>
                     <dt>COP</dt>
@@ -1646,6 +1676,8 @@ export function VisualizationPage() {
                   </div>
                 ) : null}
               </dl>
+
+              <ImuPanels history={imuHistoryFor(deviceUid)} now={imuNow} labels={imuLabels} />
 
               <div className="visualization-renderer-frame">
                 {!item ? (
