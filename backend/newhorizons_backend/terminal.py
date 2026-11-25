@@ -98,6 +98,8 @@ DEVICE_COMMAND_ALLOWLIST = {
     "set_ota_config",
     "set_indicators",
     "set_imu",
+    "set_mag",
+    "set_mag_calibration",
     "set_filter",
     "set_raw_adc",
     "file_list",
@@ -496,6 +498,16 @@ def terminal_help_items() -> list[dict[str, str]]:
             "example": "set-imu --enabled false",
         },
         {
+            "command": "set-mag",
+            "description": "Enable or disable the magnetometer (off by default; calibrate it from Maintenance) and set the calibration reminder in days (0 = never).",
+            "example": "set-mag --enabled true --cal-interval-days 30",
+        },
+        {
+            "command": "set-mag-calibration",
+            "description": "Clear the magnetometer's hard/soft-iron calibration. Calibrating is done from Maintenance.",
+            "example": "set-mag-calibration --clear true",
+        },
+        {
             "command": "io-config",
             "description": "Open the board-aware pin layout and overview helper in the terminal UI.",
             "example": "io-config",
@@ -825,6 +837,24 @@ def compile_terminal_command(command_line: str, device_commands: set[str] | None
             "enabled": _as_bool(parsed.get("enabled", "true")),
         }
         return {"command": "set_imu", "payload": payload, "argv": argv}
+
+    if command == "set-mag":
+        parsed = _parse_options(args)
+        payload = {"command": "set_mag"}
+        if "enabled" in parsed:
+            payload["enabled"] = _as_bool(parsed["enabled"])
+        if "cal_interval_days" in parsed:
+            payload["cal_interval_days"] = int(parsed["cal_interval_days"])
+        if len(payload) == 1:
+            raise ValueError("set_mag_requires_enabled_or_cal_interval_days")
+        return {"command": "set_mag", "payload": payload, "argv": argv}
+
+    if command == "set-mag-calibration":
+        parsed = _parse_options(args)
+        if not _as_bool(parsed.get("clear", "false")):
+            raise ValueError("set_mag_calibration_terminal_only_clears")
+        payload = {"command": "set_mag_calibration", "clear": True}
+        return {"command": "set_mag_calibration", "payload": payload, "argv": argv}
 
     if command == "file-list":
         parsed = _parse_options(args)

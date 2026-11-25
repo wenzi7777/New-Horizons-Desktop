@@ -34,6 +34,16 @@ Calibration is in **Maintenance**. There are three ways to do it:
 
 **Calibration data and settings** at the bottom lets you turn calibration on or off, export it, or clear it.
 
+## Magnetometer
+
+Boards with a magnetometer (v1.5.F, v2.0.F, GCU LTS) have it **off** by default, including after a firmware update. Its chip rate follows the scan rate, like the IMU's.
+
+- Switch it on in **Streaming**: pick **On** and press **Apply**. The calibration opens straight away; cancelling it switches the magnetometer off again. If the device already has a calibration that has not expired, you can keep it.
+- The calibration asks you to slowly turn the device through every direction for about a minute. A sphere fills in as directions are covered; press **Compute** when the ring is full, check the result (before/after, field strength, residual) and **Apply**.
+- Calibrate with the device as it is used (enclosure closed, battery in), away from laptops, steel desks, motors and magnets.
+- Redo it after changing the enclosure, battery or metal parts, or after a strong magnet came close. Moving to another room does not need it: fields from the room cannot be calibrated away.
+- A reminder (every 7, 14, 30 or 90 days, or never) shows a badge on Home and a dot on **Maintenance** when the calibration is due. The device also flags a calibration that no longer seems to fit (the field strength drifts more than 20% for 5 minutes). Neither stops anything.
+
 ## Updating firmware
 
 In **Update**, check for an update and apply it. The device restarts when it is done.

@@ -115,6 +115,8 @@ NORMAL_COMMANDS = SHARED_COMMANDS | {
     "set_action_button",
     "set_indicators",
     "set_imu",
+    "set_mag",
+    "set_mag_calibration",
     "set_filter",
     "set_raw_adc",
     "calibration_status",

@@ -8,6 +8,8 @@ import { boardProfileForHardwareModel, displayHardwareModel } from "../lib/board
 import { batteryIndicatorState } from "../lib/batteryProfile";
 import { isHubRelayed, useDevicesPolling, type NormalizedDevice } from "../lib/device";
 import { deviceClassName, statusDot } from "../lib/deviceStatus";
+import { magnetometerHint } from "../lib/magCalibration";
+import { magHintLabel } from "../components/magCalibration/MagnetometerPanel";
 
 const FOLDER_PREVIEW_MAX_ITEMS = 6;
 
@@ -50,6 +52,15 @@ function renderDeviceCode(uid: string) {
   );
 }
 
+// The magnetometer's calibration reminder (only while it is switched on).
+function renderMagBadge(device: NormalizedDevice, t: (key: string) => string) {
+  const status = device.raw.last_status && typeof device.raw.last_status === "object" ? (device.raw.last_status as Record<string, unknown>) : {};
+  const hint = magnetometerHint(status.magnetometer, Date.now());
+  const label = magHintLabel(t, hint);
+  if (!label || !hint) return null;
+  return <span className={`device-badge mag-hint ${hint.state}`} title={label}>{label}</span>;
+}
+
 function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) {
   const batteryIndicator = batteryIndicatorState(
     boardProfileForHardwareModel(device.hardwareModel).supportsBatteryPercentageIndicator,
@@ -67,6 +78,7 @@ function renderDeviceCard(device: NormalizedDevice, t: (key: string) => string) 
               {deviceStateLabel(device, t)}
             </span>
             {isHubRelayed(device.raw) ? <span className="device-badge hub-relay">{t("deviceViaHub")}</span> : null}
+            {renderMagBadge(device, t)}
           </div>
           <div className="device-uid">{device.uid}</div>
           <div className="device-meta-grid">

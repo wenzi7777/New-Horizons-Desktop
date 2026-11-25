@@ -414,6 +414,11 @@ export function unsubscribeVisualization(deviceUid: string) {
   }
 }
 
+/** Whether something already asked for this device's visualization stream (so a temporary subscriber leaves it on). */
+export function isVisualizationSubscribed(deviceUid: string) {
+  return subscribedVisualizations.has(deviceUid);
+}
+
 /** Receive every visualization sample, unbatched. Returns an unsubscribe. */
 export function addVisualizationListener(listener: (item: VisualizationEntry) => void): () => void {
   visualizationListeners.add(listener);

@@ -228,6 +228,35 @@ class MockDeviceMixin:
                 )
                 runtime["imu"] = imu
                 status["imu"] = imu
+            elif command in {"set_mag", "set_mag_calibration"}:
+                mag = dict(status.get("magnetometer") or self._mock_magnetometer())
+                if command == "set_mag":
+                    if "enabled" in payload:
+                        mag["enabled"] = bool(payload["enabled"])
+                        mag["state"] = "ready" if mag["enabled"] else "disabled"
+                        mag["initialized"] = mag["enabled"]
+                        mag["ready"] = mag["enabled"]
+                        mag["sample_valid"] = mag["enabled"]
+                    calibration = dict(mag.get("calibration") or {"mode": "none"})
+                    if "cal_interval_days" in payload:
+                        calibration["interval_days"] = int(payload["cal_interval_days"])
+                    mag["calibration"] = calibration
+                else:
+                    interval = int((mag.get("calibration") or {}).get("interval_days", 30))
+                    if payload.get("clear"):
+                        mag["calibration"] = {"mode": "none", "interval_days": interval}
+                    else:
+                        mag["calibration"] = {
+                            "mode": str(payload.get("mode") or "full"),
+                            "offset": list(payload.get("offset") or [0, 0, 0]),
+                            "matrix": list(payload.get("matrix") or [1, 0, 0, 0, 1, 0, 0, 0, 1]),
+                            "field_ut": float(payload.get("field_ut") or 0),
+                            "residual_pct": float(payload.get("residual_pct") or 0),
+                            "calibrated_at_ms": int(payload.get("calibrated_at_ms") or 0),
+                            "suspect": False,
+                            "interval_days": interval,
+                        }
+                status["magnetometer"] = mag
             elif command == "set_filter":
                 enabled = bool(payload.get("enabled", False))
                 median = int(payload.get("median", 3))
@@ -396,6 +425,13 @@ class MockDeviceMixin:
                     "findme": runtime.get("findme", {}),
                     "runtime": runtime,
                 })
+            elif command in {"set_mag", "set_mag_calibration"}:
+                result_payload.update({
+                    "status": "ok",
+                    "message": "config_stored" if command == "set_mag" else "mag_calibration_stored",
+                    "magnetometer": status.get("magnetometer", {}),
+                    "applied": True,
+                })
             elif command == "set_imu":
                 result_payload.update({
                     "status": "ok",
@@ -551,6 +587,25 @@ class MockDeviceMixin:
                     "applied_at": datetime.now(timezone.utc).isoformat(),
                 },
             )
+
+    @staticmethod
+    def _mock_magnetometer() -> dict[str, Any]:
+        # A v2.0.F-like BMM350: off by default, never calibrated.
+        return {
+            "model": "BMM350",
+            "enabled": False,
+            "state": "disabled",
+            "initialized": False,
+            "ready": False,
+            "compensation": "factory",
+            "calibration": {"mode": "none", "interval_days": 30},
+            "odr_hz": 100,
+            "averaging": 4,
+            "poll_interval_us": 16667,
+            "measured_rate_hz": 0,
+            "sample_valid": False,
+            "last_error": "",
+        }
 
     @staticmethod
     def _mock_services(mode: str = "normal", scan_running: bool | None = None, udp_running: bool | None = None) -> list[dict[str, Any]]:
@@ -753,7 +808,9 @@ class MockDeviceMixin:
                 "heap_before": 0,
                 "heap_after": 0,
                 "sample_rate_hz": 60,
+                "odr_hz": 100,
             },
+            "magnetometer": self._mock_magnetometer(),
             "wifi": {
                 "ssid": "Lab-Mock",
                 "password_set": True,

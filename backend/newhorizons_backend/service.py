@@ -1288,6 +1288,7 @@ class NewHorizonsService(
     SETTING_REPLY_BLOCKS = (
         "vref", "range", "imu", "filter", "stream_buffer", "matrix_layout",
         "action_button", "indicators", "battery", "power", "logging", "ota",
+        "magnetometer",
     )
 
     @classmethod

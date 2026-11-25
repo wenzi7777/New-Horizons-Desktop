@@ -25,6 +25,8 @@ import { CalibrationWorkbench, type CalibrationRun } from "../components/calibra
 import { DeviceAppsSection } from "../components/deviceApps/DeviceAppsSection";
 import { DeviceClockCard } from "../components/DeviceClockCard";
 import { DeviceHealthCard } from "../components/DeviceHealthCard";
+import { MagnetometerPanel } from "../components/magCalibration/MagnetometerPanel";
+import { magnetometerHint } from "../lib/magCalibration";
 import { ScanHealthCard } from "../components/ScanHealthCard";
 import { compareVersionCores, normalizeUpdateChannel, waitingForStableToCatchUp, type UpdateChannel } from "../lib/versioning";
 import { Battery, Check, CircleOff, Cpu, Gauge, Grid3x3, Lightbulb, Power, TriangleAlert, Wifi, WifiOff, X } from "lucide-react";
@@ -1109,6 +1111,9 @@ export function DeviceSettingsPage() {
   const ramUsed = numberValue(memory.heap_used, ramTotal > ramFree ? ramTotal - ramFree : 0);
   const ramUsedPercent = percent(ramUsed, ramTotal);
   const imu = recordValue(status.imu ?? runtime.imu ?? (lastResultCommand === "set_imu" ? lastResult.imu : undefined));
+  const magnetometer = recordValue(status.magnetometer ?? runtime.magnetometer ?? (lastResultCommand === "set_mag" || lastResultCommand === "set_mag_calibration" ? lastResult.magnetometer : undefined));
+  const magHint = magnetometerHint(magnetometer, Date.now());
+  const maintenanceNeedsAttention = magHint !== null && magHint.state !== "ok";
   const filter = recordValue(status.filter ?? runtime.filter ?? (lastResultCommand === "set_filter" ? lastResult.filter : undefined));
   const streamRawAdcEnabled = (status.stream_raw_adc ?? runtime.stream_raw_adc ?? (lastResultCommand === "set_raw_adc" ? lastResult.stream_raw_adc : undefined)) === true;
   const calibrationStatus = recordValue(status.calibration);
@@ -2681,6 +2686,7 @@ export function DeviceSettingsPage() {
                 <p className="service-muted">
                   {stringValue(imu.state ?? (imu.enabled === false ? "disabled" : "-"))}
                   {imu.sample_rate_hz ? ` · ${stringValue(imu.sample_rate_hz)} Hz` : ""}
+                  {imu.odr_hz ? ` · ${t("imuOdr")} ${stringValue(imu.odr_hz)} Hz` : ""}
                   {" · "}{t("imuSampleRateFollowsScan")}
                 </p>
               </div>
@@ -2702,6 +2708,16 @@ export function DeviceSettingsPage() {
               />
             </MoreDetails>
           </div>
+          <MagnetometerPanel
+            t={t}
+            variant="runtime"
+            deviceUid={deviceUid}
+            hardwareModel={normalized?.hardwareModel}
+            magnetometer={magnetometer}
+            disabled={isControlUnavailable || !deviceUid}
+            busy={isCommandBusy("set_mag") || isCommandBusy("set_mag_calibration")}
+            run={run}
+          />
           <div className="settings-card">
             <div className="settings-row">
               <div>
@@ -2899,6 +2915,16 @@ export function DeviceSettingsPage() {
     if (section === "maintenance") {
       return (
         <div className="settings-stack">
+          <MagnetometerPanel
+            t={t}
+            variant="maintenance"
+            deviceUid={deviceUid}
+            hardwareModel={normalized?.hardwareModel}
+            magnetometer={magnetometer}
+            disabled={isControlUnavailable || !deviceUid}
+            busy={isCommandBusy("set_mag") || isCommandBusy("set_mag_calibration")}
+            run={run}
+          />
           <CalibrationWorkbench
             t={t}
             deviceUid={deviceUid}
@@ -3280,6 +3306,7 @@ export function DeviceSettingsPage() {
               onClick={() => setActiveSection(section.id)}
             >
               <strong>{section.label}</strong>
+              {section.id === "maintenance" && maintenanceNeedsAttention ? <span className="settings-nav-dot" aria-label={t("magCalNeedsAttention")} /> : null}
             </button>
           ))}
         </aside>

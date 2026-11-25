@@ -145,6 +145,12 @@ class ArduinoResponseMixin:
             payload["imu"] = dict(imu_data) if imu_data else {
                 "enabled": bool(request.get("enabled", True)),
             }
+        elif command in {"set_mag", "set_mag_calibration"} and ok:
+            # The firmware answers with the whole magnetometer block (state,
+            # rate, calibration), which replaces the device's copy.
+            mag_data = data.get("magnetometer") if isinstance(data.get("magnetometer"), dict) else {}
+            if mag_data:
+                payload["magnetometer"] = dict(mag_data)
         elif command == "set_filter" and ok:
             filter_data = data.get("filter") if isinstance(data.get("filter"), dict) else {}
             payload["filter"] = dict(filter_data) if filter_data else {
@@ -265,6 +271,8 @@ class ArduinoResponseMixin:
             "set_range",
             "power_set_state",
             "set_imu",
+            "set_mag",
+            "set_mag_calibration",
             "set_filter",
             "set_action_button",
             "set_indicators",
